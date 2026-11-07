@@ -1,0 +1,213 @@
+"""Test fixtures.
+
+Tests run against a real PostgreSQL + PostGIS database (`ppw_test`) because spatial queries,
+partial unique indexes and row locking matter here. The schema is built with the real
+Alembic migrations and the real OSM snapshot is imported once per session (exercising the
+importer). Identity tables are truncated between tests; geography is kept.
+"""
+
+import os
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+from dotenv import dotenv_values
+
+# ── Configure the environment BEFORE importing the application ──
+_env = {**dotenv_values(Path(__file__).resolve().parents[2] / ".env"), **os.environ}
+_test_url = _env.get("TEST_DATABASE_URL") or (
+    (_env.get("DATABASE_URL") or "").rstrip("/") + "_test"
+)
+if not _test_url or not _test_url.endswith("_test"):
+    raise RuntimeError("TEST_DATABASE_URL must point to a database whose name ends in _test")
+os.environ.update(
+    {
+        "APP_ENV": "test",
+        "DATABASE_URL": _test_url,
+        "COOKIE_SECURE": "false",
+        "TRUST_PROXY_HEADERS": "false",
+        "EXPOSE_DEV_VERIFICATION_CODES": "true",
+        "JWT_SECRET": "test-secret-" + "x" * 40,
+    }
+)
+
+import httpx
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app.core.config import settings
+from app.core.database import SessionLocal
+from app.core.rate_limit import limiter
+from app.core.security import hash_password
+from app.geography.importer import import_all
+from app.main import app
+from app.models import RoleName, RoleStatus, User, UserProfile, UserRole
+from app.utils.time import utcnow
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+PASSWORD = "correct-horse-battery"
+# Points used across tests (WGS84).
+CENTRAL_MARKET = (11.56955, 104.92115)
+TOUL_KORK = (11.5800, 104.8990)  # inside Phnom Penh, outside the playable neighbourhood
+SIEM_REAP = (13.3633, 103.8564)  # outside the service area
+
+
+@pytest.fixture(scope="session", autouse=True)
+def migrated_database() -> None:
+    """Recreate the test schema from the Alembic migrations and import the OSM snapshot."""
+    import asyncio
+
+    async def _reset_schema() -> None:
+        engine = create_async_engine(_test_url)
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+        await engine.dispose()
+
+    asyncio.run(_reset_schema())
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "migrations"))
+    cfg.attributes["database_url"] = _test_url
+    command.upgrade(cfg, "head")
+
+
+@pytest.fixture(scope="session", autouse=True)
+async def imported_geography(migrated_database: None) -> dict[str, Any]:
+    async with SessionLocal() as session:
+        return await import_all(session, settings.osm_data_dir)
+
+
+IDENTITY_TABLES = (
+    "audit_logs, user_addresses, avatar_customizations, contact_verifications, sessions, "
+    "user_roles, user_profiles, users"
+)
+
+
+@pytest.fixture(autouse=True)
+async def clean_db(imported_geography: dict[str, Any]) -> AsyncIterator[None]:
+    async with SessionLocal() as session:
+        await session.execute(text(f"TRUNCATE {IDENTITY_TABLES} RESTART IDENTITY CASCADE"))
+        await session.commit()
+    limiter.reset()
+    yield
+
+
+def make_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://testserver.local/api/v1"
+    )
+
+
+@pytest.fixture
+async def client() -> AsyncIterator[httpx.AsyncClient]:
+    async with make_client() as c:
+        yield c
+
+
+def adopt_csrf(c: httpx.AsyncClient) -> None:
+    # Browsers echo the readable CSRF cookie in a header (double-submit pattern).
+    c.headers["X-CSRF-Token"] = c.cookies["ppw_csrf"]
+
+
+def registration(username: str = "sokha", **overrides: Any) -> dict[str, Any]:
+    return {
+        "username": username,
+        "email": f"{username}@example.com",
+        "password": PASSWORD,
+        "display_name": username.title(),
+        "preferred_language": "en",
+        "accept_terms": True,
+        "accept_privacy": True,
+        **overrides,
+    }
+
+
+async def register(c: httpx.AsyncClient, username: str = "sokha", **overrides: Any) -> dict:
+    response = await c.post("/auth/register", json=registration(username, **overrides))
+    assert response.status_code == 201, response.text
+    adopt_csrf(c)
+    return response.json()
+
+
+async def register_verified(c: httpx.AsyncClient, username: str = "sokha", **kw: Any) -> dict:
+    body = await register(c, username, **kw)
+    code = body["verification"]["dev_code"]
+    response = await c.post("/auth/verification/confirm", json={"code": code})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+AVATAR = {
+    "avatar_name": "Sokha",
+    "body": "a",
+    "skin_tone": "#c8946b",
+    "hair_style": "short",
+    "hair_color": "#2b2220",
+    "top_style": "tee",
+    "top_color": "#2f7d6d",
+    "bottom_style": "trousers",
+    "bottom_color": "#343b4a",
+    "shoe_color": "#eee5d5",
+    "accent_color": "#d9a441",
+    "accessories": ["cap"],
+}
+
+
+async def first_spawn_id(c: httpx.AsyncClient) -> str:
+    return (await c.get("/geo/spawn-points")).json()[0]["id"]
+
+
+async def onboard(
+    c: httpx.AsyncClient,
+    username: str = "sokha",
+    roles: list[str] | None = None,
+    visible: bool = True,
+) -> dict:
+    """Register and finish onboarding through the public API, like the web client."""
+    await register_verified(c, username)
+    assert (await c.put("/me/avatar", json=AVATAR)).status_code == 200
+    roles = ["buyer"] if roles is None else roles
+    assert (await c.post("/me/roles", json={"roles": roles})).status_code == 200
+    if "buyer" in roles:
+        lat, lon = CENTRAL_MARKET
+        address = {"label": "Home", "lat": lat, "lon": lon, "address_line": "Street 130"}
+        assert (await c.post("/me/addresses", json=address)).status_code == 201
+    spawn = {"spawn_point_id": await first_spawn_id(c), "world_visible": visible}
+    assert (await c.put("/me/spawn", json=spawn)).status_code == 200
+    response = await c.post("/me/onboarding/complete")
+    assert response.status_code == 200, response.text
+    return (await c.get("/auth/me")).json()
+
+
+async def create_admin(username: str = "chief") -> None:
+    async with SessionLocal() as session:
+        now = utcnow()
+        user = User(
+            username=username,
+            email=f"{username}@ppw.local",
+            email_verified_at=now,
+            password_hash=hash_password(PASSWORD),
+            terms_version="test",
+            terms_accepted_at=now,
+            privacy_accepted_at=now,
+        )
+        user.profile = UserProfile(display_name="Chief Admin", preferred_language="en")
+        user.roles = [
+            UserRole(role=r, status=RoleStatus.ACTIVE, requested_at=now, decided_at=now)
+            for r in (RoleName.VISITOR, RoleName.ADMIN)
+        ]
+        session.add(user)
+        await session.commit()
+
+
+@pytest.fixture
+async def admin_client() -> AsyncIterator[httpx.AsyncClient]:
+    await create_admin()
+    async with make_client() as c:
+        response = await c.post("/auth/login", json={"identifier": "chief", "password": PASSWORD})
+        assert response.status_code == 200, response.text
+        adopt_csrf(c)
+        yield c

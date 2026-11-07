@@ -1,0 +1,56 @@
+[project]
+name = "ppw-backend"
+version = "0.1.0"
+description = "Phnom Penh Digital World API — accounts, geography, multiplayer world and marketplace (FastAPI + PostGIS)"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.1",
+    "email-validator>=2.3.0",
+    "fastapi>=0.115",
+    "geoalchemy2>=0.17",
+    "psycopg[binary]>=3.2",
+    "pwdlib[argon2]>=0.3.1",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.16.2",
+    "pyjwt>=2.9",
+    "pyproj>=3.7",
+    "python-multipart>=0.0.33",
+    "shapely>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "tzdata>=2026.6",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "ASYNC", "S", "RUF"]
+# RUF001/RUF003: typographic dashes are intentional in user-facing text.
+ignore = ["S101", "B008", "RUF012", "RUF001", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "E501", "E402"]
+"scripts/**" = ["S311", "E501", "E402"]
+# Spatial SQL is built only from module-level constant fragments; values are bound parameters.
+"app/services/geo.py" = ["S608"]
+"app/services/onboarding.py" = ["S608"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.4.1.post1",
+    "ruff>=0.17.3",
+]

@@ -1,0 +1,10 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+frontend/.svelte-kit
+frontend/build
+frontend/test-results
+frontend/artifacts
+.env

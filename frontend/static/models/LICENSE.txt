@@ -1,0 +1,10 @@
+CampusEats Original 3D Assets
+
+All GLB models in this directory are original assets created by the accompanying
+Blender script tools/blender/generate_assets.py. No third-party models are included.
+
+To the extent possible under law, the creators have waived all copyright and
+related or neighboring rights to these original 3D assets under CC0 1.0 Universal.
+You may use, modify and redistribute the assets for any purpose without attribution.
+
+CC0: https://creativecommons.org/publicdomain/zero/1.0/

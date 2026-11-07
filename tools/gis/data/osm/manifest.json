@@ -1,0 +1,41 @@
+{
+  "neighborhood-daun-penh-central": {
+    "kind": "neighborhood",
+    "region": "daun-penh-central",
+    "bbox": [
+      11.565,
+      104.9165,
+      11.579,
+      104.933
+    ],
+    "file": "neighborhood-daun-penh-central.json",
+    "elements": 5074,
+    "osm_base_timestamp": "2026-11-07T23:23:51Z",
+    "fetched_at": "2026-11-07T23:24:56+00:00",
+    "source": "OpenStreetMap via Overpass API",
+    "licence": "ODbL 1.0 — © OpenStreetMap contributors",
+    "query": "[out:json][timeout:180];\n(\n  way[\"highway\"](11.565,104.9165,11.579,104.933);\n  way[\"building\"](11.565,104.9165,11.579,104.933);\n  relation[\"building\"][\"type\"=\"multipolygon\"](11.565,104.9165,11.579,104.933);\n  way[\"leisure\"](11.565,104.9165,11.579,104.933);\n  way[\"landuse\"~\"^(grass|village_green|recreation_ground|religious)$\"](11.565,104.9165,11.579,104.933);\n  way[\"natural\"](11.565,104.9165,11.579,104.933);\n  relation[\"natural\"=\"water\"](11.565,104.9165,11.579,104.933);\n  relation[\"leisure\"](11.565,104.9165,11.579,104.933);\n  relation[\"landuse\"~\"^(grass|village_green|recreation_ground|religious)$\"](11.565,104.9165,11.579,104.933);\n  way[\"waterway\"](11.565,104.9165,11.579,104.933);\n  way[\"amenity\"](11.565,104.9165,11.579,104.933);\n  way[\"tourism\"](11.565,104.9165,11.579,104.933);\n  way[\"historic\"](11.565,104.9165,11.579,104.933);\n  way[\"man_made\"](11.565,104.9165,11.579,104.933);\n  node[\"amenity\"](11.565,104.9165,11.579,104.933);\n  node[\"shop\"](11.565,104.9165,11.579,104.933);\n  node[\"tourism\"](11.565,104.9165,11.579,104.933);\n  node[\"historic\"](11.565,104.9165,11.579,104.933);\n  node[\"office\"](11.565,104.9165,11.579,104.933);\n  node[\"natural\"=\"tree\"](11.565,104.9165,11.579,104.933);\n  node[\"highway\"~\"traffic_signals|street_lamp|crossing\"](11.565,104.9165,11.579,104.933);\n  node[\"place\"](11.565,104.9165,11.579,104.933);\n);\nout geom;"
+  },
+  "city-places": {
+    "kind": "city-places",
+    "region": "phnom-penh",
+    "file": "city-places.json",
+    "elements": 425,
+    "osm_base_timestamp": "2026-11-07T22:31:55Z",
+    "fetched_at": "2026-11-07T22:33:34+00:00",
+    "source": "OpenStreetMap via Overpass API",
+    "licence": "ODbL 1.0 — © OpenStreetMap contributors",
+    "query": "[out:json][timeout:240];\narea[\"boundary\"=\"administrative\"][\"admin_level\"=\"4\"][\"name:en\"=\"Phnom Penh\"]->.pp;\n(\n  node[\"place\"~\"^(suburb|quarter|neighbourhood|village|town|city)$\"](area.pp);\n  relation[\"boundary\"=\"administrative\"][\"admin_level\"~\"^(6|7|8)$\"](area.pp);\n  node[\"amenity\"=\"marketplace\"](area.pp);\n  way[\"amenity\"=\"marketplace\"](area.pp);\n  node[\"tourism\"~\"^(attraction|museum|viewpoint)$\"](area.pp);\n  way[\"tourism\"~\"^(attraction|museum)$\"](area.pp);\n  way[\"amenity\"~\"^(university|hospital)$\"][\"name\"](area.pp);\n);\nout center tags;"
+  },
+  "city-boundary": {
+    "kind": "city-boundary",
+    "region": "phnom-penh",
+    "file": "city-boundary.json",
+    "elements": 1,
+    "osm_base_timestamp": "2026-11-07T22:32:58Z",
+    "fetched_at": "2026-11-07T22:34:18+00:00",
+    "source": "OpenStreetMap via Overpass API",
+    "licence": "ODbL 1.0 — © OpenStreetMap contributors",
+    "query": "[out:json][timeout:240];\nrelation[\"boundary\"=\"administrative\"][\"admin_level\"=\"4\"][\"name:en\"=\"Phnom Penh\"];\nout geom;"
+  }
+}

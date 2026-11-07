@@ -1,0 +1,74 @@
+# Phnom Penh Digital World — local infrastructure.
+#
+#   Database only (recommended for development):
+#     docker compose up -d db
+#
+#   Full stack (database + API + web), production-style builds:
+#     docker compose --profile full up -d --build
+#
+name: ppw
+
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ppw}
+      POSTGRES_USER: ${POSTGRES_USER:-ppw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5440}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ppw} -d ${POSTGRES_DB:-ppw}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    profiles: ["full"]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ppw}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ppw}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      TRUST_PROXY_HEADERS: "true"
+      EXPOSE_DEV_VERIFICATION_CODES: ${EXPOSE_DEV_VERIFICATION_CODES:-true}
+      OSM_DATA_DIR: /app/tools/gis/data/osm
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+      dockerfile: ../infrastructure/docker/frontend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      API_INTERNAL_URL: http://backend:8000
+      ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      PUBLIC_MAP_STYLE_URL: ${PUBLIC_MAP_STYLE_URL:-https://tiles.openfreemap.org/styles/liberty}
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  postgres_data:

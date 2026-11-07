@@ -1,0 +1,107 @@
+@import 'tailwindcss';
+
+/* Phnom Penh palette: Tonle Sap river teal, pagoda saffron, brick terracotta, ivory paper. */
+@theme {
+	--color-river-950: #0b2524;
+	--color-river-900: #123b3a;
+	--color-river-800: #18504d;
+	--color-river-700: #1f6661;
+	--color-river-500: #3f9a8f;
+	--color-river-200: #bfe0d8;
+	--color-saffron-600: #c9831f;
+	--color-saffron-500: #e8a33d;
+	--color-saffron-300: #f4cf8e;
+	--color-saffron-100: #fbf0d9;
+	--color-brick-600: #a8431f;
+	--color-brick-500: #c4552f;
+	--color-paper: #f6f1e6;
+	--color-paper-2: #ece4d3;
+	--color-ink: #1d2422;
+	--color-ink-soft: #4b5653;
+	--font-display: 'Fraunces', Georgia, serif;
+	--font-sans: 'Inter', 'Noto Sans Khmer', ui-sans-serif, system-ui, sans-serif;
+	--font-khmer: 'Noto Sans Khmer', 'Inter', sans-serif;
+}
+
+:root {
+	color-scheme: light;
+	color: var(--color-ink);
+	background: var(--color-paper);
+	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+}
+
+body {
+	margin: 0;
+	min-height: 100dvh;
+	background: var(--color-paper);
+}
+
+:lang(km),
+.khmer {
+	font-family: var(--font-khmer);
+}
+
+:focus-visible {
+	outline: 3px solid var(--color-saffron-500);
+	outline-offset: 2px;
+}
+
+/* Component utilities (Tailwind 4: @utility so they can be composed with @apply). */
+@utility btn {
+	@apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-all duration-150 select-none disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+	@apply btn bg-river-900 text-paper shadow-[0_6px_0_-2px_var(--color-river-950)] hover:bg-river-800 active:translate-y-0.5 active:shadow-none;
+}
+@utility btn-accent {
+	@apply btn bg-saffron-500 text-river-950 shadow-[0_6px_0_-2px_var(--color-saffron-600)] hover:bg-saffron-300 active:translate-y-0.5 active:shadow-none;
+}
+@utility btn-ghost {
+	@apply btn border border-river-900/20 bg-white/60 text-river-900 hover:border-river-900/50 hover:bg-white;
+}
+@utility btn-quiet {
+	@apply btn px-3 py-2 text-river-800 hover:bg-river-900/5;
+}
+@utility card {
+	@apply rounded-3xl border border-river-900/10 bg-white/80 p-6 shadow-[0_24px_60px_-30px_rgba(18,59,58,0.35)] backdrop-blur;
+}
+@utility label {
+	@apply mb-1.5 block text-xs font-semibold tracking-wide text-ink-soft uppercase;
+}
+@utility input {
+	@apply w-full rounded-xl border border-river-900/15 bg-white px-4 py-3 text-base text-ink placeholder:text-ink-soft/50 focus:border-river-700 focus:ring-4 focus:ring-river-500/15 focus:outline-none;
+}
+@utility hint {
+	@apply mt-1.5 text-xs text-ink-soft;
+}
+@utility error-text {
+	@apply mt-1.5 text-xs font-medium text-brick-600;
+}
+@utility chip {
+	@apply inline-flex items-center gap-1.5 rounded-full border border-river-900/15 bg-white px-3 py-1 text-xs font-semibold text-river-900;
+}
+@utility eyebrow {
+	@apply text-xs font-bold tracking-[0.2em] text-saffron-600 uppercase;
+}
+@utility display {
+	@apply font-display tracking-tight text-river-950;
+}
+@utility alert {
+	@apply rounded-2xl border px-4 py-3 text-sm;
+}
+@utility alert-error {
+	@apply alert border-brick-500/30 bg-brick-500/10 text-brick-600;
+}
+@utility alert-dev {
+	@apply alert border-dashed border-saffron-600/60 bg-saffron-100 text-river-950;
+}
+
+/* Subtle street-grid texture used behind auth/onboarding screens. */
+.street-grid {
+	background-color: var(--color-paper);
+	background-image:
+		linear-gradient(rgba(18, 59, 58, 0.05) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(18, 59, 58, 0.05) 1px, transparent 1px);
+	background-size: 44px 44px;
+}

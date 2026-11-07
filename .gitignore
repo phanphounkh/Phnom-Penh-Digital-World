@@ -1,0 +1,11 @@
+.env
+node_modules/
+.svelte-kit/
+build/
+test-results/
+playwright-report/
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.blend1
