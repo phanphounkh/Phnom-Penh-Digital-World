@@ -9,6 +9,7 @@ from app.api.deps import ClientIP, CurrentUser, SessionDep
 from app.core.errors import not_found
 from app.core.rate_limit import rate_limit
 from app.models import AvatarCustomization
+from app.multiplayer.hub import hub
 from app.schemas.auth import MeOut, OnboardingOut
 from app.schemas.common import Message
 from app.schemas.me import (
@@ -31,6 +32,8 @@ async def update_profile(data: ProfileUpdate, user: CurrentUser, session: Sessio
     for field, value in changes.items():
         setattr(user.profile, field, value.value if hasattr(value, "value") else value)
     await session.commit()
+    if "world_visible" in changes:
+        hub.update_visibility(user.id, bool(changes["world_visible"]))
     return await onboarding.me_out(session, user)
 
 

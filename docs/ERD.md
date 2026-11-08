@@ -1,6 +1,6 @@
 # Entity–relationship diagram
 
-Phase 1 tables (migration `0001`). UUID primary keys for people-facing entities; bigint keys
+Phase 1 tables (migration `0001`) and Phase 3 multiplayer/social tables (migration `0002`, which also adds `user_profiles.chat_muted_until`). UUID primary keys for people-facing entities; bigint keys
 for bulk OSM features, which are unique on `(osm_type, osm_id)` so ids stay stable across
 re-imports. Geometries are SRID 4326 with GiST indexes. The private address uses `geography`.
 
@@ -23,6 +23,55 @@ erDiagram
     geographic_regions ||--o{ world_chunks : "tiled into"
     geographic_regions ||--o{ dataset_imports : "imported by"
     buildings |o--o{ landmarks : houses
+    geographic_regions ||--o{ world_rooms : "runs in"
+    world_rooms ||--o{ player_sessions : hosts
+    users ||--o{ player_sessions : "plays in"
+    users ||--o{ friendships : "asks / is asked"
+    users ||--o{ user_blocks : blocks
+    users ||--o{ user_mutes : mutes
+    users ||--o{ chat_messages : sends
+    users ||--o{ player_reports : "reports / is reported"
+
+    world_rooms {
+        uuid id PK
+        varchar slug UK "daun-penh-central-1"
+        int capacity
+    }
+    player_sessions {
+        uuid id PK
+        uuid user_id FK
+        uuid room_id FK
+        uuid auth_session_id FK
+        timestamptz connected_at
+        timestamptz disconnected_at
+        float last_x "virtual position, never GPS"
+        float last_z
+    }
+    friendships {
+        uuid id PK
+        uuid requester_id FK
+        uuid addressee_id FK
+        varchar status "pending|accepted"
+        index pair_unique "least/greatest(ids)"
+    }
+    chat_messages {
+        bigint id PK
+        uuid sender_id FK
+        uuid recipient_id FK "direct only"
+        varchar channel "nearby|world|direct"
+        text body "normalised, masked"
+        bool flagged
+        timestamptz read_at
+    }
+    player_reports {
+        uuid id PK
+        uuid reporter_id FK
+        uuid reported_id FK
+        varchar reason
+        jsonb context "recent chat as evidence"
+        varchar status "open|resolved|dismissed"
+        varchar action "warn|chat_mute|suspend"
+    }
 
     users {
         uuid id PK
@@ -138,7 +187,6 @@ erDiagram
 
 | Phase | Tables |
 |---|---|
-| 3 Multiplayer | `world_rooms`, `player_sessions`, `friendships`, `chat_messages`, `player_reports`, `blocks` |
 | 4 Marketplace | `merchants`, `merchant_verifications`, `shops`, `virtual_properties` (unique unit id; `UNIQUE` active claim per unit), `property_claims`, `product_categories`, `products`, `inventory`, `carts`, `cart_items`, `orders`, `order_items` |
 | 5 Transport | `vehicles`, `road_nodes`, `road_edges` (navigation graph) |
 | 6 Delivery | `driver_profiles`, `delivery_jobs`, `delivery_assignments`, `delivery_events` |

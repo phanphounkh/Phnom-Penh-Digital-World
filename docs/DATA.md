@@ -27,13 +27,13 @@ Imported (2026-11-08):
 
 | Table | Rows | Notes |
 |---|---|---|
-| `buildings` | 2,375 | footprints, including multipolygons with courtyards |
+| `buildings` | 2,376 | footprints, including multipolygons with courtyards, and one stupa mapped as a tower |
 | `roads` | 787 | trunk → footway; 211 of 213 named roads have an English name |
 | `land_areas` | 164 | grass, parks, parking, water, plazas, pitches, temple grounds, wetland |
 | `landmarks` | 955 | named POIs; 536 linked to the building that contains them |
 | `street_features` | 300 | mapped trees (incl. sampled tree rows), lamps, signals, crossings |
 | `places` | 405 | city-wide search index (khans, villages, markets, hospitals…) |
-| `world_chunks` | 90 | 200 m chunks; 1.07 MB of JSON in total (before HTTP compression) |
+| `world_chunks` | 90 | 200 m chunks with roads, buildings, areas, landmarks, furniture and signs |
 | Phnom Penh boundary | 689 km² | the official relation (published figure ≈ 679 km²) |
 
 ## Accuracy and what is estimated
@@ -47,8 +47,37 @@ Imported (2026-11-08):
 | Building colour, windows | | **Generated**: palette and window texture are decorative. |
 | Trees in parks | 300 mapped point features | **Generated**: extra park trees are placed procedurally, deterministically (~1 per 140 m²). |
 | Sidewalks, lane markings | | **Generated** from the road class. |
-| Terrain | | **Flat.** Wat Phnom's ~27 m hill is not modelled yet (Phase 2). |
-| Landmark architecture | | Phsar Thmei's dome and Wat Phnom's stupa are plain extrusions of the real footprints. Custom models are a Phase 2 task. |
+| Terrain | | **Flat**, except Wat Phnom's hill (below). |
+| Landmark architecture | | Phsar Thmei's dome and Wat Phnom's stupa are **Blender models placed on the real footprints**. Temples get a procedural tiered Khmer roof. See "Landmarks" below. |
+| Street lamps | none mapped in OSM here | **Generated**: 748 lamps, every 24–36 m along trunk, primary, secondary and tertiary roads and pedestrian streets, alternating sides, never inside buildings or water (`k: "lamp_gen"` in chunk payloads). |
+| Street-name signs | real intersections | **Placed from data**: 181 signs where two differently named streets share an OSM node. Each has one blade per street, aligned with it, showing the OSM Khmer and English names. Posts stand 1.6 m beyond the wider carriageway, never inside buildings. |
+| Tree species | 202 mapped tree positions | **Generated**: species (rain tree, ornamental, sugar palm), size and rotation are chosen deterministically per position. |
+| Night lighting | | **Decorative**: which windows are lit says nothing about real occupancy. |
+
+### Terrain: Wat Phnom
+
+Phnom Penh is flat (about 10 m above sea level) apart from Wat Phnom, the man-made hill the
+city is named after. It is modelled as a smooth mound: **27 m high** (the commonly published
+figure), with a flat top 24 m in radius that holds the vihara and stupa, falling to street level
+68 m from the centre (11.57613 N, 104.92322 E). The radii were fitted to the OSM positions of
+the stupa, the vihara and the three mapped staircases. The shape is an approximation, not a
+survey. The same function runs in Python (`app/geography/terrain.py`) and TypeScript
+(`terrain.ts`), and shared fixtures test that they agree. The server publishes it in
+`/world/config` → `terrain`.
+
+### Landmarks (`LANDMARK_OVERRIDES` in `app/geography/regions.py`)
+
+| OSM feature | Treatment | Height | Source |
+|---|---|---|---|
+| way 859466535: Phsar Thmei wings (X plan) | extruded | 10 m | **estimated** from photographs |
+| way 859469220: Phsar Thmei central hall | Blender dome model (ribbed, louvred drum, lantern) on the wings | 26 m summit | **reference**: commonly published dome height |
+| way 1034727803 | hidden | | duplicate of 859466535 (Hausdorff distance 0.3 m) |
+| way 842087292 | hidden | | centre piece inside the dome model |
+| way 269798573: Wat Phnom vihara | walls + tiered Khmer roof | 6 m walls | **estimated** |
+| way 487758678: Wat Phnom stupa (`man_made=tower`, `tower:type=stupa`) | Blender chedi model | 18 m | **estimated** (about 2× its mapped base diameter) |
+
+Buildings tagged `temple`, `pagoda`, `religious`, `monastery` or `shrine` (≥ 60 m²) also get a
+Khmer roof and never get shopfronts.
 
 **Known gaps:** OSM building coverage in Daun Penh is good but not complete. Some footprints
 are approximate or outdated, and many buildings have no height, name or address. POI names

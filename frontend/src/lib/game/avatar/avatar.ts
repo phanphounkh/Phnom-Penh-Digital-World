@@ -10,7 +10,6 @@
  */
 import {
 	Color,
-	Float32BufferAttribute,
 	Mesh,
 	MeshStandardMaterial,
 	type Material,
@@ -19,8 +18,10 @@ import {
 	type BufferGeometry
 } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Avatar } from '$lib/api/types';
+import { floatGeometry } from '$lib/game/city/props';
 
 export const AVATAR_URL = '/models/characters/avatar.glb';
 export const AVATAR_SCALE = 0.9; // the rig is ~1.92 m tall; 0.9 ≈ 1.73 m
@@ -97,7 +98,9 @@ export function randomAvatar(name: string, rand: () => number = Math.random): Av
 let template: Promise<Group> | null = null;
 
 export function loadAvatarTemplate(url = AVATAR_URL): Promise<Group> {
-	template ??= new GLTFLoader().loadAsync(url).then((gltf) => {
+	template ??= new GLTFLoader()
+		.setMeshoptDecoder(MeshoptDecoder)
+		.loadAsync(url).then((gltf) => {
 		gltf.scene.traverse((n) => {
 			if ((n as Mesh).isMesh) {
 				n.castShadow = true;
@@ -140,23 +143,15 @@ export function batchJointMeshes(root: Object3D): void {
 			const mesh = child as Mesh;
 			if (!mesh.isMesh || mesh.children.length || Array.isArray(mesh.material)) continue;
 			mesh.updateMatrix();
-			const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrix);
-			for (const name of Object.keys(geometry.attributes)) {
-				if (!['position', 'normal', 'uv'].includes(name)) geometry.deleteAttribute(name);
-			}
-			if (!geometry.attributes.uv) {
-				geometry.setAttribute(
-					'uv',
-					new Float32BufferAttribute(new Float32Array(geometry.attributes.position.count * 2), 2)
-				);
-			}
+			// Expand Meshopt-quantised attributes to float before baking the local transform.
+			const geometry = floatGeometry(mesh.geometry).applyMatrix4(mesh.matrix);
 			const list = batches.get(mesh.material) ?? [];
 			list.push(geometry);
 			batches.set(mesh.material, list);
 			parent.remove(mesh);
 		}
 		for (const [material, geometries] of batches) {
-			const merged = mergeGeometries(geometries.map((g) => (g.index ? g.toNonIndexed() : g)));
+			const merged = mergeGeometries(geometries);
 			geometries.forEach((g) => g.dispose());
 			if (!merged) continue;
 			const mesh = new Mesh(merged, material);

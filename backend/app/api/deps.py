@@ -19,8 +19,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 TOUCH_INTERVAL = timedelta(minutes=5)
 
 
-async def get_auth(request: Request, session: SessionDep) -> tuple[User, AuthSession] | None:
-    token = request.cookies.get(settings.session_cookie_name)
+async def resolve_session_token(
+    session: AsyncSession, token: str | None
+) -> tuple[User, AuthSession] | None:
+    """Session cookie → (user, server-side session), or None. Shared by HTTP and WebSocket."""
     if not token:
         return None
     payload = decode_session_token(token)
@@ -47,6 +49,10 @@ async def get_auth(request: Request, session: SessionDep) -> tuple[User, AuthSes
         record.last_seen_at = now
         await session.commit()
     return user, record
+
+
+async def get_auth(request: Request, session: SessionDep) -> tuple[User, AuthSession] | None:
+    return await resolve_session_token(session, request.cookies.get(settings.session_cookie_name))
 
 
 AuthDep = Annotated[tuple[User, AuthSession] | None, Depends(get_auth)]

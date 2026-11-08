@@ -24,6 +24,19 @@ class PlayableRegion(BaseModel):
     dataset: dict[str, Any]
 
 
+class TerrainFeature(BaseModel):
+    """A smooth mound (see app/geography/terrain.py; mirrored in the client)."""
+
+    slug: str
+    kind: str
+    x: float
+    z: float
+    height_m: float
+    top_radius_m: float
+    base_radius_m: float
+    source: str
+
+
 class WorldConfigOut(BaseModel):
     crs: str
     origin: dict[str, float | str]
@@ -33,6 +46,7 @@ class WorldConfigOut(BaseModel):
     axes: str
     attribution: str
     regions: list[PlayableRegion]
+    terrain: list[TerrainFeature]
 
 
 class WorldPlayer(BaseModel):
@@ -43,7 +57,17 @@ class WorldPlayer(BaseModel):
     avatar: AvatarIn
 
 
+class StartPosition(BaseModel):
+    """Where the player enters: their spawn point, or where they left off (recent reconnect)."""
+
+    x: float
+    z: float
+    yaw: float
+    resumed: bool
+
+
 class WorldBootstrapOut(BaseModel):
     player: WorldPlayer
     spawn: SpawnPointOut
+    start: StartPosition
     config: WorldConfigOut

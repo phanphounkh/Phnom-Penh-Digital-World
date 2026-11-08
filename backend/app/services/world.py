@@ -1,22 +1,36 @@
+import math
+from datetime import timedelta
 from typing import Any
 
 from fastapi import status
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.errors import AppError, not_found
 from app.geography.projection import default_projection
 from app.geography.regions import WORLD_ORIGIN
-from app.models import AvatarCustomization, User, WorldChunk
+from app.geography.terrain import default_mounds
+from app.models import (
+    AvatarCustomization,
+    GeographicRegion,
+    PlayerSession,
+    User,
+    WorldChunk,
+    WorldRoom,
+)
 from app.schemas.me import AvatarIn
 from app.schemas.world import (
     PlayableRegion,
+    StartPosition,
+    TerrainFeature,
     WorldBootstrapOut,
     WorldBounds,
     WorldConfigOut,
     WorldPlayer,
 )
 from app.services import geo
+from app.utils.time import utcnow
 
 ATTRIBUTION = "Map data © OpenStreetMap contributors (ODbL)"
 
@@ -57,6 +71,10 @@ async def config(session: AsyncSession) -> WorldConfigOut:
         axes="x = east (m), y = up (m), z = -north (m), relative to origin",
         attribution=ATTRIBUTION,
         regions=regions,
+        terrain=[
+            TerrainFeature(kind="mound", **{k: v for k, v in vars(m).items()})
+            for m in default_mounds()
+        ],
     )
 
 
@@ -93,8 +111,36 @@ async def bootstrap(session: AsyncSession, user: User) -> WorldBootstrapOut:
             avatar=AvatarIn.model_validate(avatar, from_attributes=True),
         ),
         spawn=spawn,
+        start=await start_position(session, user, spawn),
         config=await config(session),
     )
+
+
+async def start_position(session: AsyncSession, user: User, spawn: Any) -> StartPosition:
+    """Resume a recent session's virtual position, else the chosen spawn point."""
+    yaw = math.pi - math.radians(spawn.heading_deg)
+    minutes = settings.world_resume_minutes
+    last = (
+        await session.execute(
+            select(PlayerSession.last_x, PlayerSession.last_z)
+            .join(WorldRoom, WorldRoom.id == PlayerSession.room_id)
+            .join(GeographicRegion, GeographicRegion.id == WorldRoom.region_id)
+            .where(
+                PlayerSession.user_id == user.id,
+                PlayerSession.last_x.is_not(None),
+                GeographicRegion.slug == spawn.region,
+                func.coalesce(PlayerSession.disconnected_at, PlayerSession.last_seen_at)
+                > utcnow() - timedelta(minutes=minutes),
+            )
+            .order_by(PlayerSession.connected_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if minutes and last is not None:
+        return StartPosition(
+            x=round(last.last_x, 2), z=round(last.last_z, 2), yaw=yaw, resumed=True
+        )
+    return StartPosition(x=spawn.x, z=spawn.z, yaw=yaw, resumed=False)
 
 
 def chunk_headers(row: WorldChunk) -> dict[str, Any]:

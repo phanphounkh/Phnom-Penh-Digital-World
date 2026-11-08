@@ -3,12 +3,16 @@
 	import { goto } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
-		ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Footprints
+		ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper
 	} from 'lucide-svelte';
+	import ChatBox from '$lib/components/world/ChatBox.svelte';
+	import PeoplePanel from '$lib/components/world/PeoplePanel.svelte';
+	import type { WorldSession } from '$lib/game/net/WorldSession.svelte';
+	import type { EmoteName } from '$lib/game/net/protocol';
 	import { geo } from '$lib/api/endpoints';
 	import type { SpawnPoint } from '$lib/api/types';
 	import { compassLabel } from '$lib/geo/projection';
-	import type { CityController, CityState, Quality } from '$lib/game/city/CityEngine';
+	import type { CityController, CityState, Quality, TimeMode } from '$lib/game/city/CityEngine';
 	import { session } from '$lib/stores/session.svelte';
 
 	let { data } = $props();
@@ -22,12 +26,24 @@
 	let progress = $state({ loaded: 0, total: 1 });
 	let ready = $state(false);
 	let failure = $state('');
-	let panel = $state<'' | 'places' | 'settings' | 'help'>('');
+	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people'>('');
+	let net = $state<WorldSession | null>(null);
+	let chatInput = $state<HTMLInputElement>();
+	const EMOTE_BUTTONS: [EmoteName, string][] = [['wave', 'Wave'], ['sampeah', 'Sampeah'], ['cheer', 'Cheer'], ['dance', 'Dance']];
 	let places = $state<SpawnPoint[]>([]);
 	let quality = $state<Quality>('high');
+	let timeMode = $state<TimeMode>('live');
+	const TIME_MODES: [TimeMode, string][] = [
+		['live', 'Live'],
+		['morning', 'Morning'],
+		['noon', 'Midday'],
+		['sunset', 'Sunset'],
+		['night', 'Night']
+	];
 	let touch = $state(false);
 
-	$effect(() => city?.setPaused(panel !== ''));
+	// Menus pause your movement (not the world): other players keep moving and chatting.
+	$effect(() => city?.setPaused(panel !== '' && panel !== 'people'));
 
 	onMount(() => {
 		touch = matchMedia('(pointer: coarse)').matches;
@@ -46,7 +62,12 @@
 				city = created;
 				quality = touch ? 'low' : 'high';
 				ready = true;
+				const { WorldSession } = await import('$lib/game/net/WorldSession.svelte');
+				net = new WorldSession(created);
+				net.start();
+				(globalThis as { __ppwNet?: unknown }).__ppwNet = net; // e2e/perf inspection
 				timer = setInterval(() => {
+					if ((globalThis as { __ppwNoMinimap?: boolean }).__ppwNoMinimap) return; // perf probes
 					const ctx = minimap?.getContext('2d');
 					if (ctx && city) city.drawMinimap(ctx, minimap!.width, 1.6);
 				}, 200);
@@ -57,14 +78,25 @@
 		})();
 		geo.spawnPoints().then((p) => (places = p)).catch(() => {});
 		const onKey = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') panel = panel ? '' : 'help';
-			if (e.key.toLowerCase() === 'm' && !(e.target instanceof HTMLInputElement)) panel = panel === 'places' ? '' : 'places';
+			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
+			if (typing) return;
+			if (e.key.toLowerCase() === 'm') panel = panel === 'places' ? '' : 'places';
+			if (e.key.toLowerCase() === 'p') panel = panel === 'people' ? '' : 'people';
+			if (e.key === 'Enter' && chatInput) {
+				e.preventDefault();
+				chatInput.focus();
+			}
+			const emote = EMOTE_BUTTONS[Number(e.key) - 1];
+			if (emote && net) net.emote(emote[0]);
 		};
 		window.addEventListener('keydown', onKey);
 		return () => {
 			disposed = true;
 			clearInterval(timer);
 			window.removeEventListener('keydown', onKey);
+			net?.stop();
+			net = null;
 			city?.dispose();
 			city = null;
 		};
@@ -72,6 +104,8 @@
 
 	async function travel(p: SpawnPoint) {
 		panel = '';
+		// Online, the server moves you (it is authoritative); offline, travel locally.
+		if (net?.travel(p.slug)) return;
 		await city?.teleport(p.x, p.z, p.heading_deg);
 	}
 
@@ -80,7 +114,13 @@
 		city?.setQuality(q);
 	}
 
+	function setTime(mode: TimeMode) {
+		timeMode = mode;
+		city?.setTimeMode(mode);
+	}
+
 	async function signOut() {
+		net?.stop();
 		city?.dispose();
 		city = null;
 		await session.logout();
@@ -101,7 +141,7 @@
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
 <div class="fixed inset-0 overflow-hidden bg-river-950 text-paper select-none">
-	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready}></div>
+	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
 		<div class="absolute inset-0 grid place-items-center bg-river-950">
@@ -126,6 +166,7 @@
 		<div class="pointer-events-none absolute top-3 left-3 max-w-[min(22rem,calc(100vw-7rem))] rounded-2xl bg-river-950/75 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-location">
 			<p class="flex items-center gap-2 text-[11px] font-bold tracking-widest text-saffron-300 uppercase">
 				<Navigation size={12} style="transform: rotate({hud.heading}deg)" /> {compassLabel(hud.heading)} · Daun Penh
+				<span class="ml-auto font-mono normal-case tracking-normal text-river-200" data-testid="hud-clock" title={hud.timeMode === 'live' ? 'Phnom Penh time (live sun)' : 'Fixed time of day'}>{hud.clock}{hud.timeMode === 'live' ? '' : ' ·'}</span>
 			</p>
 			<p class="mt-1 truncate font-display text-lg leading-tight" data-testid="hud-street">
 				{hud.street ?? 'Off-street'}
@@ -141,7 +182,7 @@
 
 		<!-- Toolbar -->
 		<div class="absolute top-3 right-3 flex flex-col gap-2">
-			{#each [['places', MapPin, 'Places (M)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
+			{#each [['people', Users, 'People (P)'], ['places', MapPin, 'Places (M)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
 				<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800 {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={label} title={label} onclick={() => (panel = panel === id ? '' : id)}>
 					<Icon size={19} />
 				</button>
@@ -158,9 +199,42 @@
 
 		<!-- Status -->
 		<div class="pointer-events-none absolute right-3 bottom-10 flex flex-col items-end gap-1.5 text-[11px]">
-			<span class="flex items-center gap-1.5 rounded-full bg-river-950/70 px-3 py-1 backdrop-blur"><Users size={12} /> Solo preview · multiplayer arrives in Phase 3</span>
+			{#if net}
+				<span class="flex items-center gap-1.5 rounded-full px-3 py-1 backdrop-blur {net.status === 'open' ? 'bg-river-950/70' : 'bg-brick-600/85'}" data-testid="hud-net" data-status={net.status}>
+					{#if net.status === 'open'}
+						<Wifi size={12} /> <span data-testid="hud-online">{net.online}</span>&nbsp;online · {net.nearby.length} nearby{#if net.rtt} · {net.rtt} ms{/if}
+					{:else}
+						<WifiOff size={12} /> {net.detail || (net.status === 'connecting' ? 'Connecting…' : 'Offline')}
+					{/if}
+				</span>
+			{/if}
 			<span class="flex items-center gap-1.5 rounded-full bg-river-950/70 px-3 py-1 backdrop-blur" data-testid="hud-perf"><Gauge size={12} /> {hud.fps} fps · {hud.chunks} chunks{hud.pending ? ` (+${hud.pending})` : ''}</span>
 		</div>
+
+		{#if net}
+			<div class="pointer-events-none absolute bottom-10 left-[calc(170px+1.5rem)] flex flex-col gap-2 max-sm:bottom-52 max-sm:left-3">
+				<div class="pointer-events-auto flex gap-1.5" role="group" aria-label="Emotes (keys 1–4)">
+					{#each EMOTE_BUTTONS as [id, label], i (id)}
+						<button class="flex items-center gap-1 rounded-full bg-river-950/70 px-2.5 py-1 text-[11px] font-semibold backdrop-blur hover:bg-river-800" title={`${label} (${i + 1})`} onclick={() => net?.emote(id)} data-testid={`emote-${id}`}>
+							{#if id === 'wave'}<Hand size={12} />{:else if id === 'sampeah'}<span aria-hidden="true">🙏</span>{:else if id === 'cheer'}<PartyPopper size={12} />{:else}<Sparkles size={12} />{/if}
+							{label}
+						</button>
+					{/each}
+				</div>
+				<ChatBox session={net} bind:input={chatInput} />
+			</div>
+			<div class="absolute top-3 left-1/2 flex w-[min(26rem,calc(100vw-8rem))] -translate-x-1/2 flex-col gap-2" aria-live="polite">
+				{#each net.toasts as t (t.key)}
+					<div class="flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm shadow-xl {t.kind === 'warning' ? 'bg-brick-600 text-white' : 'bg-paper text-ink'}" data-testid="toast">
+						<span class="flex-1">{t.text}</span>
+						{#if t.kind === 'invite' && t.from}
+							<button class="btn-primary px-3 py-1.5 text-xs" onclick={() => net?.join(t.from!)} data-testid="join-invite">Join</button>
+						{/if}
+						<button class="text-ink-soft" aria-label="Dismiss" onclick={() => net?.dismiss(t.key)}><X size={15} /></button>
+					</div>
+				{/each}
+			</div>
+		{/if}
 
 		{#if hud.nearEdge}
 			<div class="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 rounded-full bg-saffron-500 px-4 py-2 text-sm font-semibold text-river-950 shadow-lg">
@@ -184,9 +258,12 @@
 	{/if}
 
 	{#if panel}
-		<div class="absolute top-3 right-17 w-[min(22rem,calc(100vw-5.5rem))] rounded-2xl bg-paper p-5 text-ink shadow-2xl" role="dialog" aria-label={panel}>
+		<div class="absolute top-3 right-17 {panel === 'people' ? 'w-[min(27rem,calc(100vw-5.5rem))]' : 'w-[min(22rem,calc(100vw-5.5rem))]'} rounded-2xl bg-paper p-5 text-ink shadow-2xl" role="dialog" aria-label={panel}>
 			<button class="absolute top-3 right-3 rounded-lg p-1 text-ink-soft hover:bg-paper-2" aria-label="Close" onclick={() => (panel = '')}><X size={18} /></button>
-			{#if panel === 'places'}
+			{#if panel === 'people' && net}
+				<h2 class="display mb-3 text-xl font-bold">People</h2>
+				<div class="h-[min(32rem,calc(100dvh-10rem))]"><PeoplePanel session={net} /></div>
+			{:else if panel === 'places'}
 				<h2 class="display text-xl font-bold">Places</h2>
 				<p class="mt-1 text-xs text-ink-soft">Fast-travel between public spawn areas. Vehicles arrive in Phase 5.</p>
 				<div class="mt-3 grid gap-2">
@@ -206,6 +283,13 @@
 					{/each}
 				</div>
 				<p class="hint">Performance mode turns off shadows and streams fewer chunks. It switches on automatically if the frame rate stays low.</p>
+				<p class="label mt-4">Time of day</p>
+				<div class="grid grid-cols-5 gap-1 rounded-xl bg-paper-2 p-1 text-xs font-semibold" role="radiogroup" aria-label="Time of day">
+					{#each TIME_MODES as [mode, text] (mode)}
+						<button role="radio" aria-checked={timeMode === mode} class="rounded-lg py-2 {timeMode === mode ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => setTime(mode)}>{text}</button>
+					{/each}
+				</div>
+				<p class="hint">Live follows the real sun over Phnom Penh (UTC+7). Street lamps are generated; OSM maps none here.</p>
 				<p class="label mt-4">Avatar</p>
 				<a class="btn-ghost w-full" href="/onboarding/avatar" data-sveltekit-reload>Edit avatar</a>
 				<p class="label mt-4">Visibility</p>
@@ -218,6 +302,9 @@
 					<dt class="font-mono font-semibold">Drag</dt><dd>Orbit the camera</dd>
 					<dt class="font-mono font-semibold">Wheel</dt><dd>Zoom</dd>
 					<dt class="font-mono font-semibold">M</dt><dd>Places / fast travel</dd>
+					<dt class="font-mono font-semibold">P</dt><dd>People: friends, messages, blocking</dd>
+					<dt class="font-mono font-semibold">Enter</dt><dd>Chat (Tab: nearby ↔ world)</dd>
+					<dt class="font-mono font-semibold">1 – 4</dt><dd>Wave · Sampeah · Cheer · Dance</dd>
 					<dt class="font-mono font-semibold">Esc</dt><dd>This panel</dd>
 				</dl>
 				<p class="mt-4 rounded-xl bg-paper-2 p-3 text-xs text-ink-soft">

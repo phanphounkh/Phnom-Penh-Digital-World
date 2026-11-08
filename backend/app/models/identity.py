@@ -107,6 +107,8 @@ class UserProfile(TimestampMixin, Base):
     )
     # Set when the user confirms their role choice during onboarding (even "visitor only").
     roles_chosen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Moderation: no public chat until this time.
+    chat_muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     user: Mapped[User] = relationship(back_populates="profile")
 

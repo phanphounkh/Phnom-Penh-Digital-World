@@ -29,7 +29,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.geography import osm
 from app.geography.projection import WorldProjection, chunk_key, default_projection
-from app.geography.regions import NEIGHBORHOODS, PHNOM_PENH_FALLBACK_BBOX, SPAWN_POINTS
+from app.geography.regions import (
+    KHMER_ROOF_KINDS,
+    LANDMARK_OVERRIDES,
+    NEIGHBORHOODS,
+    PHNOM_PENH_FALLBACK_BBOX,
+    SPAWN_POINTS,
+)
+from app.geography.streetscape import NamedLine, generated_lamps, minimum_rectangle, street_signs
+from app.marketplace.units import sync_units
 from app.models import (
     Building,
     DatasetImport,
@@ -235,6 +243,8 @@ def build_chunk_payloads(
     parsed: osm.ParsedArea,
     building_ids: dict[tuple[str, int], int],
     road_ids: dict[tuple[str, int], int],
+    signs: list[dict[str, Any]] | None = None,
+    lamps: list[tuple[float, float, float]] | None = None,
 ) -> dict[tuple[int, int], dict[str, Any]]:
     min_x, min_z, max_x, max_z = region_world.bounds
     ix0, iz0 = projection.chunk_of(min_x, min_z)
@@ -255,6 +265,7 @@ def build_chunk_payloads(
                 "areas": [],
                 "landmarks": [],
                 "features": [],
+                "signs": [],
                 "_cell": cell,
             }
 
@@ -264,26 +275,44 @@ def build_chunk_payloads(
         return chunks.get(projection.chunk_of(point.x, point.y))
 
     for b in parsed.buildings:
+        override = LANDMARK_OVERRIDES.get((b.osm_type, b.osm_id), {})
+        if override.get("hide"):
+            continue
         world = projection.geometry_to_world(b.geom)
         chunk = owner(world.representative_point())
         if chunk is None:
             continue
-        chunk["buildings"].append(
-            {
-                "id": building_ids.get((b.osm_type, b.osm_id)),
-                "name": b.name,
-                "name_km": b.name_km,
-                "kind": b.building,
-                "h": b.height_m,
-                "min_h": b.min_height_m,
-                "hs": b.height_source,
-                "colour": b.colour,
-                "polys": [
-                    [_ring(p.exterior.coords), *[_ring(i.coords) for i in p.interiors]]
-                    for p in _polygons(world)
-                ],
+        entry: dict[str, Any] = {
+            "id": building_ids.get((b.osm_type, b.osm_id)),
+            "name": b.name,
+            "name_km": b.name_km,
+            "kind": b.building,
+            "h": b.height_m,
+            "min_h": b.min_height_m,
+            "hs": b.height_source,
+            "colour": b.colour,
+            "polys": [
+                [_ring(p.exterior.coords), *[_ring(i.coords) for i in p.interiors]]
+                for p in _polygons(world)
+            ],
+        }
+        largest = max(_polygons(world), key=lambda p: p.area, default=None)
+        if override.get("model") and largest is not None:
+            c = largest.centroid
+            entry["model"] = {
+                "name": override["model"],
+                "c": [_r(c.x), _r(c.y)],
+                "r": _r((largest.area / math.pi) ** 0.5),
+                "base": override.get("base_height_m", 0.0),
             }
+        roof = override.get("roof") or (
+            "khmer"
+            if b.building in KHMER_ROOF_KINDS and largest is not None and largest.area >= 60
+            else None
         )
+        if roof and largest is not None:
+            entry["roof"] = {"type": roof, "obb": minimum_rectangle(largest)}
+        chunk["buildings"].append(entry)
 
     for road in parsed.roads:
         world = projection.geometry_to_world(road.geom)
@@ -344,6 +373,16 @@ def build_chunk_payloads(
         if chunk is not None:
             chunk["features"].append({"k": f.kind, "p": [_r(x), _r(z)]})
 
+    for sign in signs or []:
+        chunk = owner(Point(*sign["p"]))
+        if chunk is not None:
+            chunk["signs"].append(sign)
+
+    for x, z, a in lamps or []:
+        chunk = owner(Point(x, z))
+        if chunk is not None:
+            chunk["features"].append({"k": "lamp_gen", "p": [x, z], "a": a})
+
     for chunk in chunks.values():
         chunk.pop("_cell")
         # Most important landmarks first (the client labels the top few).
@@ -392,6 +431,11 @@ async def import_neighborhood(
         area.geom = osm.as_multipolygon(area.geom.intersection(region_ll)) or area.geom
     parsed.landmarks = [lm for lm in parsed.landmarks if region_ll.contains(lm.geom)]
     parsed.street_features = [f for f in parsed.street_features if region_ll.contains(f.geom)]
+    for b in parsed.buildings:
+        override = LANDMARK_OVERRIDES.get((b.osm_type, b.osm_id), {})
+        if "height_m" in override:
+            b.height_m = override["height_m"]
+            b.height_source = override.get("height_source", "estimated")
 
     def base(f: Any) -> dict[str, Any]:
         return {
@@ -497,7 +541,46 @@ async def import_neighborhood(
     }
 
     region_world = projection.geometry_to_world(region_ll)
-    chunks = build_chunk_payloads(projection, region_world, parsed, building_ids, road_ids)
+    obstacles = STRtree(
+        [p for b in parsed.buildings for p in _polygons(projection.geometry_to_world(b.geom))]
+        + [
+            p
+            for a in parsed.areas
+            if a.kind == "water"
+            for p in _polygons(projection.geometry_to_world(a.geom))
+        ]
+    )
+    named = [
+        NamedLine(
+            r.name,
+            r.name_en,
+            r.name_km,
+            r.highway,
+            r.width_m,
+            projection.geometry_to_world(r.geom),
+        )
+        for r in parsed.roads
+        if r.name
+    ]
+    lamp_lines = [
+        NamedLine(
+            r.name or "",
+            r.name_en,
+            r.name_km,
+            r.highway,
+            r.width_m,
+            projection.geometry_to_world(r.geom),
+        )
+        for r in parsed.roads
+    ]
+    region_inner = region_world.buffer(-10)
+    signs = street_signs(named, obstacles, region_inner)
+    lamps = generated_lamps(lamp_lines, obstacles, region_inner)
+    stats["street_signs"] = len(signs)
+    stats["generated_lamps"] = len(lamps)
+    chunks = build_chunk_payloads(
+        projection, region_world, parsed, building_ids, road_ids, signs, lamps
+    )
     chunk_rows = []
     for (ix, iz), payload in chunks.items():
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -525,17 +608,10 @@ async def import_neighborhood(
         await session.execute(insert(WorldChunk).values(chunk_rows[start : start + 50]))
     stats["chunks"] = len(chunk_rows)
 
+    # Virtual shop units (Phase 4), cut from the same projected payloads the client renders.
+    stats.update(await sync_units(session, region, projection, list(chunks.values())))
+
     # Spawn points: nearest open public ground to each landmark, facing it; upsert by slug.
-    obstacles = STRtree(
-        [p for b in parsed.buildings for p in _polygons(projection.geometry_to_world(b.geom))]
-        + [
-            p
-            for a in parsed.areas
-            if a.kind == "water"
-            for p in _polygons(projection.geometry_to_world(a.geom))
-        ]
-    )
-    region_inner = region_world.buffer(-10)
     spawn_rows = []
     for order, sp in enumerate(SPAWN_POINTS):
         tx, tz = projection.to_world(sp["lat"], sp["lon"])

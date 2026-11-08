@@ -72,6 +72,16 @@ export class CollisionWorld {
 		}
 	}
 
+	/** A small round obstacle (tree trunk, pole) that blocks walking but not the camera. */
+	addCircle(owner: string, x: number, z: number, r: number): void {
+		const ring: XZ[] = [];
+		for (let i = 0; i < 6; i++) {
+			const a = (i / 6) * Math.PI * 2;
+			ring.push([x + Math.cos(a) * r, z + Math.sin(a) * r]);
+		}
+		this.addRing(owner, ring, 0);
+	}
+
 	removeOwner(owner: string): void {
 		this.chunks.delete(owner);
 	}

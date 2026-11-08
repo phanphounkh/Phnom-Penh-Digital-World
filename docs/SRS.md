@@ -24,8 +24,15 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-GEO-3 | Nearby buildings, reverse lookup, search | ✅ | B: test_reverse_lookup_and_nearby_buildings |
 | F-WORLD-1 | Stream chunks near the player and unload distant ones | ✅ | E (chunk counts in the HUD); ChunkManager |
 | F-WORLD-2 | Avatar movement (walk, run, turn), third-person camera, collisions | ✅ | U: collision.test.ts; E (player moves) |
+| F-WORLD-4 | Recognisable landmarks, terrain, street furniture, street signs, day/night (Phase 2) | ✅ | B: test_streetscape (10); U: chunkGeometry/terrain tests (18); E: phase2.spec.ts |
 | F-WORLD-3 | Road-position → world, route calculation | ⏳ 5 | Navigation graph planned |
-| F-MP-* | Multiplayer presence, sync, chat, friends, moderation | ⏳ 3 | |
+| F-MP-1 | Real players only; presence on connect, despawn and session close on disconnect; one connection per account | ✅ | B: test_two_players…, test_departure…, test_a_second_connection…; E: phase3.spec.ts |
+| F-MP-2 | Position sync with interpolation; spatial interest management | ✅ | B: test_far_players…; U: Interpolator.test.ts; E: phase3 (B's walk seen by A) |
+| F-MP-3 | Server validation of speed, bounds and footprints; authoritative travel and teleports | ✅ | B: test_server_rejects_teleports_walls_and_bounds, test_players_arriving… |
+| F-MP-4 | Opt-in visibility; hidden players never broadcast | ✅ | B: test_hidden_players_are_never_broadcast, test_hidden_players_do_not_show_as_online… |
+| F-MP-5 | Usernames, emotes, nearby/world chat, private messages | ✅ | B: test_nearby_and_world_chat, test_emotes…, test_direct_messages; E: phase3 |
+| F-MP-6 | Friend requests, friend invitations (join a friend), mute, block, report | ✅ | B: test_social.py (8 tests); E: phase3 (friend via UI) |
+| F-MP-7 | Moderation and rate limiting (chat filter, limits, chat-mute, suspend, session re-validation) | ✅ | B: test_chat_is_rate_limited, test_reports_capture_context…, test_signing_out_elsewhere… |
 | F-SHOP-*, F-CART-*, F-ORD-* | Shop claims, products, cart, orders | ⏳ 4 | Legacy cart/checkout kept at `/mall` |
 | F-VEH-* | Vehicles | ⏳ 5 | |
 | F-DEL-* | Delivery jobs | ⏳ 6 | |
@@ -36,10 +43,12 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | ID | Requirement | Status | Notes |
 |---|---|---|---|
 | N-SEC-1 | Argon2id passwords; CSRF protection; secure cookie flags; production guards | ✅ | B: test_state_changes_require_csrf_token, test_cross_origin_writes_are_blocked, test_password_is_hashed_with_argon2 |
-| N-SEC-2 | Rate limiting on auth, verification and search | ✅ | In-process; Redis-backed in Phase 3 |
+| N-SEC-2 | Rate limiting on auth, verification, search, social and WebSocket messages | ✅ | In-process (one API process); a shared Redis store comes with Phase 8 scale-out |
+| N-SEC-3 | WebSocket hijacking protection (Origin), session binding, revocation | ✅ | B: test_connection_requires_origin_session_and_onboarding, test_signing_out_elsewhere… |
+| N-SCALE-1 | Multiple API processes for the world | ⏳ 8 | Single authoritative process today (docs/HLD.md) |
 | N-PRIV-1 | Addresses owner-only; never in public cards or audit logs; avatar position ≠ GPS | ✅ | B: test_privacy (5 tests) |
 | N-DATA-1 | Dataset dates, coverage, accuracy and estimates documented and labelled per feature | ✅ | docs/DATA.md; `*_source` columns |
-| N-PERF-1 | Usable on ordinary computers: streaming, merged meshes, instancing, adaptive quality | 🟡 | Implemented. Measured only with headless **software** WebGL (10–13 fps, a lower bound); not yet measured on real GPUs |
+| N-PERF-1 | Usable on ordinary computers: streaming, merged meshes, instancing, adaptive quality | ✅ | 60 fps (p5 ≥ 59.5, no frame over 16.8 ms while streaming) at high quality on an Intel Alder Lake-N iGPU, 1280×720; render ≈ 4 ms/frame. docs/perf/README.md |
 | N-PERF-2 | 3D assets are lazy-loaded | ✅ | Three.js and MapLibre load only on the pages that need them |
 | N-I18N-1 | Preferred language stored; Khmer place names | 🟡 | UI text is English only |
 | N-OPS-1 | Docker Compose, migrations, idempotent import | ✅ | Images built and the stack smoke-tested |

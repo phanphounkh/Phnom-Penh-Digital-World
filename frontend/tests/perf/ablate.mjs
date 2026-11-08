@@ -1,0 +1,33 @@
+// Render-cost ablation at one spawn: toggles features and measures renderer.render() time.
+import { chromium } from '@playwright/test';
+import { perfSession } from './session.mjs';
+const slug = process.argv[2] ?? 'central-market';
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist'].concat(process.env.UNCAPPED ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : []) });
+const ctx = await b.newContext({ baseURL: 'http://127.0.0.1:5173', viewport: { width: 1280, height: 720 } });
+const bot = await perfSession(ctx); await bot.moveTo(slug);
+const page = await ctx.newPage();
+await page.goto('/world');
+await page.locator('[data-testid="world-canvas"][data-ready="true"]').waitFor({ timeout: 180000 });
+await page.waitForTimeout(5000);
+const run = async (label, setup) => {
+	await page.evaluate(setup);
+	await page.waitForTimeout(400);
+	await page.evaluate(() => globalThis.__ppwPerf.reset());
+	await page.waitForTimeout(3000);
+	const r = await page.evaluate(() => { const p = globalThis.__ppwPerf; return { render: +(p.render / p.frames).toFixed(2), max: +p.maxRender.toFixed(0), spikes: p.spikes, calls: p.calls, programs: p.programs() }; });
+	console.log(label.padEnd(22), JSON.stringify(r));
+};
+await page.evaluate(() => { globalThis.__restore = () => { const { scene, renderer } = globalThis.__ppwPerf; scene.traverse((n) => (n.visible = true)); renderer.shadowMap.enabled = true; }; });
+await run('baseline', () => {});
+await run('baseline again', () => {});
+await run('no shadows', () => { const { scene, renderer } = globalThis.__ppwPerf; renderer.shadowMap.enabled = false; scene.traverse((n) => n.material && (n.material.needsUpdate = true)); });
+await run('shadows back', () => { const { scene, renderer } = globalThis.__ppwPerf; renderer.shadowMap.enabled = true; scene.traverse((n) => n.material && (n.material.needsUpdate = true)); });
+await run('no instanced props', () => { globalThis.__ppwPerf.scene.traverse((n) => { if (n.isInstancedMesh) n.visible = false; }); });
+await run('no walls', () => { globalThis.__restore(); const { scene, materials } = globalThis.__ppwPerf; scene.traverse((n) => { if (n.material === materials.walls) n.visible = false; }); });
+await run('no sprites', () => { globalThis.__restore(); globalThis.__ppwPerf.scene.traverse((n) => { if (n.isSprite) n.visible = false; }); });
+await run('no pools', () => { globalThis.__restore(); const { scene, materials } = globalThis.__ppwPerf; scene.traverse((n) => { if (n.material === materials.pools) n.visible = false; }); });
+await run('restored', () => globalThis.__restore());
+await run('no minimap', () => { globalThis.__ppwNoMinimap = true; });
+await run('no minimap, no HUD', () => { document.querySelectorAll('[data-testid="world-canvas"] ~ *').forEach((e) => (e.style.display = 'none')); });
+await run('HUD back, minimap back', () => { globalThis.__ppwNoMinimap = false; document.querySelectorAll('[data-testid="world-canvas"] ~ *').forEach((e) => (e.style.display = '')); });
+await b.close();

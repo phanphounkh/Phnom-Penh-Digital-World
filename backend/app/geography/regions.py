@@ -74,3 +74,58 @@ SPAWN_POINTS = [
         "heading_deg": 0,
     },
 ]
+
+# Terrain features. Phnom Penh is flat (about 10 m above sea level) except Wat Phnom, the
+# man-made hill the city is named after. It is modelled as a smooth mound: a flat top that
+# holds the vihara and stupa, falling to street level along the mapped staircases. The height
+# (~27 m) is the commonly published figure; the shape is an approximation, not a survey.
+TERRAIN_FEATURES = [
+    {
+        "slug": "wat-phnom-hill",
+        "kind": "mound",
+        "lat": 11.57613,
+        "lon": 104.92322,
+        "height_m": 27.0,
+        "top_radius_m": 24.0,
+        "base_radius_m": 68.0,
+        "source": "Height: published ~27 m. Shape: fitted to the OSM stupa, vihara and "
+        "staircase positions; not surveyed.",
+    },
+]
+
+# Per-building corrections for landmarks, keyed by (osm_type, osm_id). Anything not in OSM is
+# labelled: "reference" = a published figure, "estimated" = our approximation.
+LANDMARK_OVERRIDES: dict[tuple[str, int], dict] = {
+    # Phsar Thmei (Central Market), 1937. The X-shaped wings, the central domed hall
+    # (rendered with a Blender dome model) and two footprints that duplicate them in OSM.
+    ("way", 859466535): {
+        "height_m": 10.0,
+        "height_source": "estimated",
+        "note": "Phsar Thmei wings; height estimated from photographs",
+    },
+    ("way", 859469220): {
+        "model": "phsar-thmei-dome",
+        "height_m": 26.0,
+        "base_height_m": 10.0,
+        "height_source": "reference",
+        "note": "Phsar Thmei central dome; commonly published as 26 m high",
+    },
+    ("way", 842087292): {"hide": True, "note": "Centre piece inside the dome model"},
+    ("way", 1034727803): {"hide": True, "note": "Duplicate of way 859466535 (0.3 m apart)"},
+    # Wat Phnom: the hilltop vihara (Khmer roof) and the stupa of King Ponhea Yat.
+    ("way", 269798573): {
+        "roof": "khmer",
+        "height_m": 6.0,
+        "height_source": "estimated",
+        "note": "Wat Phnom vihara walls; tiered Khmer roof added on top",
+    },
+    ("way", 487758678): {
+        "model": "stupa",
+        "height_m": 18.0,
+        "height_source": "estimated",
+        "note": "Wat Phnom stupa; height estimated as ~2x its mapped base diameter",
+    },
+}
+
+# Building types that get a tiered Khmer roof.
+KHMER_ROOF_KINDS = {"temple", "pagoda", "religious", "monastery", "shrine"}

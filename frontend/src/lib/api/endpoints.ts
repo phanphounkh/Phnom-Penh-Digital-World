@@ -3,6 +3,11 @@ import type {
 	Address,
 	Avatar,
 	ChunkPayload,
+	Conversation,
+	DirectMessage,
+	Friend,
+	PlayerReport,
+	ReportReason,
 	Language,
 	Me,
 	Onboarding,
@@ -77,11 +82,35 @@ export const world = {
 		api<ChunkPayload>(`/world/chunks/${key}`, { signal })
 };
 
+const enc = encodeURIComponent;
+
+export const social = {
+	friends: () => api<Friend[]>('/social/friends'),
+	addFriend: (username: string) => api<{ message: string }>('/social/friends', { method: 'POST', body: { username } }),
+	accept: (u: string) => api(`/social/friends/${enc(u)}/accept`, { method: 'POST' }),
+	decline: (u: string) => api(`/social/friends/${enc(u)}/decline`, { method: 'POST' }),
+	unfriend: (u: string) => api(`/social/friends/${enc(u)}`, { method: 'DELETE' }),
+	relations: () => api<{ blocked: string[]; muted: string[] }>('/social/relations'),
+	block: (u: string) => api(`/social/blocks/${enc(u)}`, { method: 'POST' }),
+	unblock: (u: string) => api(`/social/blocks/${enc(u)}`, { method: 'DELETE' }),
+	mute: (u: string) => api(`/social/mutes/${enc(u)}`, { method: 'POST' }),
+	unmute: (u: string) => api(`/social/mutes/${enc(u)}`, { method: 'DELETE' }),
+	conversations: () => api<Conversation[]>('/social/conversations'),
+	thread: (u: string) => api<DirectMessage[]>(`/social/messages/${enc(u)}`),
+	sendMessage: (u: string, text: string) =>
+		api<DirectMessage>(`/social/messages/${enc(u)}`, { method: 'POST', body: { text } }),
+	report: (username: string, reason: ReportReason, details?: string) =>
+		api<{ message: string }>('/social/reports', { method: 'POST', body: { username, reason, details } })
+};
+
 export const admin = {
 	roleRequests: (status = 'pending') =>
 		api<RoleRequest[]>('/admin/role-requests', { query: { status } }),
 	approve: (id: string, reason?: string) =>
 		api<RoleRequest>(`/admin/role-requests/${id}/approve`, { method: 'POST', body: { reason } }),
 	reject: (id: string, reason?: string) =>
-		api<RoleRequest>(`/admin/role-requests/${id}/reject`, { method: 'POST', body: { reason } })
+		api<RoleRequest>(`/admin/role-requests/${id}/reject`, { method: 'POST', body: { reason } }),
+	reports: (status = 'open') => api<PlayerReport[]>('/admin/reports', { query: { status } }),
+	resolve: (id: string, action: 'dismiss' | 'warn' | 'chat_mute' | 'suspend', hours = 24, note?: string) =>
+		api<{ message: string }>(`/admin/reports/${id}/resolve`, { method: 'POST', body: { action, hours, note } })
 };

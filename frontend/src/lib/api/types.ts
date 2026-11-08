@@ -146,6 +146,55 @@ export interface WorldConfig {
 	axes: string;
 	attribution: string;
 	regions: PlayableRegion[];
+	terrain: {
+		slug: string;
+		kind: string;
+		x: number;
+		z: number;
+		height_m: number;
+		top_radius_m: number;
+		base_radius_m: number;
+		source: string;
+	}[];
+}
+
+export interface Friend {
+	username: string;
+	display_name: string;
+	status: 'accepted' | 'incoming' | 'outgoing';
+	online: boolean;
+	since: string;
+}
+
+export interface Conversation {
+	username: string;
+	display_name: string;
+	last: string;
+	last_at: string;
+	from_me: boolean;
+	unread: number;
+}
+
+export interface DirectMessage {
+	from_me: boolean;
+	text: string;
+	at: string;
+}
+
+export type ReportReason = 'harassment' | 'hate' | 'spam' | 'cheating' | 'inappropriate_name' | 'other';
+
+export interface PlayerReport {
+	id: string;
+	reporter: string;
+	reported: string;
+	reported_display_name: string;
+	reason: ReportReason;
+	details: string | null;
+	context: { messages?: { id: number; channel: string; text: string; at: string; flagged: boolean }[] };
+	status: string;
+	action: string | null;
+	resolution_note: string | null;
+	created_at: string;
 }
 
 export interface WorldBootstrap {
@@ -157,6 +206,7 @@ export interface WorldBootstrap {
 		avatar: Avatar;
 	};
 	spawn: SpawnPoint;
+	start: { x: number; z: number; yaw: number; resumed: boolean };
 	config: WorldConfig;
 }
 
@@ -184,9 +234,19 @@ export interface ChunkBuilding {
 	kind: string;
 	h: number;
 	min_h: number;
-	hs: 'osm' | 'levels' | 'estimated';
+	hs: 'osm' | 'levels' | 'estimated' | 'reference';
 	colour: string | null;
 	polys: PolygonRings[];
+	/** A Blender landmark model replaces the extrusion (e.g. Phsar Thmei's dome, a stupa). */
+	model?: { name: string; c: XZ; r: number; base: number };
+	/** A special roof on top of the walls; obb = [cx, cz, length, width, yaw]. */
+	roof?: { type: 'khmer'; obb: [number, number, number, number, number] };
+}
+
+export interface ChunkSign {
+	p: XZ;
+	/** One blade per street, aligned with it (a = yaw of the street direction). */
+	blades: { en: string; km: string | null; a: number }[];
 }
 
 export interface ChunkArea {
@@ -214,7 +274,9 @@ export interface ChunkPayload {
 	buildings: ChunkBuilding[];
 	areas: ChunkArea[];
 	landmarks: ChunkLandmark[];
-	features: { k: string; p: XZ }[];
+	/** k: tree | traffic_signals | crossing | street_lamp | lamp_gen (generated; a = road yaw) */
+	features: { k: string; p: XZ; a?: number }[];
+	signs?: ChunkSign[];
 }
 
 export interface RoleRequest {

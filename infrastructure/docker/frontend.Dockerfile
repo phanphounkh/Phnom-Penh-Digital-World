@@ -11,7 +11,8 @@ WORKDIR /app
 ENV NODE_ENV=production PORT=3000
 COPY --from=build /app/build ./build
 COPY --from=build /app/node_modules ./node_modules
-COPY package.json ./
+COPY package.json server.js ./
 USER node
 EXPOSE 3000
-CMD ["node", "build"]
+# server.js = SvelteKit handler + WebSocket pass-through to the API for /api/v1/world/ws.
+CMD ["node", "server.js"]

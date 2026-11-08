@@ -28,6 +28,8 @@ os.environ.update(
         "COOKIE_SECURE": "false",
         "TRUST_PROXY_HEADERS": "false",
         "EXPOSE_DEV_VERIFICATION_CODES": "true",
+        "WORLD_TICK_HZ": "20",
+        "WORLD_RESUME_MINUTES": "15",
         "JWT_SECRET": "test-secret-" + "x" * 40,
     }
 )
@@ -45,6 +47,7 @@ from app.core.security import hash_password
 from app.geography.importer import import_all
 from app.main import app
 from app.models import RoleName, RoleStatus, User, UserProfile, UserRole
+from app.multiplayer.hub import hub
 from app.utils.time import utcnow
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -81,13 +84,15 @@ async def imported_geography(migrated_database: None) -> dict[str, Any]:
 
 
 IDENTITY_TABLES = (
-    "audit_logs, user_addresses, avatar_customizations, contact_verifications, sessions, "
-    "user_roles, user_profiles, users"
+    "player_reports, chat_messages, user_mutes, user_blocks, friendships, player_sessions, "
+    "world_rooms, audit_logs, user_addresses, avatar_customizations, contact_verifications, "
+    "sessions, user_roles, user_profiles, users"
 )
 
 
 @pytest.fixture(autouse=True)
 async def clean_db(imported_geography: dict[str, Any]) -> AsyncIterator[None]:
+    await hub.reset()
     async with SessionLocal() as session:
         await session.execute(text(f"TRUNCATE {IDENTITY_TABLES} RESTART IDENTITY CASCADE"))
         await session.commit()
@@ -211,3 +216,57 @@ async def admin_client() -> AsyncIterator[httpx.AsyncClient]:
         assert response.status_code == 200, response.text
         adopt_csrf(c)
         yield c
+
+
+# ── WebSocket helpers ───────────────────────────────────────────────────────────────────
+import asyncio
+import contextlib
+import json
+
+from httpx_ws import aconnect_ws
+from httpx_ws.transport import ASGIWebSocketTransport
+
+ORIGIN = "http://localhost:5173"
+
+
+@contextlib.asynccontextmanager
+async def world_socket(c: httpx.AsyncClient, origin: str | None = ORIGIN):
+    """Open /api/v1/world/ws with the cookies of an HTTP test client."""
+    async with httpx.AsyncClient(
+        transport=ASGIWebSocketTransport(app), base_url="http://testserver.local"
+    ) as wsc:
+        wsc.cookies = c.cookies
+        headers = {"origin": origin} if origin else {}
+        async with aconnect_ws("/api/v1/world/ws", wsc, headers=headers) as ws:
+            ws.inbox = []  # messages received while waiting for something else
+            yield ws
+
+
+async def expect(ws, kind: str, timeout: float = 3.0, where=None) -> dict:
+    """Next message of type `kind` (optionally matching `where`), keeping others in ws.inbox."""
+    for i, msg in enumerate(ws.inbox):
+        if msg["t"] == kind and (where is None or where(msg)):
+            return ws.inbox.pop(i)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise AssertionError(f"no {kind!r} message; got {[m['t'] for m in ws.inbox]}")
+        try:
+            msg = json.loads(await ws.receive_text(timeout=remaining))
+        except TimeoutError as exc:
+            raise AssertionError(f"no {kind!r} message; got {[m['t'] for m in ws.inbox]}") from exc
+        if msg["t"] == kind and (where is None or where(msg)):
+            return msg
+        ws.inbox.append(msg)
+
+
+async def never(ws, kind: str, wait: float = 0.6, where=None) -> None:
+    """Assert no message of `kind` arrives within `wait` seconds."""
+    with contextlib.suppress(AssertionError):
+        msg = await expect(ws, kind, wait, where)
+        raise RuntimeError(f"unexpected {kind!r}: {msg}")
+
+
+async def send(ws, **message) -> None:
+    await ws.send_text(json.dumps(message))

@@ -57,7 +57,7 @@ app.add_middleware(
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-    allow_headers=["Content-Type", settings.csrf_header_name],
+    allow_headers=["Content-Type", settings.csrf_header_name, "Idempotency-Key"],
 )
 
 

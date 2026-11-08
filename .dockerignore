@@ -8,3 +8,4 @@ frontend/build
 frontend/test-results
 frontend/artifacts
 .env
+backend/var

@@ -30,6 +30,7 @@ class RateLimiter:
         """Record a hit. Returns seconds to wait if the limit is exceeded, else None."""
         if not self.enabled:
             return None
+        limit *= settings.rate_limit_scale
         now = time.monotonic()
         hits = self._hits[key]
         while hits and hits[0] <= now - window_seconds:

@@ -1,0 +1,111 @@
+{
+  "label": "phase2-uncapped",
+  "gpu": true,
+  "uncapped": true,
+  "base": "http://127.0.0.1:5173",
+  "viewport": "1280x720",
+  "results": [
+    {
+      "slug": "central-market",
+      "quality": "high",
+      "load_ms": 2602,
+      "idle": {
+        "fps": 59.4,
+        "p5_fps": 9.2,
+        "worst_ms": 315
+      },
+      "moving": {
+        "fps": 63.2,
+        "p5_fps": 8,
+        "worst_ms": 262.1
+      },
+      "hud": "115 fps · 26 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "central-market",
+      "quality": "low",
+      "load_ms": 1639,
+      "idle": {
+        "fps": 127.5,
+        "p5_fps": 78.1,
+        "worst_ms": 264.6
+      },
+      "moving": {
+        "fps": 156.5,
+        "p5_fps": 111.1,
+        "worst_ms": 229.1
+      },
+      "hud": "290 fps · 26 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "wat-phnom",
+      "quality": "high",
+      "load_ms": 1587,
+      "idle": {
+        "fps": 69.9,
+        "p5_fps": 13.9,
+        "worst_ms": 384.7
+      },
+      "moving": {
+        "fps": 54.5,
+        "p5_fps": 5.2,
+        "worst_ms": 417.2
+      },
+      "hud": "99 fps · 25 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "wat-phnom",
+      "quality": "low",
+      "load_ms": 1663,
+      "idle": {
+        "fps": 115.9,
+        "p5_fps": 66.7,
+        "worst_ms": 280.2
+      },
+      "moving": {
+        "fps": 127.4,
+        "p5_fps": 69.9,
+        "worst_ms": 247.8
+      },
+      "hud": "91 fps · 25 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "riverside",
+      "quality": "high",
+      "load_ms": 1561,
+      "idle": {
+        "fps": 109.7,
+        "p5_fps": 95.2,
+        "worst_ms": 460.5
+      },
+      "moving": {
+        "fps": 115.3,
+        "p5_fps": 108.7,
+        "worst_ms": 424.8
+      },
+      "hud": "82 fps · 23 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "riverside",
+      "quality": "low",
+      "load_ms": 1168,
+      "idle": {
+        "fps": 229.7,
+        "p5_fps": 54.6,
+        "worst_ms": 161
+      },
+      "moving": {
+        "fps": 228.6,
+        "p5_fps": 54.1,
+        "worst_ms": 193.8
+      },
+      "hud": "450 fps · 23 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ]
+}

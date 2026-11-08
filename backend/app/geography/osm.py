@@ -67,6 +67,7 @@ DEFAULT_LEVELS = {
     "monastery": 2,
     "pagoda": 2,
     "kiosk": 1,
+    "stupa": 4,
     "roof": 1,
     "garage": 1,
     "garages": 1,
@@ -350,6 +351,8 @@ def road_from(element: dict[str, Any]) -> RoadFeature | None:
 def building_from(element: dict[str, Any]) -> BuildingFeature | None:
     tags = element.get("tags", {})
     kind = tags.get("building")
+    if not kind and tags.get("man_made") == "tower" and tags.get("tower:type") == "stupa":
+        kind = "stupa"  # Khmer stupas (chedi) are usually mapped as towers, not buildings
     if not kind or kind == "no" or element["type"] == "node":
         return None
     geom = element_area(element)
