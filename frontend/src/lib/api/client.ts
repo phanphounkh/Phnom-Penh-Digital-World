@@ -66,11 +66,14 @@ export type RequestOptions = {
 	query?: Record<string, string | number | boolean | undefined | null>;
 	fetch?: typeof fetch;
 	signal?: AbortSignal;
+	headers?: Record<string, string>;
+	/** Multipart upload (files); the browser sets the Content-Type boundary. */
+	form?: FormData;
 };
 
 export async function api<T>(path: string, options: RequestOptions = {}): Promise<T> {
 	const method = (options.method ?? 'GET').toUpperCase();
-	const headers: Record<string, string> = { Accept: 'application/json' };
+	const headers: Record<string, string> = { Accept: 'application/json', ...options.headers };
 	if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 	if (UNSAFE.has(method)) {
 		const csrf = readCookie(CSRF_COOKIE);
@@ -88,7 +91,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
 	const response = await (options.fetch ?? fetch)(url, {
 		method,
 		headers,
-		body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+		body: options.form ?? (options.body !== undefined ? JSON.stringify(options.body) : undefined),
 		credentials: 'same-origin',
 		signal: options.signal
 	});

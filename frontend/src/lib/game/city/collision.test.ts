@@ -84,3 +84,31 @@ describe('rayFraction (camera occlusion)', () => {
 		expect(rayFraction(w, -5, 2, 5, 15, 2, 5)).toBe(1);
 	});
 });
+
+describe('doorways', () => {
+	// A 10 m square building with a 4 m doorway centred on its south wall (z = 0).
+	const ring: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10]];
+	const make = (withDoor: boolean) => {
+		const world = new CollisionWorld();
+		world.addRing('b', ring, 8);
+		if (withDoor) world.doors = [{ ax: 3, az: 0, bx: 7, bz: 0 }];
+		return world;
+	};
+
+	it('blocks the wall but lets the player walk through the opening', () => {
+		const solid = make(false);
+		expect(moveCircle(solid, 5, -2, 0, 4, 0.35).z).toBeLessThan(0);
+		const open = make(true);
+		const inside = moveCircle(open, 5, -2, 0, 4, 0.35);
+		expect(inside.z).toBeCloseTo(2, 5);
+		// Beside the opening (the door jamb) is still wall.
+		expect(moveCircle(open, 1.5, -2, 0, 4, 0.35).z).toBeLessThan(0);
+	});
+
+	it('lets low camera rays through the opening but not above it', () => {
+		const open = make(true);
+		expect(rayFraction(open, 5, 1.5, 3, 5, 2, -5)).toBe(1);
+		expect(rayFraction(open, 5, 4, 3, 5, 5, -5)).toBeLessThan(1);
+		expect(rayFraction(make(false), 5, 1.5, 3, 5, 2, -5)).toBeLessThan(1);
+	});
+});

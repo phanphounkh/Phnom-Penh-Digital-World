@@ -31,6 +31,8 @@ os.environ.update(
         "WORLD_TICK_HZ": "20",
         "WORLD_RESUME_MINUTES": "15",
         "JWT_SECRET": "test-secret-" + "x" * 40,
+        "MEDIA_ROOT": __import__("tempfile").mkdtemp(prefix="ppw-test-media-"),
+        "DEMO_PAYMENTS_ENABLED": "true",
     }
 )
 
@@ -84,6 +86,9 @@ async def imported_geography(migrated_database: None) -> dict[str, Any]:
 
 
 IDENTITY_TABLES = (
+    "vehicles, refunds, order_events, order_items, orders, payment_intents, cart_items, carts, "
+    "inventory, products, shops, property_disputes, property_transfers, property_claims, "
+    "merchant_verifications, merchants, "
     "player_reports, chat_messages, user_mutes, user_blocks, friendships, player_sessions, "
     "world_rooms, audit_logs, user_addresses, avatar_customizations, contact_verifications, "
     "sessions, user_roles, user_profiles, users"
@@ -270,3 +275,82 @@ async def never(ws, kind: str, wait: float = 0.6, where=None) -> None:
 
 async def send(ws, **message) -> None:
     await ws.send_text(json.dumps(message))
+
+
+# ── Marketplace helpers ─────────────────────────────────────────────────────────────────
+MERCHANT = {
+    "business_name": "Sokha Coffee",
+    "category": "food_drink",
+    "contact_phone": "012 345 678",
+    "business_address": "Street 136, Daun Penh",
+    "operating_hours": {"mon": [["07:00", "20:00"]], "sat": [["08:00", "22:00"]]},
+}
+
+
+@pytest.fixture
+async def clients() -> AsyncIterator[Any]:
+    """Factory for extra signed-in clients (several players/merchants in one test)."""
+    opened: list[httpx.AsyncClient] = []
+
+    async def factory() -> httpx.AsyncClient:
+        c = make_client()
+        await c.__aenter__()
+        opened.append(c)
+        return c
+
+    yield factory
+    for c in opened:
+        await c.__aexit__(None, None, None)
+
+
+async def merchant_id_of(admin: httpx.AsyncClient, username: str) -> str:
+    rows = (await admin.get("/admin/merchants", params={"status": "pending"})).json()
+    return next(m["id"] for m in rows if m["owner_username"] == username)
+
+
+async def approved_merchant(
+    clients: Any, admin: httpx.AsyncClient, username: str, **merchant: Any
+) -> httpx.AsyncClient:
+    """A signed-in seller whose merchant application an administrator approved."""
+    c = await clients()
+    await onboard(c, username, roles=["buyer", "seller"])
+    body = {**MERCHANT, "business_name": f"{username.title()} Shop", **merchant}
+    response = await c.post("/merchant", json=body)
+    assert response.status_code == 201, response.text
+    mid = await merchant_id_of(admin, username)
+    response = await admin.post(f"/admin/merchants/{mid}/approve", json={})
+    assert response.status_code == 200, response.text
+    return c
+
+
+async def free_units(
+    c: httpx.AsyncClient, count: int = 1, verification: bool = False
+) -> list[dict]:
+    """Available units near Central Market (optionally ones at real businesses)."""
+    lat, lon = CENTRAL_MARKET
+    bbox = f"{lon - 0.006},{lat - 0.006},{lon + 0.006},{lat + 0.006}"
+    rows = (await c.get("/market/units", params={"bbox": bbox, "available": "true"})).json()
+    picked = [u for u in rows if u["requires_verification"] == verification]
+    assert len(picked) >= count, f"only {len(picked)} matching units"
+    return picked[:count]
+
+
+async def shop_with_products(
+    clients: Any, admin: httpx.AsyncClient, username: str, products: list[dict]
+) -> tuple[httpx.AsyncClient, dict, list[dict]]:
+    """Approved merchant + claimed unit + products. Returns (client, shop, products)."""
+    c = await approved_merchant(clients, admin, username)
+    taken = {
+        u["unit"]["code"]
+        for u in (await admin.get("/admin/claims", params={"status": "approved"})).json()
+    }
+    unit = next(u for u in await free_units(c, 40) if u["code"] not in taken)
+    response = await c.post("/merchant/claims", json={"unit_code": unit["code"]})
+    assert response.status_code == 201, response.text
+    shop = (await c.get("/merchant/shops")).json()[0]
+    created = []
+    for p in products:
+        response = await c.post("/merchant/products", json={"category": "food", "stock": 10, **p})
+        assert response.status_code == 201, response.text
+        created.append(response.json())
+    return c, shop, created

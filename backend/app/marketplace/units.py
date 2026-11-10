@@ -210,6 +210,8 @@ def _street_in_front(
     best: tuple[float, dict[str, Any]] | None = None
     for k in tree.query(mid.buffer(ROAD_SEARCH_M)):
         line, road = roads[int(k)]
+        if road["cls"] == "service" and not road.get("name"):
+            continue  # unnamed service ways are alleys and parking aisles, not shopping streets
         d = line.distance(mid)
         if d > ROAD_SEARCH_M:
             continue
@@ -217,8 +219,9 @@ def _street_in_front(
         vx, vz = nearest.x - mx, nearest.y - mz
         if vx * -nx + vz * -nz < 0.7 * math.hypot(vx, vz):
             continue  # the street is beside or behind this wall, not in front of it
-        if best is None or d < best[0]:
-            best = (d, road)
+        score = d if road.get("name") else d + 8.0  # prefer a named street in front
+        if best is None or score < best[0]:
+            best = (score, road)
     return best[1] if best else None
 
 

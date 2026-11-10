@@ -67,9 +67,9 @@ class MerchantIn(BaseModel):
     business_address: str | None = Field(default=None, max_length=300)
     operating_hours: dict[str, Any] = Field(default_factory=dict)
 
-    _clean = field_validator("business_name", "business_name_km", "description", "business_address")(
-        classmethod(lambda cls, v: _text(v))
-    )
+    _clean = field_validator(
+        "business_name", "business_name_km", "description", "business_address"
+    )(classmethod(lambda cls, v: _text(v)))
 
     @field_validator("contact_phone")
     @classmethod

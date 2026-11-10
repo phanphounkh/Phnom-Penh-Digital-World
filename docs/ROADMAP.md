@@ -4,10 +4,10 @@
 |---|---|---|
 | 1 | Foundation: accounts, verification, roles, avatars, real map, one playable neighbourhood | ✅ Done |
 | 2 | 3D city quality | ✅ Done |
-| 3 | Multiplayer | **✅ Done (this build)** |
-| 4 | Marketplace (shop claims, storefronts, cart, demo checkout) | Next |
-| 5 | Transportation (bicycle, motorbike, car, tuk-tuk, routing) | Planned |
-| 6 | Delivery (simulated jobs, tracking) | Planned |
+| 3 | Multiplayer | ✅ Done |
+| 4 | Marketplace (shop claims, storefronts, cart, demo checkout) | ✅ Done |
+| 5 | Transportation (bicycle, motorbike, routing, parking; car and tuk-tuk later) | **✅ Done (this build)** |
+| 6 | Delivery (simulated jobs, tracking) | Next |
 | 7 | Demo wallet and double-entry ledger | Planned |
 | 8 | Optimisation and production readiness | Planned |
 
@@ -67,13 +67,89 @@ delivery. Phases 3 and 4 can overlap.
 4. Server-side collision against tree trunks and poles (the client blocks them; the server
    checks footprints and water only).
 5. Voice chat, player-to-player trading, parties: not planned yet.
-6. A dedicated E2E API instance on the `ppw_test` database, so browser tests never put bots in
-   the shared dev world (do this first in Phase 4).
+6. ~~A dedicated E2E API instance~~: done in Phase 4 (API :8001 on `ppw_e2e`).
 
-## Phase 4: next (marketplace)
+## Phase 4: delivered
 
-Virtual shop units with unique claims (database-level uniqueness, transactional claims, expiry,
-disputes), merchant verification, a seller dashboard, a product catalogue, 3D storefronts
-(the `/mall` food court as the interior template), in-world product interaction, a
-server-priced multi-merchant cart and demo checkout (reusing the CampusEats order and payment
-patterns, with integer minor units).
+* **1,680 virtual shop units** generated from real Daun Penh building frontages on public
+  streets (never residential buildings), with permanent codes and a claim map.
+* Merchant applications (business details, hours, private address, verification documents)
+  with administrator approval; the seller role is granted in the same step.
+* Exclusive claims guaranteed by the database; evidence and review for units at real
+  businesses; disputes; 30-day terms with renewal and expiry; release; transfers; revocation.
+* Seller dashboard: units map, storefront customisation (name EN/KM, tagline, theme, colours,
+  open/closed), products (category policy, photos without metadata, display models, stock),
+  orders with explicit transitions, demo revenue, customer messages.
+* Walk-in 3D storefronts at the real frontage: doorway, sign, awning, shelves with product
+  facings and price tags, island table, cart and counter. E picks a product up (held in the
+  avatar's hand), E puts it in the cart, E at the counter opens checkout. "Walk there" from the
+  shop directory.
+* Server cart, idempotent multi-merchant demo checkout, a payment that cannot complete twice,
+  expiry that releases stock, refunds (simulated), buyer order tracking.
+* The isolated E2E stack.
+
+## Deferred from Phase 4 (still open)
+
+1. **Delivery fulfilment** (orders are pickup-only; the delivery states exist for Phase 6) and
+   the **demo wallet balance and ledger** (Phase 7 debits the payment intent).
+2. **Other players do not see what you carry**, and shop interiors have no per-shop lighting.
+3. A KHR price option (USD cents only for now) and per-branch stock (stock is per product).
+4. **Khmer UI** for the dashboard (shop names and products already accept Khmer); the Khmer
+   category names need native review.
+5. Real business verification beyond document upload (e.g. a check against the Ministry of
+   Commerce register) and a dispute conversation thread.
+6. A content-moderation pass on product photos and names (today: admin review for restricted
+   categories only).
+7. Uploaded GLB models for products (sellers choose from built-in display models).
+
+## Phase 5: delivered
+
+* **Road graph from OSM.** The importer splits the real OSM ways at shared nodes into a routing
+  graph (`road_nodes`, `road_edges`: 1,109 nodes, 1,485 edges, 74 km in Daun Penh), clipped to
+  the playable area. Every edge carries per-direction access masks for foot, bicycle and
+  motorbike, derived from the highway class and the OSM `access`, `vehicle`, `motor_vehicle`,
+  `motorcycle`, `bicycle`, `foot`, `oneway`, `oneway:bicycle` and `junction` tags (317 one-way
+  edges; 100 private service roads excluded), plus OSM `maxspeed` where tagged. Traffic signals
+  sit on graph nodes.
+* **Routing.** `GET /routes` (A*, travel time, a short wait at signals for vehicles): one-way
+  streets bind vehicles, not pedestrians; turn-by-turn steps with English and Khmer street names;
+  road position ↔ world position (`/roads/snap`, `/roads/position`).
+* **Vehicles.** Blender models of a step-through city bicycle (front basket) and a generic
+  underbone motorbike, with steering, wheel spin, lean, headlights at night and a rider posed with
+  leg and arm IK (pedalling on the bicycle). A garage (V) hands out one free starter vehicle of
+  each kind, parked on the nearest street; repaint, valet ("bring it here", once a minute), give
+  back.
+* **Riding.** F gets on when you stand next to your vehicle. W/S throttle and brake, A/D steer
+  (kinematic bicycle model, less lock at speed); a chase camera; speedometer, OSM speed limit,
+  one-way and wrong-way indicators. The server validates every move against the vehicle's top
+  speed (bicycle 25 km/h, motorbike 45 km/h, ×1.35 tolerance) and keeps vehicles on roads their
+  mode may use (carriageway + pavement, car parks); shop floors are foot-only.
+* **Lane-aware guidance.** Routes are drawn in the world (chevron ribbon, destination beacon) and on
+  the minimap. Vehicles keep to the right-hand lane (Cambodia drives on the right), the right-hand
+  lane of one-way streets; walkers keep to the pavement. The autopilot rides or walks the route
+  (pure-pursuit steering, slowing for bends and speed limits) and re-plans when you leave it.
+* **Parking.** F again parks: at the kerb or on the pavement of a through road, anywhere in
+  alleys and OSM car parks, never mid-carriageway or on top of another vehicle (the server pulls
+  over up to 6 m). Disconnecting or fast-travelling while riding parks the vehicle nearby.
+* **Sync.** Other players see riders on their vehicle (kind and colour), and parked vehicles in
+  their area as world objects without the owner's identity; hidden players' and blocked players'
+  vehicles are never shown.
+
+## Deferred from Phase 5 (still open)
+
+1. **Cars and tuk-tuks** (remorque): the mode bits (`car = 8`) and access rules exist; models,
+   handling for four wheels and a wider collision shape do not.
+2. **Traffic rules beyond one-way**: no enforced speed limits, signals or turn restrictions
+   (OSM `turn:lanes` and `restriction` relations are not imported); riding the wrong way is
+   flagged, not prevented.
+3. **No NPC traffic** (principle 2: no fake crowds) and no player–vehicle collisions on the server.
+4. **Bridges and layers** are routed but not rendered as decks; the graph ignores `layer`.
+5. Buying, selling or renting vehicles comes with the Phase 7 wallet (today: free starters).
+6. A Khmer voice/UI for directions (step text is English; street names are bilingual).
+
+## Phase 6: next (delivery)
+
+Simulated delivery jobs on the routing graph: driver profiles (the driver role), job offers
+from paid orders with "delivery" fulfilment, pickup at the shop's door, a route to the buyer's
+virtual drop-off point, tracking on the buyer's order page, and delivery states on the order
+machine that already exist.

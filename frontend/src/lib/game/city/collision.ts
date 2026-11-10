@@ -26,6 +26,8 @@ interface Footprint {
 }
 
 const CELL = 12;
+/** Rays below this height pass through doorways (matches the rendered opening). */
+const DOORWAY_HEIGHT = 2.9;
 
 class ChunkColliders {
 	grid = new Map<number, Wall[]>();
@@ -34,10 +36,29 @@ class ChunkColliders {
 
 const cellKey = (cx: number, cz: number) => cx * 73856093 + cz * 19349663;
 
+/** A doorway: a gap in any wall that runs along this segment (walk-in shops). */
+export interface Door {
+	ax: number;
+	az: number;
+	bx: number;
+	bz: number;
+}
+
 export class CollisionWorld {
 	private chunks = new Map<string, ChunkColliders>();
 	/** Rectangular world limit (the edge of the mapped neighbourhood). */
 	bounds: { minX: number; minZ: number; maxX: number; maxZ: number } | null = null;
+	/** Openings cut into walls; contacts that fall inside one are ignored. */
+	doors: Door[] = [];
+
+	/** True if (x, z) lies on a doorway (within 6 cm of its segment). */
+	inDoor(x: number, z: number): boolean {
+		for (const d of this.doors) {
+			const [cx, cz] = closestOnSegment(x, z, { ax: d.ax, az: d.az, bx: d.bx, bz: d.bz, h: 0, poly: 0 });
+			if ((cx - x) * (cx - x) + (cz - z) * (cz - z) < 0.0036) return true;
+		}
+		return false;
+	}
 
 	addRing(owner: string, ring: XZ[], height: number): void {
 		if (ring.length < 3) return;
@@ -163,6 +184,7 @@ export function moveCircle(
 					nz = z - cz;
 				const d = Math.hypot(nx, nz);
 				if (d >= radius) continue;
+				if (world.doors.length && world.inDoor(cx, cz)) continue; // walking through a doorway
 				if (d < 1e-6) {
 					// Exactly on the wall: push along the wall's normal.
 					nx = -(w.bz - w.az);
@@ -239,7 +261,9 @@ export function rayFraction(
 		const u = ((w.ax - ax) * dz - (w.az - az) * dx) / denom;
 		if (t <= 0 || t >= best || u < 0 || u > 1) continue;
 		const y = ay + (by - ay) * t;
-		if (y < w.h) best = t;
+		if (y >= w.h) continue;
+		if (world.doors.length && y < DOORWAY_HEIGHT && world.inDoor(ax + dx * t, az + dz * t)) continue;
+		best = t;
 	}
 	return best;
 }

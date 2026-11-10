@@ -1,7 +1,8 @@
 /**
  * The playable 3D city: renderer, day/night lighting, terrain, streamed OSM chunks (built in
  * Web Workers), Blender props and landmarks, the player's avatar, third-person camera,
- * keyboard/touch controls and collision.
+ * keyboard/touch controls and collision. Phase 5: riding a bicycle or motorbike (physics,
+ * staying on the streets, chase camera), route guidance and the riding/walking autopilot.
  */
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
@@ -17,6 +18,14 @@ import { DayNight, type TimeMode } from './lighting';
 import { CityMaterials } from './materials';
 import { PropLibrary } from './props';
 import { Terrain, type Mound } from './terrain';
+import type { XZ } from '$lib/api/types';
+import { RoadNetwork } from '$lib/game/vehicles/RoadNetwork';
+import { createVehicle, setVehicleNight, type VehicleInstance } from '$lib/game/vehicles/VehicleModels';
+import { Rider } from '$lib/game/vehicles/Rider';
+import { pursuitSteer, rideState, rideStep } from '$lib/game/vehicles/kinematics';
+import { MODES, PULL_OVER_M, type TravelMode, type VehicleKind } from '$lib/game/vehicles/specs';
+import { RouteLine } from '$lib/game/vehicles/RouteLine';
+import { PathFollower, RouteGuide, lanePath, stepText, type Progress, type Route } from '$lib/game/vehicles/route';
 
 export type Quality = 'high' | 'low';
 export type { TimeMode };
@@ -44,6 +53,20 @@ export interface CityState {
 	/** Height of the ground under the player (metres above street level). */
 	ground: number;
 	workers: number;
+	/** Phase 5: on foot or riding, the speedometer, the street's limit and one-way state. */
+	mode: TravelMode;
+	speedKmh: number;
+	speedLimit: number | null;
+	oneWay: boolean;
+	wrongWay: boolean;
+	/** Route guidance while a route is shown. */
+	nav: (Progress & { text: string; auto: boolean }) | null;
+}
+
+export interface RidingVehicle {
+	id: string;
+	kind: VehicleKind;
+	color: string;
 }
 
 export interface LocalState {
@@ -58,11 +81,35 @@ export interface CityController {
 	readonly scene: THREE.Scene;
 	readonly camera: THREE.PerspectiveCamera;
 	readonly terrain: Terrain;
+	readonly collision: CollisionWorld;
+	readonly materials: CityMaterials;
+	/** The local player's avatar root (shops attach a held product to its wrist). */
+	readonly avatar: THREE.Object3D;
+	/** Carry pose while holding a product. */
+	setHolding(holding: boolean): void;
+	/** Walk along waypoints (world x/z) like a player would; any movement key cancels. */
+	walkTo(points: [number, number][], onDone?: (arrived: boolean) => void): void;
+	readonly walking: boolean;
 	/** Runs every frame after the player has moved (dt in seconds). */
 	onFrame(callback: (dt: number) => void): () => void;
 	localState(): LocalState;
 	/** Authoritative position from the server (start, travel, invite, correction). */
 	setPosition(x: number, z: number, yaw?: number): void;
+	/** Streets and their riding/parking rules, from the loaded chunks. */
+	readonly network: RoadNetwork;
+	readonly mode: TravelMode;
+	readonly riding: RidingVehicle | null;
+	/** Get on (the server placed you on the vehicle) or off (null; you stand beside it). */
+	setRiding(vehicle: RidingVehicle | null, x: number, z: number, yaw: number): void;
+	/** Where "park" would leave the vehicle (null: pull over first). */
+	parkingSpot(free?: (x: number, z: number) => boolean): XZ | null;
+	/** Show a route in the world and on the minimap (null clears it); `destination` is the
+	 * exact place to reach (the route ends at the nearest road position to it). */
+	setRoute(route: Route | null, destination?: XZ): void;
+	readonly route: Route | null;
+	/** Follow the shown route: walk it or ride it (any movement key takes over). */
+	followRoute(onDone?: (arrived: boolean) => void): void;
+	readonly following: boolean;
 	playEmote(name: EmoteName): void;
 	setQuality(q: Quality): void;
 	setTimeMode(mode: TimeMode): void;
@@ -85,6 +132,10 @@ const WALK = 2.6;
 const RUN = 6.5;
 const RADIUS = 0.35;
 const EYE = 1.55;
+/** Physics sub-step while riding (stable steering on slow, software-rendered frames). */
+const RIDE_STEP = 0.05;
+/** The server tolerates riders this far beyond the carriageway (client stops at 2.0 m). */
+const RIDE_ESCAPE_MARGIN = 2.7;
 
 /** A displaced ground patch for each mound, coloured like a wooded hill. */
 function terrainMesh(terrain: Terrain, material: THREE.Material): THREE.Group {
@@ -213,6 +264,42 @@ export async function createCity(
 	let pz = boot.start?.z ?? boot.spawn.z;
 	let yaw = boot.start?.yaw ?? yawForHeading(boot.spawn.heading_deg);
 	let speed = 0;
+	let holding = false;
+	// Riding (Phase 5).
+	const network = new RoadNetwork();
+	let riding: RidingVehicle | null = null;
+	let vehicle: VehicleInstance | null = null;
+	let rider: Rider | null = null;
+	let rideToken = 0;
+	const ride = rideState();
+	let lastDrag = -10;
+	// Route guidance and the riding autopilot.
+	const routeLine = new RouteLine(terrain);
+	scene.add(routeLine.group);
+	let navRoute: Route | null = null;
+	let navDestination: XZ | null = null;
+	let guide: RouteGuide | null = null;
+	let follower: PathFollower | null = null;
+	let autoRide = false;
+	let autoDone: ((arrived: boolean) => void) | undefined;
+	let autoStuck = 0;
+	const endAuto = (arrived: boolean) => {
+		if (!autoRide) return;
+		autoRide = false;
+		const done = autoDone;
+		autoDone = undefined;
+		done?.(arrived);
+	};
+	// Autopilot ("walk me there"): real walking with collision, so the server sees normal moves.
+	let route: [number, number][] = [];
+	let routeDone: ((arrived: boolean) => void) | undefined;
+	let routeStuck = 0;
+	const endRoute = (arrived: boolean) => {
+		route = [];
+		const done = routeDone;
+		routeDone = undefined;
+		done?.(arrived);
+	};
 	let camYaw = yaw + Math.PI; // behind the player
 	let camPitch = 0.38;
 	let camDistance = 7.5;
@@ -252,6 +339,7 @@ export async function createCity(
 	const onPointerMove = (e: PointerEvent) => {
 		if (!dragging) return;
 		camYaw -= (e.clientX - lastX) * 0.006;
+		lastDrag = performance.now() / 1000;
 		camPitch = THREE.MathUtils.clamp(camPitch + (e.clientY - lastY) * 0.004, 0.08, 1.25);
 		lastX = e.clientX;
 		lastY = e.clientY;
@@ -314,13 +402,35 @@ export async function createCity(
 	const shadowDir = new THREE.Vector3();
 
 	function step(dt: number) {
+		network.sync(chunks.payloads(), chunks.version);
+		if (riding) return stepRiding(dt);
 		const forward = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
 		const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
 		const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
 		let mx = fx * forward + -fz * strafe;
 		let mz = fz * forward + fx * strafe;
-		const len = Math.hypot(mx, mz);
-		const target = len > 0 ? (keys.has('shift') ? RUN : WALK) : 0;
+		let len = Math.hypot(mx, mz);
+		let autoRun = false;
+		if (len > 0 && route.length) endRoute(false); // the player took over
+		while (route.length && len === 0) {
+			const [tx, tz] = route[0];
+			const d = Math.hypot(tx - px, tz - pz);
+			if (d < 0.35) {
+				route.shift();
+				routeStuck = 0;
+				if (!route.length) endRoute(true);
+				continue;
+			}
+			mx = (tx - px) / d;
+			mz = (tz - pz) / d;
+			len = 1;
+			autoRun = d > 8;
+			// Let the camera swing round behind the walking direction.
+			let behind = Math.atan2(mx, mz) + Math.PI - camYaw;
+			behind = Math.atan2(Math.sin(behind), Math.cos(behind));
+			camYaw += behind * (1 - Math.exp(-dt * 2.5));
+		}
+		const target = len > 0 ? (keys.has('shift') || autoRun ? RUN : WALK) : 0;
 		speed += (target - speed) * (1 - Math.exp(-dt * 8));
 		let travel = 0;
 		if (len > 0) {
@@ -336,23 +446,33 @@ export async function createCity(
 			px = result.x;
 			pz = result.z;
 		}
+		if (route.length) {
+			// Blocked by a wall for a while: give up rather than push into it forever.
+			routeStuck = travel < speed * dt * 0.25 ? routeStuck + dt : 0;
+			if (routeStuck > 1.5) endRoute(false);
+		}
 		const ground = terrain.height(px, pz);
 		player.position.set(px, ground, pz);
 		player.rotation.y = yaw;
 		shadowBlob.position.set(px, ground + 0.09, pz);
-		animations.update(dt, dt > 0 ? travel / dt : 0, false, false, null, travel, 1);
+		animations.update(dt, dt > 0 ? travel / dt : 0, holding, false, null, travel, 1);
 		emotes.update(dt, speed > 0.3);
 
-		// Camera: orbit, pulled in when a building stands between it and the player.
-		const head = ground + EYE;
+		shadowBlob.scale.set(1, 1, 1);
+		placeCamera(dt, ground + EYE, camDistance);
+		updateWorld();
+	}
+
+	/** Camera: orbit, pulled in when a building stands between it and the player. */
+	function placeCamera(dt: number, head: number, distance: number) {
 		desired.set(
-			px + Math.sin(camYaw) * Math.cos(camPitch) * camDistance,
-			head + Math.sin(camPitch) * camDistance,
-			pz + Math.cos(camYaw) * Math.cos(camPitch) * camDistance
+			px + Math.sin(camYaw) * Math.cos(camPitch) * distance,
+			head + Math.sin(camPitch) * distance,
+			pz + Math.cos(camYaw) * Math.cos(camPitch) * distance
 		);
 		const f = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
 		if (f < 1) {
-			const k = Math.max(0.18, f - 0.4 / camDistance);
+			const k = Math.max(0.18, f - 0.4 / distance);
 			desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
 		}
 		desired.y = Math.max(desired.y, terrain.height(desired.x, desired.z) + 0.8);
@@ -360,7 +480,11 @@ export async function createCity(
 		camera.position.y = Math.max(camera.position.y, terrain.height(camera.position.x, camera.position.z) + 0.6);
 		cameraTarget.set(px, head, pz);
 		camera.lookAt(cameraTarget);
+	}
 
+	/** Streaming, the cached shadow window and the route line follow the player. */
+	function updateWorld() {
+		routeLine.update(1 / 60);
 		chunks.update(px, pz);
 		// Shadow window snapped to a 12 m grid: re-render only when it moves or things change.
 		const sx = Math.round(px / SHADOW_SNAP) * SHADOW_SNAP;
@@ -377,6 +501,94 @@ export async function createCity(
 			sun.target.updateMatrixWorld();
 			renderer.shadowMap.needsUpdate = true;
 		}
+	}
+
+	/** May a vehicle of this mode move to (x, z)? (Back inside from the server's wider margin.) */
+	function rideAllowed(bit: number, fromX: number, fromZ: number, x: number, z: number): boolean {
+		if (network.allows(bit, x, z)) return true;
+		return !network.allows(bit, fromX, fromZ) && network.allows(bit, x, z, RIDE_ESCAPE_MARGIN);
+	}
+
+	function stepRiding(dt: number) {
+		const kind = riding!.kind;
+		const spec = MODES[kind];
+		const throttleKey = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+		const steerKey = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+		if ((throttleKey || steerKey) && autoRide) endAuto(false); // the rider took over
+		const n = Math.max(1, Math.ceil(dt / RIDE_STEP));
+		const h = dt / n;
+		for (let i = 0; i < n; i++) {
+			let throttle = throttleKey,
+				steer = steerKey,
+				maxSpeed: number | undefined;
+			if (autoRide && follower) {
+				const { along } = follower.project(px, pz);
+				const remaining = follower.length - along;
+				const look = Math.max(4, Math.min(14, Math.abs(ride.speed) * 0.9 + 3));
+				const [tx, tz] = follower.pointAt(along + look);
+				steer = pursuitSteer(kind, ride.speed, yaw, tx - px, tz - pz);
+				const bend = follower.bendAhead(along, 18);
+				const limit = currentLimit();
+				maxSpeed = spec.topSpeed * (bend > 1.0 ? 0.32 : bend > 0.55 ? 0.5 : bend > 0.25 ? 0.75 : 0.92);
+				if (limit) maxSpeed = Math.min(maxSpeed, limit / 3.6);
+				maxSpeed = Math.min(maxSpeed, Math.max(1.6, remaining * 0.55));
+				throttle = remaining < 1.2 ? -1 : 1;
+				if (remaining < 1.2 && Math.abs(ride.speed) < 0.2) {
+					ride.speed = 0;
+					endAuto(true);
+				}
+			}
+			const { dyaw, distance } = rideStep(kind, ride, { throttle, steer, maxSpeed }, h);
+			yaw += dyaw;
+			if (Math.abs(distance) < 1e-5) continue;
+			const moved = moveCircle(collision, px, pz, Math.sin(yaw) * distance, Math.cos(yaw) * distance, spec.radius);
+			let nx = moved.x,
+				nz = moved.z;
+			if (!rideAllowed(spec.bit, px, pz, nx, nz)) {
+				// The kerb of the riding area: slide along it, or stop.
+				if (rideAllowed(spec.bit, px, pz, nx, pz)) nz = pz;
+				else if (rideAllowed(spec.bit, px, pz, px, nz)) nx = px;
+				else {
+					nx = px;
+					nz = pz;
+				}
+				ride.speed *= 0.55;
+			}
+			if (moved.blocked) ride.speed *= 0.6;
+			px = nx;
+			pz = nz;
+		}
+		speed = Math.abs(ride.speed);
+		if (autoRide) {
+			autoStuck = speed < 0.3 ? autoStuck + dt : 0;
+			if (autoStuck > 4) endAuto(false);
+		}
+		const ground = terrain.height(px, pz);
+		if (vehicle) {
+			vehicle.root.position.set(px, ground, pz);
+			vehicle.root.rotation.y = yaw;
+			vehicle.pose(ride.wheel, ride.steer, ride.lean);
+			rider?.update(dt, ride.wheel);
+		} else {
+			player.position.set(px, ground, pz); // the model is still loading
+			player.rotation.y = yaw;
+		}
+		shadowBlob.position.set(px, ground + 0.09, pz);
+		shadowBlob.scale.set(1.15, 2.3, 1);
+		shadowBlob.rotation.z = -yaw;
+		// Chase camera: swings behind the vehicle unless the player orbited it a moment ago.
+		if (performance.now() / 1000 - lastDrag > 1.5 && speed > 0.5) {
+			let behind = yaw + Math.PI - camYaw;
+			behind = Math.atan2(Math.sin(behind), Math.cos(behind));
+			camYaw += behind * (1 - Math.exp(-dt * 2.2));
+		}
+		placeCamera(dt, ground + EYE + 0.35, Math.max(camDistance, 5.5) + speed * 0.12);
+		updateWorld();
+	}
+
+	function currentLimit(): number | null {
+		const road = network.roadAt(px, pz, riding ? MODES[riding.kind].bit : 0);
+		return road?.vmax ?? null;
 	}
 
 	function emitState() {
@@ -404,8 +616,32 @@ export async function createCity(
 			timeMode: lighting.mode,
 			night: lighting.night,
 			ground: terrain.height(px, pz),
-			workers: chunks.workerCount
+			workers: chunks.workerCount,
+			...rideHud()
 		});
+	}
+
+	function rideHud(): Pick<CityState, 'mode' | 'speedKmh' | 'speedLimit' | 'oneWay' | 'wrongWay' | 'nav'> {
+		const mode: TravelMode = riding?.kind ?? 'foot';
+		const bit = MODES[mode].bit;
+		const oneWay = riding ? network.oneWayAt(bit, px, pz, ride.speed < 0 ? yaw + Math.PI : yaw) : null;
+		let nav: CityState['nav'] = null;
+		if (guide) {
+			const p = guide.progress(px, pz);
+			nav = {
+				...p,
+				text: p.arrived ? 'You have arrived' : p.next ? stepText(p.next) : 'Continue to the destination',
+				auto: autoRide || (mode === 'foot' && route.length > 0)
+			};
+		}
+		return {
+			mode,
+			speedKmh: Math.round(speed * 3.6),
+			speedLimit: riding ? currentLimit() : null,
+			oneWay: !!oneWay,
+			wrongWay: !!oneWay?.against && speed > 1,
+			nav
+		};
 	}
 
 	// Frame-cost diagnostics (read by tests/perf/*.mjs via window.__ppwPerf).
@@ -452,6 +688,7 @@ export async function createCity(
 		stateTimer += elapsed;
 		if (elapsed > 1 / 24) slowTime += elapsed;
 		if (stateTimer >= 0.25) {
+			setVehicleNight(lighting.night);
 			fps = Math.round(frames / stateTimer);
 			frames = 0;
 			stateTimer = 0;
@@ -468,18 +705,103 @@ export async function createCity(
 	camera.position.set(px + Math.sin(camYaw) * camDistance, startGround + EYE + 3, pz + Math.cos(camYaw) * camDistance);
 	loop();
 
-	return {
+	const controller: CityController = {
 		projection,
 		scene,
 		camera,
 		terrain,
+		collision,
+		materials,
+		avatar: player,
+		setHolding(h) {
+			holding = h;
+		},
+		walkTo(points, onDone) {
+			if (route.length) endRoute(false);
+			route = points.map(([x, z]) => [x, z]);
+			routeDone = onDone;
+			routeStuck = 0;
+		},
+		get walking() {
+			return route.length > 0;
+		},
 		onFrame(callback) {
 			frameCallbacks.add(callback);
 			return () => frameCallbacks.delete(callback);
 		},
 		localState: () => ({ x: px, z: pz, yaw, speed }),
+		network,
+		get mode() {
+			return riding?.kind ?? 'foot';
+		},
+		get riding() {
+			return riding;
+		},
+		setRiding(next, x, z, newYaw) {
+			const token = ++rideToken;
+			if (route.length) endRoute(false);
+			endAuto(false);
+			rider?.detach(scene);
+			rider = null;
+			vehicle?.dispose();
+			vehicle = null;
+			riding = next;
+			Object.assign(ride, rideState());
+			px = x;
+			pz = z;
+			yaw = newYaw;
+			speed = 0;
+			player.position.set(px, terrain.height(px, pz), pz);
+			player.rotation.set(0, yaw, 0);
+			if (!next) return;
+			createVehicle(next.kind, next.color).then((v) => {
+				if (token !== rideToken || disposed) return v.dispose();
+				vehicle = v;
+				scene.add(v.root);
+				player.rotation.set(0, 0, 0);
+				rider = new Rider(player, animations, v);
+			});
+		},
+		parkingSpot(free) {
+			if (!riding) return null;
+			return network.nearestParkable(MODES[riding.kind].bit, px, pz, PULL_OVER_M - 0.5, free);
+		},
+		setRoute(next, destination) {
+			endAuto(false);
+			if (route.length) endRoute(false);
+			navRoute = next;
+			if (destination || !next) navDestination = destination ?? null;
+			guide = next ? new RouteGuide(next) : null;
+			follower = null;
+			if (!next) return routeLine.set(null);
+			routeLine.set(lanePath(next), navDestination ?? [next.to.x, next.to.z]);
+		},
+		get route() {
+			return navRoute;
+		},
+		followRoute(onDone) {
+			if (!navRoute) return onDone?.(false);
+			const path = lanePath(navRoute);
+			const f = new PathFollower(path);
+			const { along } = f.project(px, pz);
+			if (!riding) {
+				// Walk it with the normal autopilot: from the nearest point on, then the end.
+				const ahead = path.filter((_, i) => f.cum[i] > along + 1);
+				const end: XZ[] = [[navRoute.to.x, navRoute.to.z]];
+				if (navDestination) end.push(navDestination); // off the road: walk the last metres
+				return controller.walkTo([...ahead, ...end], onDone);
+			}
+			follower = f;
+			autoRide = true;
+			autoStuck = 0;
+			autoDone = onDone;
+		},
+		get following() {
+			return autoRide || route.length > 0;
+		},
 		setPosition(x, z, newYaw) {
 			const far = Math.hypot(x - px, z - pz) > 30;
+			if (far && route.length) endRoute(false);
 			px = x;
 			pz = z;
 			if (newYaw !== undefined) {
@@ -487,14 +809,16 @@ export async function createCity(
 				if (far) camYaw = yaw + Math.PI;
 			}
 			speed = 0;
+			ride.speed = 0;
 			if (far) {
+				endAuto(false);
 				const g = terrain.height(px, pz);
 				camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
 				chunks.update(px, pz);
 			}
 		},
 		playEmote(name) {
-			emotes.play(name);
+			if (!riding) emotes.play(name);
 		},
 		setQuality(q) {
 			quality = q;
@@ -526,7 +850,7 @@ export async function createCity(
 			else keys.delete(key);
 		},
 		drawMinimap(ctx, size, mpp) {
-			drawMinimap(ctx, size, mpp, chunks, px, pz, yaw);
+			drawMinimap(ctx, size, mpp, chunks, px, pz, yaw, navRoute?.points ?? null);
 		},
 		dispose() {
 			if (disposed) return;
@@ -538,6 +862,9 @@ export async function createCity(
 			window.removeEventListener('keyup', onKeyUp);
 			window.removeEventListener('blur', onBlur);
 			chunks.dispose();
+			routeLine.dispose();
+			rider?.detach(null);
+			vehicle?.dispose();
 			animations.dispose();
 			avatar.dispose();
 			hills.traverse((n) => (n as THREE.Mesh).geometry?.dispose());
@@ -553,6 +880,7 @@ export async function createCity(
 			renderer.domElement.remove();
 		}
 	};
+	return controller;
 }
 
 const MINI_ROADS: Record<string, [string, number]> = {
@@ -568,7 +896,8 @@ function drawMinimap(
 	chunks: ChunkManager,
 	px: number,
 	pz: number,
-	yaw: number
+	yaw: number,
+	routePoints: XZ[] | null
 ) {
 	const half = size / 2;
 	const tx = (x: number) => half + (x - px) / mpp;
@@ -603,6 +932,18 @@ function drawMinimap(
 			r.pts.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
 			ctx.stroke();
 		}
+	if (routePoints && routePoints.length > 1) {
+		ctx.strokeStyle = '#c4552f';
+		ctx.lineWidth = 3.5;
+		ctx.beginPath();
+		routePoints.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
+		ctx.stroke();
+		const [ex, ez] = routePoints[routePoints.length - 1];
+		ctx.fillStyle = '#c4552f';
+		ctx.beginPath();
+		ctx.arc(tx(ex), tz(ez), 5, 0, Math.PI * 2);
+		ctx.fill();
+	}
 	ctx.save();
 	ctx.translate(half, half);
 	ctx.rotate(Math.PI - yaw);

@@ -5,6 +5,22 @@ export const EMOTES = ['wave', 'sampeah', 'cheer', 'dance'] as const;
 export type EmoteName = (typeof EMOTES)[number];
 export type ChatChannel = 'nearby' | 'world';
 
+/** A vehicle being ridden, as other players see it (kind and colour only). */
+export interface RideCard {
+	id: string;
+	k: 'bicycle' | 'motorbike';
+	c: string;
+}
+
+/** A parked vehicle in your area (`mine` and `name` only for your own). */
+export interface ParkedCard extends RideCard {
+	x: number;
+	z: number;
+	yaw: number;
+	mine?: boolean;
+	name?: string;
+}
+
 export interface PlayerCard {
 	id: number;
 	u: string;
@@ -13,6 +29,8 @@ export interface PlayerCard {
 	x: number;
 	z: number;
 	yaw: number;
+	/** Riding (Phase 5). */
+	v?: RideCard;
 }
 
 /** [id, x, z, yaw, speed] */
@@ -32,15 +50,23 @@ export type ServerMessage =
 	| { t: 'online'; n: number }
 	| { t: 'pong'; c: number; s: number }
 	| { t: 'error'; code: string; message: string }
-	| { t: 'kicked'; why: string };
+	| { t: 'kicked'; why: string }
+	| { t: 'shops' }
+	| { t: 'order'; number: string; status: string }
+	| { t: 'ride'; id: number; v: RideCard | null; x?: number; z?: number; yaw?: number }
+	| { t: 'vspawn'; v: ParkedCard }
+	| { t: 'vdespawn'; id: string };
 
 export type ClientMessage =
 	| { t: 'move'; x: number; z: number; yaw: number; s: number }
 	| { t: 'chat'; ch: ChatChannel; text: string }
 	| { t: 'emote'; e: EmoteName }
 	| { t: 'travel'; spawn: string }
+	| { t: 'travel'; shop: string }
 	| { t: 'invite'; to: string }
 	| { t: 'join'; from: string }
+	| { t: 'mount'; v: string }
+	| { t: 'dismount' }
 	| { t: 'ping'; c: number };
 
 /** Close codes that mean "do not reconnect automatically". */

@@ -28,21 +28,26 @@ from sqlalchemy import select, text, update
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.geography.projection import default_projection
-from app.models import ChatMessage, GeographicRegion, PlayerSession, WorldRoom
+from app.models import ChatMessage, GeographicRegion, PlayerSession, Vehicle, WorldRoom
 from app.multiplayer import chatfilter
 from app.multiplayer.protocol import (
     MAX_MESSAGE_BYTES,
     NEARBY_CHAT_RADIUS_M,
     Chat,
+    Dismount,
     Emote,
     Invite,
     Join,
+    Mount,
     Move,
     Ping,
     Travel,
     client_message,
 )
-from app.multiplayer.validation import MovementValidator
+from app.multiplayer.validation import MovementValidator, Verdict
+from app.transport.area import TravelArea, load_travel_area
+from app.transport.parking import ParkedIndex, ParkedVehicle
+from app.transport.specs import MODES, MOUNT_RANGE_M, PULL_OVER_M, server_speed_limit
 from app.utils.time import utcnow
 
 logger = logging.getLogger("ppw.hub")
@@ -55,6 +60,9 @@ EMOTE_GAP_S = 1.0
 TRAVEL_GAP_S = 2.0
 MOVES_PER_SECOND = 25
 MAX_INVALID = 30
+# A rider who disconnects or fast-travels leaves the vehicle at the nearest legal spot within
+# this distance (else exactly where they were).
+AUTO_PARK_RADIUS_M = 30.0
 
 
 def yaw_for_heading(deg: float) -> float:
@@ -95,9 +103,17 @@ class Player:
     queue: asyncio.Queue[str | None] = field(default_factory=lambda: asyncio.Queue(QUEUE_LIMIT))
     writer: asyncio.Task[None] | None = None
     closing: bool = False
+    # Phase 5: the vehicle being ridden (taken out of the parked index while in use) and the
+    # parked vehicles this player's client knows, with the version it last received.
+    riding: ParkedVehicle | None = None
+    known_vehicles: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def mode(self) -> str:
+        return self.riding.kind if self.riding else "foot"
 
     def card(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "id": self.sid,
             "u": self.username,
             "n": self.display_name,
@@ -106,6 +122,9 @@ class Player:
             "z": round(self.z, 2),
             "yaw": round(self.yaw, 3),
         }
+        if self.riding is not None:
+            out["v"] = self.riding.ride_card()
+        return out
 
     def state(self) -> list[float]:
         return [self.sid, round(self.x, 2), round(self.z, 2), round(self.yaw, 3), round(self.s, 2)]
@@ -120,6 +139,13 @@ class Room:
     capacity: int
     validator: MovementValidator
     spawns: dict[str, tuple[float, float, float]]
+    # Active shops: id -> (door x, door z, heading out to the street). Shared with the
+    # region template and updated in place when shops change.
+    shops: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    # Phase 5, shared with the region template: where vehicles may ride and park, and the
+    # vehicles parked in the region (visible from every room).
+    area: TravelArea | None = None
+    parked: ParkedIndex = field(default_factory=ParkedIndex)
     players: dict[int, Player] = field(default_factory=dict)
     cells: dict[tuple[int, int], set[int]] = field(default_factory=dict)
 
@@ -154,6 +180,7 @@ class Hub:
         self._task: asyncio.Task[None] | None = None
         self._loaded: dict[uuid.UUID, Room] = {}  # region_id → first room template
         self._lock = asyncio.Lock()
+        self._load_lock = asyncio.Lock()
 
     # ── lifecycle ───────────────────────────────────────────────────────────────────────
     async def ensure_started(self) -> None:
@@ -220,10 +247,7 @@ class Hub:
                 )
                 session.add(row)
                 await session.commit()
-            template = self._loaded.get(region.id)
-            if template is None:
-                template = await self._load_world(session, region)
-                self._loaded[region.id] = template
+            template = await self._template(session, region)
         room = Room(
             id=row.id,
             slug=row.slug,
@@ -232,10 +256,33 @@ class Hub:
             capacity=row.capacity,
             validator=template.validator,
             spawns=template.spawns,
+            shops=template.shops,
+            area=template.area,
+            parked=template.parked,
         )
         self.rooms[room.id] = room
         logger.info("Opened world room %s", room.slug)
         return room
+
+    async def _template(self, session: Any, region: GeographicRegion) -> Room:
+        async with self._load_lock:
+            template = self._loaded.get(region.id)
+            if template is None:
+                template = await self._load_world(session, region)
+                self._loaded[region.id] = template
+            return template
+
+    async def region_world(self, region_id: uuid.UUID) -> Room:
+        """A region's shared world data (validator, travel area, parked vehicles), loaded on
+        first use, also when nobody is online (the vehicle API places vehicles with it)."""
+        template = self._loaded.get(region_id)
+        if template is not None:
+            return template
+        async with SessionLocal() as session:
+            region = await session.get(GeographicRegion, region_id)
+            if region is None:
+                raise LookupError("region")
+            return await self._template(session, region)
 
     async def _load_world(self, session: Any, region: GeographicRegion) -> Room:
         """Obstacles (footprints, water) and spawn points of a region, in world metres."""
@@ -278,8 +325,7 @@ class Hub:
             x, z = projection.to_world(sp.lat, sp.lon)
             spawns[sp.slug] = (x, z, yaw_for_heading(sp.heading_deg))
         validator = MovementValidator(polygons, bounds)
-        validator.set_open_zones(await self._shop_zones(session, region.id))
-        return Room(
+        template = Room(
             id=uuid.uuid4(),
             slug="template",
             region_id=region.id,
@@ -287,28 +333,78 @@ class Hub:
             capacity=0,
             validator=validator,
             spawns=spawns,
+            area=await load_travel_area(session, region.id),
         )
+        await self._load_shops(session, template)
+        await self._load_vehicles(session, template)
+        return template
 
     @staticmethod
-    async def _shop_zones(session: Any, region_id: uuid.UUID) -> list[Polygon]:
-        """Floors of the region's active walk-in shops (world metres)."""
+    async def _load_vehicles(session: Any, template: Room) -> None:
+        """Every vehicle of the region is parked when the world loads (nobody is riding yet:
+        a vehicle left `in_use` by a crash stays at its last saved position)."""
+        await session.execute(
+            text("""UPDATE vehicles SET status = 'parked', parked_at = coalesce(parked_at, now())
+                    WHERE region_id = :r AND status = 'in_use'"""),
+            {"r": template.region_id},
+        )
+        await session.commit()
         rows = await session.execute(
             text("""
-            SELECT vp.corners FROM shops s
+            SELECT v.id, v.owner_id, v.kind, v.color, v.name, v.x, v.z, v.yaw, v.odometer_m,
+                   coalesce(p.world_visible, false) AS visible
+            FROM vehicles v LEFT JOIN user_profiles p ON p.user_id = v.owner_id
+            WHERE v.region_id = :r"""),
+            {"r": template.region_id},
+        )
+        for row in rows:
+            template.parked.add(
+                ParkedVehicle(
+                    id=str(row.id),
+                    owner_id=row.owner_id,
+                    kind=row.kind,
+                    color=row.color,
+                    name=row.name,
+                    x=row.x,
+                    z=row.z,
+                    yaw=row.yaw,
+                    owner_visible=row.visible,
+                    odometer_m=row.odometer_m,
+                )
+            )
+
+    @staticmethod
+    async def _load_shops(session: Any, template: Room) -> None:
+        """The region's active walk-in shops: their floors become walkable (validation) and
+        their doors become fast-travel destinations."""
+        rows = (
+            await session.execute(
+                text("""
+            SELECT s.id, vp.corners, vp.door_x, vp.door_z, vp.heading FROM shops s
             JOIN virtual_properties vp ON vp.id = s.property_id
             JOIN merchants m ON m.id = s.merchant_id
             WHERE s.status = 'active' AND m.status = 'approved' AND vp.region_id = :r"""),
-            {"r": region_id},
-        )
-        return [Polygon(row.corners) for row in rows]
+                {"r": template.region_id},
+            )
+        ).all()
+        template.validator.set_open_zones([Polygon(row.corners) for row in rows])
+        template.shops.clear()  # in place: every room of the region shares this dict
+        template.shops.update({str(row.id): (row.door_x, row.door_z, row.heading) for row in rows})
+
+    def catalog_changed(self) -> None:
+        """Products or stock changed somewhere: clients reload the storefront list (each shop
+        carries a catalogue version) and restock the shelves they can see."""
+        message = {"t": "shops"}
+        for player in list(self.by_user.values()):
+            self.send(player, message)
 
     async def shops_changed(self) -> None:
         """A storefront opened, closed, changed or ended: refresh movement validation and tell
         every connected client to reload the storefronts."""
         if self._loaded:
             async with SessionLocal() as session:
-                for region_id, template in self._loaded.items():
-                    template.validator.set_open_zones(await self._shop_zones(session, region_id))
+                for template in self._loaded.values():
+                    await self._load_shops(session, template)
         message = {"t": "shops"}
         for player in list(self.by_user.values()):
             self.send(player, message)
@@ -418,6 +514,8 @@ class Hub:
         return player
 
     async def leave(self, player: Player, reason: str = "left") -> None:
+        if player.riding is not None:
+            await self._auto_park(player, announce=False)
         if self.by_user.get(player.user_id) is player:
             del self.by_user[player.user_id]
         room = player.room
@@ -538,8 +636,26 @@ class Hub:
                 if moved:
                     self.send(viewer, {"t": "state", "ts": now_ms, "p": moved})
                 viewer.known = set(wanted)
+                self._sync_vehicles(viewer, room)
             for p in room.players.values():
                 p.dirty = False
+
+    def _sync_vehicles(self, viewer: Player, room: Room) -> None:
+        """Parked vehicles in the viewer's 3x3 cells: their own, and other visible owners'
+        (never across a block). A changed vehicle (moved, recoloured) is sent again."""
+        wanted = {
+            v.id: v
+            for v in room.parked.around(viewer.cell)
+            if (v.owner_visible or v.owner_id == viewer.user_id)
+            and v.owner_id not in viewer.blocked
+        }
+        for vid in [vid for vid in viewer.known_vehicles if vid not in wanted]:
+            del viewer.known_vehicles[vid]
+            self.send(viewer, {"t": "vdespawn", "id": vid})
+        for vid, v in wanted.items():
+            if viewer.known_vehicles.get(vid) != v.version:
+                viewer.known_vehicles[vid] = v.version
+                self.send(viewer, {"t": "vspawn", "v": v.card(viewer.user_id)})
 
     # ── messages ────────────────────────────────────────────────────────────────────────
     def _error(self, player: Player, code: str, message: str) -> None:
@@ -560,11 +676,15 @@ class Hub:
             case Emote():
                 self._emote(player, msg)
             case Travel():
-                self._travel(player, msg)
+                await self._travel(player, msg)
             case Invite():
                 self._invite(player, msg)
             case Join():
-                self._join(player, msg)
+                await self._join(player, msg)
+            case Mount():
+                await self._mount(player, msg)
+            case Dismount():
+                await self._dismount(player)
             case Ping():
                 self.send(player, {"t": "pong", "c": msg.c, "s": int(time.time() * 1000)})
 
@@ -581,7 +701,19 @@ class Hub:
         if len(player.move_times) >= MOVES_PER_SECOND:
             return
         player.move_times.append(now)
-        verdict = player.room.validator.check(player.x, player.z, msg.x, msg.z, now - player.t_move)
+        mode = player.mode
+        limit = server_speed_limit(mode)
+        room = player.room
+        verdict = room.validator.check(
+            player.x, player.z, msg.x, msg.z, now - player.t_move, limit, on_foot=mode == "foot"
+        )
+        if (
+            verdict.ok
+            and mode != "foot"
+            and room.area is not None
+            and not room.area.allows(MODES[mode].bit, msg.x, msg.z)
+        ):
+            verdict = Verdict(False, "offroad")  # vehicles stay on roads they may use
         if not verdict.ok:
             self.send(
                 player,
@@ -593,7 +725,9 @@ class Hub:
                 },
             )
             return
-        player.x, player.z, player.yaw, player.s = msg.x, msg.z, msg.yaw, min(msg.s, 10.0)
+        if player.riding is not None:
+            player.riding.odometer_m += math.hypot(msg.x - player.x, msg.z - player.z)
+        player.x, player.z, player.yaw, player.s = msg.x, msg.z, msg.yaw, min(msg.s, limit)
         player.t_move = now
         player.dirty = True
         player.room.place(player)
@@ -675,14 +809,28 @@ class Hub:
             if player.sid in other.known:
                 self.send(other, out)
 
-    def _travel(self, player: Player, msg: Travel) -> None:
+    async def _travel(self, player: Player, msg: Travel) -> None:
         now = time.monotonic()
-        spawn = player.room.spawns.get(msg.spawn)
+        if msg.shop is not None:
+            door = player.room.shops.get(str(msg.shop))
+            if door is None:
+                return self._error(player, "UNKNOWN_PLACE", "That shop is not open in this area.")
+            # On the pavement 2.5 m in front of the door, facing the shop.
+            dx, dz, heading = door
+            spawn = (
+                dx + math.sin(heading) * 2.5,
+                dz + math.cos(heading) * 2.5,
+                heading + math.pi,
+            )
+        else:
+            spawn = player.room.spawns.get(msg.spawn or "")
         if spawn is None:
             return self._error(player, "UNKNOWN_PLACE", "That place does not exist.")
         if now - player.last_travel < TRAVEL_GAP_S:
             return self._error(player, "RATE_LIMITED", "Wait a moment before travelling again.")
         player.last_travel = now
+        if player.riding is not None:
+            await self._auto_park(player)  # vehicles do not fast-travel
         x, z = self._arrival_spot(player.room, spawn[0], spawn[1], player.sid, exclude=player)
         self._set_position(player, x, z, spawn[2], why="travel")
 
@@ -699,17 +847,206 @@ class Hub:
             {"t": "notify", "kind": "invite_sent", "u": target.username, "n": target.display_name},
         )
 
-    def _join(self, player: Player, msg: Join) -> None:
+    async def _join(self, player: Player, msg: Join) -> None:
         inviter = next((p for p in self.by_user.values() if p.username == msg.from_.lower()), None)
         expiry = player.invites.pop(inviter.user_id, 0) if inviter else 0
         if inviter is None or expiry < time.monotonic():
             return self._error(player, "INVITE_EXPIRED", "That invitation is no longer valid.")
         if inviter.room is not player.room:
             return self._error(player, "OTHER_ROOM", "Your friend is in another room.")
+        if player.riding is not None:
+            await self._auto_park(player)
         others = [(p.x, p.z) for p in player.room.players.values() if p is not player]
         x, z = player.room.validator.free_spot_near(inviter.x, inviter.z, others=others)
         yaw = math.atan2(inviter.x - x, inviter.z - z)  # face the friend
         self._set_position(player, x, z, yaw, why="join")
+
+    # ── vehicles (Phase 5) ──────────────────────────────────────────────────────────────
+    def parking_spot(
+        self,
+        room: Room,
+        kind: str,
+        x: float,
+        z: float,
+        max_distance: float,
+        exclude: str | None = None,
+    ) -> tuple[float, float] | None:
+        """The nearest legal parking spot for `kind`: on the travel area's kerb, pavement,
+        alleys or car parks, outside buildings and water, clear of other parked vehicles."""
+        spec = MODES[kind]
+        if room.area is None:
+            return None
+
+        def free(cx: float, cz: float) -> bool:
+            if not room.validator.in_bounds(cx, cz):
+                return False
+            if room.validator.inside_obstacle(cx, cz, open_zones=False):
+                return False
+            for other in room.parked.near(cx, cz, 2.0):
+                gap = max(spec.parking_spacing, MODES[other.kind].parking_spacing)
+                if other.id != exclude and math.hypot(other.x - cx, other.z - cz) < gap:
+                    return False
+            return True
+
+        spot = room.area.nearest_parkable(spec.bit, x, z, max_distance, free)
+        if spot is None:
+            return None
+        # Line it up along the kerb on that side of the street, like real parked bikes.
+        kerb = room.area.kerb_line(spec.bit, *spot)
+        if kerb is not None and room.area.parkable(spec.bit, kerb[0], kerb[1]) and free(*kerb[:2]):
+            return kerb[0], kerb[1]
+        return spot
+
+    def parking_heading(self, room: Room, kind: str, x: float, z: float, yaw: float) -> float:
+        """Parked along the street (the direction nearest to how it arrived)."""
+        kerb = room.area.kerb_line(MODES[kind].bit, x, z) if room.area else None
+        if kerb is None:
+            return yaw
+        along = kerb[2]
+        turn = math.atan2(math.sin(yaw - along), math.cos(yaw - along))
+        return along if abs(turn) <= math.pi / 2 else along + math.pi
+
+    def _announce_ride(self, player: Player, announce: bool = True) -> None:
+        out = {
+            "t": "ride",
+            "id": player.sid,
+            "v": player.riding.ride_card() if player.riding else None,
+        }
+        if announce:
+            for other in player.room.players.values():
+                if player.sid in other.known:
+                    self.send(other, out)
+        self.send(
+            player,
+            {**out, "x": round(player.x, 2), "z": round(player.z, 2), "yaw": round(player.yaw, 3)},
+        )
+
+    async def _save_vehicle(self, v: ParkedVehicle, status: str) -> None:
+        values: dict[str, Any] = {
+            "status": status,
+            "x": v.x,
+            "z": v.z,
+            "yaw": v.yaw,
+            "odometer_m": round(v.odometer_m, 1),
+        }
+        values["parked_at" if status == "parked" else "last_used_at"] = utcnow()
+        try:
+            async with SessionLocal() as session:
+                await session.execute(
+                    update(Vehicle).where(Vehicle.id == uuid.UUID(v.id)).values(**values)
+                )
+                await session.commit()
+        except Exception:
+            logger.exception("Could not save vehicle %s", v.id)
+
+    async def _mount(self, player: Player, msg: Mount) -> None:
+        if player.riding is not None:
+            return self._error(player, "ALREADY_RIDING", "Park your vehicle first.")
+        room = player.room
+        v = room.parked.by_id.get(str(msg.v))
+        if v is None or v.owner_id != player.user_id:
+            return self._error(player, "VEHICLE_NOT_FOUND", "That vehicle is not parked here.")
+        if math.hypot(v.x - player.x, v.z - player.z) > MOUNT_RANGE_M:
+            return self._error(player, "TOO_FAR", "Walk up to your vehicle to get on it.")
+        # Synchronous hand-over (no await before this): a second mount finds nothing.
+        room.parked.remove(v.id)
+        player.riding = v
+        player.x, player.z, player.yaw, player.s = v.x, v.z, v.yaw, 0.0
+        player.t_move = time.monotonic()
+        player.dirty = True
+        room.place(player)
+        self._announce_ride(player)
+        await self._save_vehicle(v, "in_use")
+
+    async def _dismount(self, player: Player) -> None:
+        v = player.riding
+        if v is None:
+            return self._error(player, "NOT_RIDING", "You are on foot.")
+        spot = self.parking_spot(player.room, v.kind, player.x, player.z, PULL_OVER_M, v.id)
+        if spot is None:
+            return self._error(
+                player,
+                "PARKING_NOT_ALLOWED",
+                "You can't park in the middle of the road. Pull over to the kerb, "
+                "into a car park or an alley.",
+            )
+        await self._park(player, spot)
+
+    async def _park(self, player: Player, spot: tuple[float, float], announce: bool = True):
+        v = player.riding
+        assert v is not None
+        room = player.room
+        v.x, v.z = spot
+        v.yaw = self.parking_heading(room, v.kind, v.x, v.z, player.yaw)
+        player.riding = None
+        room.parked.add(v)
+        # Step off beside it: right, left, behind, else the nearest open ground.
+        right = (-math.cos(v.yaw), math.sin(v.yaw))
+        back = (-math.sin(v.yaw), -math.cos(v.yaw))
+        candidates = [
+            (v.x + right[0] * 0.95, v.z + right[1] * 0.95),
+            (v.x - right[0] * 0.95, v.z - right[1] * 0.95),
+            (v.x + back[0] * 1.6, v.z + back[1] * 1.6),
+        ]
+        validator = room.validator
+        px, pz = next(
+            (
+                c
+                for c in candidates
+                if validator.in_bounds(*c) and not validator.inside_obstacle(*c)
+            ),
+            None,
+        ) or validator.free_spot_near(v.x, v.z, radius=1.0)
+        player.x, player.z, player.s = px, pz, 0.0
+        player.t_move = time.monotonic()
+        player.dirty = True
+        room.place(player)
+        self._announce_ride(player, announce)
+        await self._save_vehicle(v, "parked")
+
+    async def _auto_park(self, player: Player, announce: bool = True) -> None:
+        v = player.riding
+        if v is None:
+            return
+        spot = self.parking_spot(
+            player.room, v.kind, player.x, player.z, AUTO_PARK_RADIUS_M, v.id
+        ) or (player.x, player.z)
+        await self._park(player, spot, announce)
+        self.send(
+            player,
+            {
+                "t": "notify",
+                "kind": "vehicle_parked",
+                "text": f"You parked your {MODES[v.kind].label.lower()} before travelling.",
+            },
+        )
+
+    def riding_vehicle(self, user_id: uuid.UUID) -> ParkedVehicle | None:
+        player = self.by_user.get(user_id)
+        return player.riding if player else None
+
+    def vehicle_added(self, region_id: uuid.UUID, v: ParkedVehicle) -> None:
+        template = self._loaded.get(region_id)
+        if template is not None:
+            template.parked.add(v)
+
+    def vehicle_removed(self, region_id: uuid.UUID, vid: str) -> None:
+        template = self._loaded.get(region_id)
+        if template is not None:
+            template.parked.remove(vid)
+
+    def vehicle_restyled(self, region_id: uuid.UUID, vid: str, name: str, color: str) -> None:
+        """A rename or new paint: re-sent to whoever sees it (parked or being ridden)."""
+        template = self._loaded.get(region_id)
+        v = template.parked.by_id.get(vid) if template else None
+        if v is not None:
+            v.name, v.color = name, color
+            v.version += 1
+            return
+        for player in self.by_user.values():
+            if player.riding is not None and player.riding.id == vid:
+                player.riding.name, player.riding.color = name, color
+                self._announce_ride(player)
 
     # ── relationships & moderation (called by REST endpoints) ───────────────────────────
     def update_relations(self, user_id: uuid.UUID, relations: dict[str, set[uuid.UUID]]) -> None:
@@ -723,6 +1060,12 @@ class Hub:
         player = self.by_user.get(user_id)
         if player:
             player.visible = visible
+            if player.riding is not None:
+                player.riding.owner_visible = visible
+        # Parked vehicles follow their owner's visibility (hidden players leave no trace).
+        for template in self._loaded.values():
+            for v in template.parked.of_owner(user_id):
+                v.owner_visible = visible
 
     def set_chat_mute(self, user_id: uuid.UUID, until: datetime | None) -> None:
         player = self.by_user.get(user_id)
@@ -742,6 +1085,12 @@ class Hub:
                         update(PlayerSession)
                         .where(PlayerSession.id == p.session_row_id)
                         .values(last_x=p.x, last_z=p.z, last_seen_at=now)
+                    )
+                if p.riding is not None:  # a crash leaves the vehicle near its rider
+                    await session.execute(
+                        update(Vehicle)
+                        .where(Vehicle.id == uuid.UUID(p.riding.id))
+                        .values(x=p.x, z=p.z, yaw=p.yaw, odometer_m=round(p.riding.odometer_m, 1))
                     )
             ended = set(
                 (

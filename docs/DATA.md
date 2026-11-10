@@ -34,6 +34,7 @@ Imported (2026-11-08):
 | `street_features` | 300 | mapped trees (incl. sampled tree rows), lamps, signals, crossings |
 | `places` | 405 | city-wide search index (khans, villages, markets, hospitals…) |
 | `world_chunks` | 90 | 200 m chunks with roads, buildings, areas, landmarks, furniture and signs |
+| `road_nodes` / `road_edges` | 1,109 / 1,485 | routing graph (74 km), 317 one-way edges, 23 signalled nodes (Phase 5) |
 | Phnom Penh boundary | 689 km² | the official relation (published figure ≈ 679 km²) |
 
 ## Accuracy and what is estimated
@@ -82,6 +83,33 @@ Khmer roof and never get shopfronts.
 **Known gaps:** OSM building coverage in Daun Penh is good but not complete. Some footprints
 are approximate or outdated, and many buildings have no height, name or address. POI names
 may be stale. The virtual city is **not** a live or exact replica of Phnom Penh.
+
+## Road graph and access (Phase 5)
+
+Junctions are **real**: two OSM ways meet in the graph only where they share an OSM node. Who
+may use an edge, and in which direction, comes from the highway class and OSM tags (`access`,
+`vehicle`, `motor_vehicle`, `motorcycle`, `bicycle`, `foot`, `oneway`, `oneway:bicycle`,
+`junction`). In the 2026-11-07 snapshot: 141 ways are tagged one-way, 100 service roads are
+`access=private` (not routable for anyone), 10 ways allow motorcycles explicitly. 20 ways carry a
+`maxspeed` (30 or 40 km/h); elsewhere travel times use **estimated** speeds by class (40 km/h on
+trunk to secondary roads, 30 on tertiary and residential, 15 on service roads), and the HUD shows a
+limit only where OSM has one. Turn restrictions, lanes per direction and signal timings are
+**not** modelled (6 s average wait per signal for vehicles is an estimate). Vehicle speeds are
+game values (bicycle 25 km/h, motorbike 45 km/h), not legal limits.
+
+## Virtual shop units (generated)
+
+`app/marketplace/units.py` derives shop units from the same projected building outlines the 3D
+client renders: a 6 m × 8 m rectangle on a wall at least 7 m long that faces a public street
+within 30 m (unnamed `service` ways, i.e. alleys and parking aisles, do not count), entirely
+inside the footprint and clear of other buildings, up to 4 per wall and 6 per building.
+Buildings tagged residential, apartments, house, terrace (and any other kind not in the
+storefront list: retail, commercial, shop, kiosk, restaurant, hotel, office, mixed use and the
+generic `yes`), places of worship, schools, landmark-model buildings and building parts get no
+units. Result for the 2026-11-07 snapshot: **1,680 units**, of which those within 12 m of a
+named OSM business are marked "verification required". Units are **virtual**: whether a real
+shop exists at that exact spot is not known (OSM building outlines often cover a whole row of
+shophouses), and a claim never implies any right to the real property.
 
 ## Coordinate system
 

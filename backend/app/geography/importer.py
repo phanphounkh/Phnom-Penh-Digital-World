@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from geoalchemy2.shape import from_shape
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 from sqlalchemy import delete, select, text
@@ -47,11 +47,18 @@ from app.models import (
     Place,
     PlayerSpawnPoint,
     Road,
+    RoadEdge,
+    RoadNode,
     StreetFeature,
     WorldChunk,
 )
+from app.transport import routing
+from app.transport.network import build_graph, oriented_pieces, road_masks
 
 logger = logging.getLogger("ppw.importer")
+# Bump when the importer derives new data from the same snapshot (so `import_osm.py --if-empty`
+# re-imports an existing database after an upgrade): 5 = Phase 5 road graph + chunk road masks.
+IMPORTER_VERSION = 5
 LICENCE = "ODbL 1.0 — © OpenStreetMap contributors"
 CITY_SLUG = "phnom-penh"
 BATCH = 400
@@ -316,9 +323,13 @@ def build_chunk_payloads(
 
     for road in parsed.roads:
         world = projection.geometry_to_world(road.geom)
+        fwd, bwd = road_masks(road)
         for chunk in chunks.values():
-            clipped = world.intersection(chunk["_cell"])
-            for line in _lines(clipped):
+            # Pieces keep the way's direction, so the per-direction masks stay true.
+            for piece in oriented_pieces(world, chunk["_cell"]):
+                line = _lines(piece)
+                if not line:
+                    continue
                 chunk["roads"].append(
                     {
                         "id": road_ids.get(("way", road.osm_id)),
@@ -330,7 +341,12 @@ def build_chunk_payloads(
                         "oneway": road.oneway,
                         "bridge": road.is_bridge,
                         "layer": road.layer,
-                        "pts": line,
+                        # Travel modes allowed along / against `pts` (Phase 5; bits in
+                        # app/transport/specs.py), and the OSM speed limit if tagged.
+                        "af": fwd,
+                        "ab": bwd,
+                        "vmax": road.max_speed_kmh,
+                        "pts": line[0],
                     }
                 )
 
@@ -388,6 +404,83 @@ def build_chunk_payloads(
         # Most important landmarks first (the client labels the top few).
         chunk["landmarks"].sort(key=lambda lm: -lm["imp"])
     return chunks
+
+
+async def sync_road_graph(
+    session: AsyncSession,
+    region: GeographicRegion,
+    projection: WorldProjection,
+    parsed: osm.ParsedArea,
+    road_ids: dict[tuple[str, int], int],
+    region_world: Polygon,
+) -> dict[str, Any]:
+    """Rebuild the region's routing graph (road_nodes / road_edges) from the parsed ways.
+
+    Derived data like the chunks: deleted and rebuilt on every import. Edges are clipped to the
+    movement bounds (the region minus 3 m), where clipped ends become dead-end nodes."""
+    min_x, min_z, max_x, max_z = region_world.bounds
+    keep = box(min_x + 3, min_z + 3, max_x - 3, max_z - 3)
+    signals = {f.osm_id for f in parsed.street_features if f.kind == "traffic_signals"}
+    nodes, edges = build_graph(parsed.roads, projection, keep, signals)
+    degree: dict[int, int] = {}
+    for e in edges:
+        degree[e.a] = degree.get(e.a, 0) + 1
+        degree[e.b] = degree.get(e.b, 0) + 1
+    await session.execute(delete(RoadEdge).where(RoadEdge.region_id == region.id))
+    await session.execute(delete(RoadNode).where(RoadNode.region_id == region.id))
+    node_rows = []
+    for key, n in nodes.items():
+        lat, lon = projection.to_latlon(n.x, n.z)
+        node_rows.append(
+            {
+                "region_id": region.id,
+                "node_key": key,
+                "x": n.x,
+                "z": n.z,
+                "degree": degree.get(key, 0),
+                "is_signal": n.signal,
+                "location": ewkt(Point(lon, lat)),
+            }
+        )
+    ids: dict[int, int] = {}
+    for start in range(0, len(node_rows), BATCH):
+        result = await session.execute(
+            insert(RoadNode)
+            .values(node_rows[start : start + BATCH])
+            .returning(RoadNode.id, RoadNode.node_key)
+        )
+        ids.update({row.node_key: row.id for row in result})
+    edge_rows = []
+    for e in edges:
+        road_id = road_ids.get(("way", e.osm_way_id))
+        if road_id is None:
+            continue
+        lonlat = projection.geometry_to_lonlat(LineString(e.pts))
+        edge_rows.append(
+            {
+                "region_id": region.id,
+                "road_id": road_id,
+                "from_node_id": ids[e.a],
+                "to_node_id": ids[e.b],
+                "length_m": e.length_m,
+                "highway": e.highway,
+                "width_m": e.width_m,
+                "access_fwd": e.access_fwd,
+                "access_bwd": e.access_bwd,
+                "max_speed_kmh": e.max_speed_kmh,
+                "pts": [list(p) for p in e.pts],
+                "geom": ewkt(lonlat),
+            }
+        )
+    for start in range(0, len(edge_rows), BATCH):
+        await session.execute(insert(RoadEdge).values(edge_rows[start : start + BATCH]))
+    routing.invalidate()
+    return {
+        "road_nodes": len(node_rows),
+        "road_edges": len(edge_rows),
+        "road_graph_km": round(sum(e.length_m for e in edges) / 1000, 2),
+        "oneway_edges": sum(1 for e in edges if e.access_fwd != e.access_bwd),
+    }
 
 
 async def import_neighborhood(
@@ -541,6 +634,7 @@ async def import_neighborhood(
     }
 
     region_world = projection.geometry_to_world(region_ll)
+    stats.update(await sync_road_graph(session, region, projection, parsed, road_ids, region_world))
     obstacles = STRtree(
         [p for b in parsed.buildings for p in _polygons(projection.geometry_to_world(b.geom))]
         + [
@@ -650,7 +744,7 @@ async def import_neighborhood(
             source="OpenStreetMap via Overpass API",
             licence=LICENCE,
             osm_base_timestamp=snapshot.meta.get("osm_base_timestamp"),
-            stats=stats,
+            stats={**stats, "importer_version": IMPORTER_VERSION},
         )
     )
     return stats

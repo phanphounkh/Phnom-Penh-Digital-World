@@ -3,9 +3,15 @@
 	import { admin } from '$lib/api/endpoints';
 	import { ApiError } from '$lib/api/client';
 	import type { PlayerReport, RoleRequest } from '$lib/api/types';
+	import { marketAdmin, money, type AdminMerchant, type AdminProduct, type Claim, type Dispute } from '$lib/api/market';
 
 	let { data } = $props();
-	let section = $state<'roles' | 'reports'>('roles');
+	let section = $state<'roles' | 'reports' | 'merchants' | 'claims' | 'products'>('merchants');
+	let merchantStatus = $state<'pending' | 'approved' | 'rejected' | 'suspended'>('pending');
+	let merchants = $state<AdminMerchant[]>([]);
+	let claims = $state<Claim[]>([]);
+	let disputes = $state<Dispute[]>([]);
+	let products = $state<AdminProduct[]>([]);
 	let status = $state<'pending' | 'active' | 'rejected'>('pending');
 	let reportStatus = $state<'open' | 'resolved' | 'dismissed'>('open');
 	let requests = $state<RoleRequest[]>([]);
@@ -19,7 +25,10 @@
 		error = '';
 		try {
 			if (section === 'roles') requests = await admin.roleRequests(status);
-			else reports = await admin.reports(reportStatus);
+			else if (section === 'reports') reports = await admin.reports(reportStatus);
+			else if (section === 'merchants') merchants = await marketAdmin.merchants(merchantStatus);
+			else if (section === 'claims') [claims, disputes] = await Promise.all([marketAdmin.claims('pending'), marketAdmin.disputes('open')]);
+			else products = await marketAdmin.products('pending_review');
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'Could not load.';
 		}
@@ -48,6 +57,24 @@
 		}
 	}
 
+	async function market(fn: () => Promise<{ message: string }>) {
+		error = '';
+		try {
+			notice = (await fn()).message;
+			await load();
+		} catch (e) {
+			error = e instanceof ApiError ? e.message : 'Action failed.';
+		}
+	}
+
+	const TITLES = {
+		roles: 'Seller & driver requests',
+		reports: 'Player reports',
+		merchants: 'Merchant applications',
+		claims: 'Unit claims & disputes',
+		products: 'Restricted products'
+	} as const;
+
 	const REASON_LABEL: Record<string, string> = {
 		harassment: 'Harassment', hate: 'Hate speech', spam: 'Spam / scams', cheating: 'Cheating',
 		inappropriate_name: 'Inappropriate name/avatar', other: 'Other'
@@ -57,25 +84,93 @@
 <svelte:head><title>Admin · Phnom Penh Digital World</title></svelte:head>
 
 <main class="street-grid min-h-dvh px-5 py-10">
-	<div class="mx-auto max-w-4xl space-y-6">
+	<div class="mx-auto max-w-5xl space-y-6">
 		<header class="flex items-end justify-between gap-4">
 			<div>
 				<p class="eyebrow">Administration</p>
-				<h1 class="display text-3xl font-bold">{section === 'roles' ? 'Seller & driver requests' : 'Player reports'}</h1>
+				<h1 class="display text-3xl font-bold">{TITLES[section]}</h1>
 			</div>
 			<a class="btn-ghost" href="/">Home</a>
 		</header>
 		{#if !data.isAdmin}
 			<p class="alert-error">Administrator access is required.</p>
 		{:else}
-			<div class="grid max-w-sm grid-cols-2 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
-				<button class="rounded-lg py-2 {section === 'roles' ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => { section = 'roles'; load(); }}>Role requests</button>
-				<button class="rounded-lg py-2 {section === 'reports' ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => { section = 'reports'; load(); }}>Reports</button>
+			<div class="flex flex-wrap gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
+				{#each [['merchants', 'Merchants'], ['claims', 'Claims & disputes'], ['products', 'Products'], ['roles', 'Role requests'], ['reports', 'Reports']] as const as [id, label] (id)}
+					<button class="rounded-lg px-3 py-2 {section === id ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => { section = id; notice = ''; load(); }} data-testid={`admin-${id}`}>{label}</button>
+				{/each}
 			</div>
 			{#if error}<p class="alert-error">{error}</p>{/if}
 			{#if notice}<p class="alert border-river-500/30 bg-river-200/40">{notice}</p>{/if}
 
-			{#if section === 'roles'}
+			{#if section === 'merchants'}
+				<div class="flex gap-2">
+					{#each ['pending', 'approved', 'rejected', 'suspended'] as const as s (s)}
+						<button class="chip py-2 {merchantStatus === s ? 'bg-river-900 text-paper' : ''}" onclick={() => { merchantStatus = s; load(); }}>{s}</button>
+					{/each}
+				</div>
+				{#if !merchants.length}<p class="card text-sm text-ink-soft">No {merchantStatus} merchants.</p>{/if}
+				{#each merchants as m (m.id)}
+					<article class="card space-y-2" data-testid="admin-merchant">
+						<p class="font-semibold">{m.business_name}{#if m.business_name_km} <span class="khmer font-normal" lang="km">{m.business_name_km}</span>{/if} <span class="font-normal text-ink-soft">@{m.owner_username}</span> <span class="chip ml-1">{m.category}</span></p>
+						{#if m.description}<p class="text-sm">{m.description}</p>{/if}
+						<p class="text-xs text-ink-soft">{m.contact_phone ?? ''} {m.contact_email ?? ''} · address (private): {m.business_address ?? '—'} · seller role: {m.seller_role ?? 'none'}</p>
+						<p class="text-xs">Documents:
+							{#each m.documents as d (d.id)}<a class="ml-2 underline" href={marketAdmin.documentUrl(d.id)} target="_blank" rel="noopener">{d.original_name}</a>{:else}<span class="text-ink-soft"> none</span>{/each}
+						</p>
+						<div class="flex flex-wrap items-center gap-2">
+							<input class="input max-w-xs py-2 text-sm" placeholder="Reason (optional)" bind:value={reasons[m.id]} />
+							{#if m.status !== 'approved'}<button class="btn-primary py-2" onclick={() => market(() => marketAdmin.decideMerchant(m.id, 'approve', reasons[m.id]))} data-testid="approve-merchant">Approve</button>{/if}
+							{#if m.status === 'pending'}<button class="btn-ghost py-2" onclick={() => market(() => marketAdmin.decideMerchant(m.id, 'reject', reasons[m.id]))}>Reject</button>{/if}
+							{#if m.status === 'approved'}<button class="btn py-2 bg-brick-600 text-white" onclick={() => confirm('Suspend this merchant? Their shops close.') && market(() => marketAdmin.decideMerchant(m.id, 'suspend', reasons[m.id]))}>Suspend</button>{/if}
+						</div>
+					</article>
+				{/each}
+			{:else if section === 'claims'}
+				<h2 class="font-semibold">Claims waiting for review (units at real businesses)</h2>
+				{#if !claims.length}<p class="card text-sm text-ink-soft">No pending claims.</p>{/if}
+				{#each claims as c (c.id)}
+					<article class="card space-y-2">
+						<p class="font-semibold">{c.unit.code} · {c.unit.street_name} <span class="font-normal text-ink-soft">by {c.merchant_name} (@{c.merchant_username})</span></p>
+						<p class="text-sm">Real business here: <strong>{c.unit.real_business_name}</strong></p>
+						{#if c.evidence_note}<p class="text-sm">“{c.evidence_note}”</p>{/if}
+						{#if c.document}<a class="text-xs underline" href={marketAdmin.documentUrl(c.document.id)} target="_blank" rel="noopener">{c.document.original_name}</a>{/if}
+						<div class="flex gap-2">
+							<input class="input max-w-xs py-2 text-sm" placeholder="Reason (optional)" bind:value={reasons[c.id]} />
+							<button class="btn-primary py-2" onclick={() => market(() => marketAdmin.decideClaim(c.id, 'approve', reasons[c.id]))}>Approve</button>
+							<button class="btn-ghost py-2" onclick={() => market(() => marketAdmin.decideClaim(c.id, 'reject', reasons[c.id]))}>Reject</button>
+						</div>
+					</article>
+				{/each}
+				<h2 class="font-semibold">Open disputes</h2>
+				{#if !disputes.length}<p class="card text-sm text-ink-soft">No open disputes.</p>{/if}
+				{#each disputes as d (d.id)}
+					<article class="card space-y-2">
+						<p class="font-semibold">{d.unit_code}{d.real_business_name ? ` · ${d.real_business_name}` : ''} <span class="font-normal text-ink-soft">held by {d.claimed_by ?? '—'}, disputed by @{d.disputer}</span></p>
+						<p class="text-sm">“{d.reason}”</p>
+						{#if d.contact}<p class="text-xs text-ink-soft">Contact: {d.contact}</p>{/if}
+						<div class="flex gap-2">
+							<input class="input max-w-xs py-2 text-sm" placeholder="Note" bind:value={reasons[d.id]} />
+							<button class="btn-primary py-2" onclick={() => market(() => marketAdmin.resolveDispute(d.id, true, reasons[d.id]))}>Uphold (revoke claim)</button>
+							<button class="btn-ghost py-2" onclick={() => market(() => marketAdmin.resolveDispute(d.id, false, reasons[d.id]))}>Reject</button>
+						</div>
+					</article>
+				{/each}
+			{:else if section === 'products'}
+				{#if !products.length}<p class="card text-sm text-ink-soft">No products waiting for review.</p>{/if}
+				{#each products as p (p.id)}
+					<article class="card flex flex-wrap items-center gap-3">
+						{#if p.image_url}<img src={p.image_url} alt="" class="h-14 w-14 rounded-lg object-cover" />{/if}
+						<div class="flex-1">
+							<p class="font-semibold">{p.name} <span class="font-normal text-ink-soft">· {p.merchant_name} · {p.category_name} · {money(p.price_minor)}</span></p>
+							{#if p.description}<p class="text-sm">{p.description}</p>{/if}
+						</div>
+						<input class="input max-w-48 py-2 text-sm" placeholder="Note" bind:value={reasons[p.id]} />
+						<button class="btn-primary py-2" onclick={() => market(() => marketAdmin.reviewProduct(p.id, 'approve', reasons[p.id]))}>Approve</button>
+						<button class="btn-ghost py-2" onclick={() => market(() => marketAdmin.reviewProduct(p.id, 'reject', reasons[p.id]))}>Reject</button>
+					</article>
+				{/each}
+			{:else if section === 'roles'}
 				<div class="flex gap-2">
 					{#each ['pending', 'active', 'rejected'] as const as s (s)}
 						<button class="chip py-2 {status === s ? 'bg-river-900 text-paper' : ''}" onclick={() => { status = s; load(); }}>{s}</button>

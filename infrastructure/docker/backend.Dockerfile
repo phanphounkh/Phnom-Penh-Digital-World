@@ -11,7 +11,7 @@ COPY backend/ ./
 # The committed OSM snapshots, imported on first start.
 COPY tools/gis/data/osm /app/tools/gis/data/osm
 
-RUN useradd --system --uid 10001 ppw && chown -R ppw /app
+RUN useradd --system --uid 10001 ppw && mkdir -p /app/var/media && chown -R ppw /app
 USER ppw
 ENV PATH="/app/backend/.venv/bin:$PATH" OSM_DATA_DIR=/app/tools/gis/data/osm
 EXPOSE 8000

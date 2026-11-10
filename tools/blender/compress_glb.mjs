@@ -7,7 +7,7 @@ import { join } from 'node:path';
 
 const root = new URL('../../frontend/static/models/', import.meta.url).pathname;
 const targets = [
-	...['city', 'landmarks'].flatMap((dir) =>
+	...['city', 'landmarks', 'shop', 'vehicles'].flatMap((dir) =>
 		readdirSync(join(root, dir)).filter((f) => f.endsWith('.glb')).map((f) => join(root, dir, f))
 	),
 	join(root, 'characters', 'avatar.glb')

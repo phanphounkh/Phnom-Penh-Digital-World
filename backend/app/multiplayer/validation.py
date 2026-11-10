@@ -14,6 +14,7 @@ from shapely.geometry import Point, Polygon
 from shapely.strtree import STRtree
 
 # Running speed is 6.5 m/s on the client; allow headroom for timing jitter and latency.
+# Vehicles have their own limits (app/transport/specs.py: server_speed_limit).
 MAX_SPEED_MPS = 6.5 * 1.35
 SLACK_M = 2.0
 # Footprints are shrunk so a player brushing a wall (client collision radius 0.35 m) is fine.
@@ -40,26 +41,39 @@ class MovementValidator:
         self.open_zones = [z for z in zones if z.is_valid and not z.is_empty]
         self.zone_tree = STRtree(self.open_zones) if self.open_zones else None
 
-    def inside_obstacle(self, x: float, z: float) -> bool:
+    def inside_obstacle(self, x: float, z: float, open_zones: bool = True) -> bool:
         if self.tree is None:
             return False
         point = Point(x, z)
         if not len(self.tree.query(point, predicate="within")):
             return False
-        # Inside a footprint: allowed only on the floor of an open shop unit.
-        return self.zone_tree is None or not len(self.zone_tree.query(point, predicate="within"))
+        # Inside a footprint: allowed only on foot, on the floor of an open shop unit.
+        if not open_zones or self.zone_tree is None:
+            return True
+        return not len(self.zone_tree.query(point, predicate="within"))
 
     def in_bounds(self, x: float, z: float) -> bool:
         min_x, min_z, max_x, max_z = self.bounds
         return min_x <= x <= max_x and min_z <= z <= max_z
 
-    def check(self, prev_x: float, prev_z: float, x: float, z: float, dt: float) -> Verdict:
+    def check(
+        self,
+        prev_x: float,
+        prev_z: float,
+        x: float,
+        z: float,
+        dt: float,
+        max_speed: float = MAX_SPEED_MPS,
+        on_foot: bool = True,
+    ) -> Verdict:
+        """`max_speed` depends on the travel mode (app/transport/specs.py); vehicles never
+        enter shop floors (the hub also keeps them on roads they may use)."""
         if not self.in_bounds(x, z):
             return Verdict(False, "bounds")
         distance = math.hypot(x - prev_x, z - prev_z)
-        if distance > MAX_SPEED_MPS * max(dt, 0.0) + SLACK_M:
+        if distance > max_speed * max(dt, 0.0) + SLACK_M:
             return Verdict(False, "speed")
-        if self.inside_obstacle(x, z):
+        if self.inside_obstacle(x, z, open_zones=on_foot):
             return Verdict(False, "blocked")
         return Verdict(True)
 

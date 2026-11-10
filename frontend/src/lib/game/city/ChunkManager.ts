@@ -46,6 +46,8 @@ export class ChunkManager {
 	detailRadius = 240;
 	/** Set whenever chunks are added/removed or detail visibility changes (shadow cache). */
 	changed = false;
+	/** Bumped whenever the set of loaded chunks changes (road network, vehicles). */
+	version = 0;
 
 	constructor(
 		private scene: THREE.Scene,
@@ -188,6 +190,7 @@ export class ChunkManager {
 		this.loaded.set(key, { payload, group });
 		this.assembleMs += performance.now() - started;
 		this.changed = true;
+		this.version++;
 	}
 
 	private unload(key: string): void {
@@ -197,6 +200,7 @@ export class ChunkManager {
 		this.collision.removeOwner(key);
 		this.loaded.delete(key);
 		this.changed = true;
+		this.version++;
 	}
 
 	/** Nearest named road within `maxDistance` metres of the road edge. */

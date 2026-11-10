@@ -193,7 +193,7 @@ async def decide(
     reason: str | None,
     ip: str,
 ) -> Merchant:
-    merchant = await session.get(Merchant, merchant_id, with_for_update=True)
+    merchant = await session.get(Merchant, merchant_id, with_for_update={"of": Merchant})
     if merchant is None:
         raise not_found("Merchant")
     allowed = {

@@ -1,0 +1,32 @@
+{
+  "bits": {
+    "foot": 1,
+    "bicycle": 2,
+    "motorbike": 4,
+    "car": 8
+  },
+  "modes": {
+    "foot": {
+      "top_speed": 6.5,
+      "cruise_speed": 2.6,
+      "radius": 0.35,
+      "parking_spacing": 0.0
+    },
+    "bicycle": {
+      "top_speed": 7.0,
+      "cruise_speed": 5.5,
+      "radius": 0.42,
+      "parking_spacing": 1.0
+    },
+    "motorbike": {
+      "top_speed": 12.5,
+      "cruise_speed": 10.0,
+      "radius": 0.5,
+      "parking_spacing": 1.3
+    }
+  },
+  "mount_range_m": 3.0,
+  "ride_margin_client_m": 2.0,
+  "kerb_band_m": 2.2,
+  "pull_over_m": 6.0
+}

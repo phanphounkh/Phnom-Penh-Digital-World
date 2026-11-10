@@ -27,6 +27,14 @@ from app.schemas.market import (
 from app.services import audit
 
 MAX_PRODUCTS = 200
+
+
+def _catalog_changed() -> None:
+    from app.multiplayer.hub import hub
+
+    hub.catalog_changed()
+
+
 PURCHASABLE = "active"
 
 
@@ -155,16 +163,20 @@ async def shop_detail(session: AsyncSession, shop_id: uuid.UUID) -> ShopDetailOu
 async def my_shops(session: AsyncSession, user: User) -> list[ShopOut]:
     merchant = await require_merchant(session, user)
     shops = (
-        await session.scalars(
-            select(Shop).where(Shop.merchant_id == merchant.id, Shop.status == "active")
+        (
+            await session.scalars(
+                select(Shop).where(Shop.merchant_id == merchant.id, Shop.status == "active")
+            )
         )
-    ).unique().all()
+        .unique()
+        .all()
+    )
     return [await shop_out(session, s) for s in shops]
 
 
 async def update_shop(session: AsyncSession, user: User, shop_id: uuid.UUID, data: ShopIn) -> Shop:
     merchant = await require_merchant(session, user)
-    shop = await session.get(Shop, shop_id, with_for_update=True)
+    shop = await session.get(Shop, shop_id, with_for_update={"of": Shop})
     if shop is None or shop.merchant_id != merchant.id or shop.status != "active":
         raise not_found("Shop")
     if merchant.status != "approved" and data.is_open:
@@ -204,7 +216,7 @@ async def _category(session: AsyncSession, slug: str) -> ProductCategory:
 
 async def _own_product(session: AsyncSession, user: User, product_id: uuid.UUID) -> Product:
     merchant = await require_merchant(session, user)
-    product = await session.get(Product, product_id, with_for_update=True)
+    product = await session.get(Product, product_id, with_for_update={"of": Product})
     if product is None or product.merchant_id != merchant.id or product.status == "archived":
         raise not_found("Product")
     if merchant.status == "suspended":
@@ -265,6 +277,7 @@ async def create_product(session: AsyncSession, user: User, data: ProductIn, ip:
         category=category.slug,
     )
     await session.commit()
+    _catalog_changed()
     return await reload(session, product.id)
 
 
@@ -282,7 +295,7 @@ async def update_product(
     product = await _own_product(session, user, product_id)
     changes = data.model_dump(exclude_unset=True)
     needs_review = False
-    if "category" in changes and changes["category"]:
+    if changes.get("category"):
         category = await _category(session, changes.pop("category"))
         if category.id != product.category_id:
             product.category_id = category.id
@@ -311,17 +324,21 @@ async def update_product(
             new=product.price_minor,
         )
     await session.commit()
+    _catalog_changed()
     return await reload(session, product.id)
 
 
-async def set_stock(session: AsyncSession, user: User, product_id: uuid.UUID, on_hand: int) -> Product:
+async def set_stock(
+    session: AsyncSession, user: User, product_id: uuid.UUID, on_hand: int
+) -> Product:
     product = await _own_product(session, user, product_id)
-    inventory = await session.get(Inventory, product.id, with_for_update=True)
+    inventory = await session.get(Inventory, product.id, with_for_update={"of": Inventory})
     if inventory is None:
         session.add(Inventory(product_id=product.id, on_hand=on_hand))
     else:
         inventory.on_hand = on_hand
     await session.commit()
+    _catalog_changed()
     return await reload(session, product.id)
 
 
@@ -332,19 +349,28 @@ async def set_image(
     name = await media.save_product_image(upload)
     old, product.image_name = product.image_name, name
     await session.commit()
+    _catalog_changed()
     media.delete_product_image(old)
     return await reload(session, product.id)
 
 
-async def archive_product(session: AsyncSession, user: User, product_id: uuid.UUID, ip: str) -> None:
+async def archive_product(
+    session: AsyncSession, user: User, product_id: uuid.UUID, ip: str
+) -> None:
     """Products are archived, not deleted, so past orders keep their history."""
     product = await _own_product(session, user, product_id)
     product.status = "archived"
     await session.execute(delete(CartItem).where(CartItem.product_id == product.id))
     audit.record(
-        session, "product.archived", actor=user.id, target_type="product", target_id=product.id, ip=ip
+        session,
+        "product.archived",
+        actor=user.id,
+        target_type="product",
+        target_id=product.id,
+        ip=ip,
     )
     await session.commit()
+    _catalog_changed()
 
 
 # ── administration (restricted categories) ───────────────────────────────────────────
@@ -352,23 +378,30 @@ async def archive_product(session: AsyncSession, user: User, product_id: uuid.UU
 
 async def admin_products(session: AsyncSession, status_filter: str) -> list[AdminProductOut]:
     rows = (
-        await session.execute(
-            select(Product, Merchant.business_name)
-            .join(Merchant, Merchant.id == Product.merchant_id)
-            .where(Product.status == status_filter)
-            .order_by(Product.updated_at)
-            .limit(100)
+        (
+            await session.execute(
+                select(Product, Merchant.business_name)
+                .join(Merchant, Merchant.id == Product.merchant_id)
+                .where(Product.status == status_filter)
+                .order_by(Product.updated_at)
+                .limit(100)
+            )
         )
-    ).unique().all()
-    return [
-        AdminProductOut(**product_out(p).model_dump(), merchant_name=name) for p, name in rows
-    ]
+        .unique()
+        .all()
+    )
+    return [AdminProductOut(**product_out(p).model_dump(), merchant_name=name) for p, name in rows]
 
 
 async def admin_review_product(
-    session: AsyncSession, admin: User, product_id: uuid.UUID, approve: bool, note: str | None, ip: str
+    session: AsyncSession,
+    admin: User,
+    product_id: uuid.UUID,
+    approve: bool,
+    note: str | None,
+    ip: str,
 ) -> Product:
-    product = await session.get(Product, product_id, with_for_update=True)
+    product = await session.get(Product, product_id, with_for_update={"of": Product})
     if product is None:
         raise not_found("Product")
     if product.status != "pending_review":
@@ -385,4 +418,5 @@ async def admin_review_product(
         note=note,
     )
     await session.commit()
+    _catalog_changed()
     return await reload(session, product.id)

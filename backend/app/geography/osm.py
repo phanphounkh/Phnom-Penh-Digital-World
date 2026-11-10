@@ -148,6 +148,12 @@ class RoadFeature(Named):
     layer: int
     is_bridge: bool
     geom: LineString
+    # Phase 5 (transport): OSM node ids aligned with `geom`'s coordinates (shared ids are
+    # junctions), the access-related tags (access, motor_vehicle, bicycle, oneway…) and the
+    # signed speed limit. Defaults keep hand-built test roads valid.
+    node_ids: list[int] = field(default_factory=list)
+    access: dict[str, str] = field(default_factory=dict)
+    max_speed_kmh: int | None = None
 
 
 @dataclass
@@ -246,6 +252,56 @@ def way_line(element: dict[str, Any]) -> LineString | None:
     return LineString(max(runs, key=len)) if runs else None
 
 
+def way_line_nodes(element: dict[str, Any]) -> tuple[LineString, list[int]] | None:
+    """Like `way_line`, plus the OSM node ids of the kept run (empty if the way has none)."""
+    geometry = element.get("geometry") or []
+    nodes = element.get("nodes") or []
+    aligned = len(nodes) == len(geometry)
+    best: tuple[list[tuple[float, float]], list[int]] = ([], [])
+    run: tuple[list[tuple[float, float]], list[int]] = ([], [])
+    for i, p in enumerate(geometry):
+        if p:
+            run[0].append((p["lon"], p["lat"]))
+            if aligned:
+                run[1].append(int(nodes[i]))
+        else:
+            if len(run[0]) > len(best[0]):
+                best = run
+            run = ([], [])
+    if len(run[0]) > len(best[0]):
+        best = run
+    if len(best[0]) < 2:
+        return None
+    return LineString(best[0]), best[1]
+
+
+# Tags that decide who may use a road and in which direction (app/transport/network.py).
+ACCESS_TAGS = (
+    "access",
+    "vehicle",
+    "motor_vehicle",
+    "motorcycle",
+    "motorcar",
+    "bicycle",
+    "foot",
+    "oneway",
+    "oneway:bicycle",
+    "junction",
+    "service",
+)
+
+
+def parse_speed_kmh(value: str | None) -> int | None:
+    """OSM `maxspeed` in km/h ("40", "40 km/h", "25 mph"); None for unknown or implicit."""
+    if not value:
+        return None
+    match = re.match(r"^\s*(\d+(?:\.\d+)?)\s*(km/h|kmh|kph|mph)?\s*$", value, re.IGNORECASE)
+    if not match:
+        return None
+    speed = float(match.group(1)) * (1.609344 if (match.group(2) or "").lower() == "mph" else 1)
+    return round(speed) if 5 <= speed <= 150 else None
+
+
 def way_polygon(element: dict[str, Any]) -> Polygon | None:
     geometry = element.get("geometry") or []
     if not is_complete(geometry):
@@ -319,9 +375,10 @@ def road_from(element: dict[str, Any]) -> RoadFeature | None:
     highway = tags.get("highway")
     if element["type"] != "way" or highway not in ROAD_CLASSES or tags.get("area") == "yes":
         return None
-    line = way_line(element)
-    if line is None or line.length == 0:
+    kept = way_line_nodes(element)
+    if kept is None or kept[0].length == 0:
         return None
+    line, node_ids = kept
     lanes = parse_int(tags.get("lanes"))
     width = parse_metres(tags.get("width"))
     if width and 1 <= width <= 60:
@@ -345,6 +402,9 @@ def road_from(element: dict[str, Any]) -> RoadFeature | None:
         layer=parse_int(tags.get("layer")) or 0,
         is_bridge=tags.get("bridge") not in (None, "no"),
         geom=line,
+        node_ids=node_ids,
+        access={k: tags[k] for k in ACCESS_TAGS if k in tags},
+        max_speed_kmh=parse_speed_kmh(tags.get("maxspeed")),
     )
 
 

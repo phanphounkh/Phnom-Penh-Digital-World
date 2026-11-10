@@ -3,9 +3,11 @@
  * remote avatars, and exposes reactive state (presence, chat, toasts, invites) to the UI.
  */
 import type { CityController } from '$lib/game/city/CityEngine';
+import { MODES } from '$lib/game/vehicles/specs';
+import { ParkedVehicles } from './ParkedVehicles';
 import { RemotePlayers, type RemoteSummary } from './RemotePlayers';
 import { WorldSocket, type SocketStatus } from './WorldSocket';
-import type { ChatChannel, EmoteName, ServerMessage } from './protocol';
+import type { ChatChannel, EmoteName, ParkedCard, ServerMessage } from './protocol';
 
 export interface ChatLine {
 	key: number;
@@ -39,11 +41,22 @@ export class WorldSession {
 	rtt = $state(0);
 	/** Bumped when friends/messages may have changed (the UI refetches). */
 	socialVersion = $state(0);
+	/** Bumped when storefronts changed (a shop opened, closed or restocked). */
+	shopsVersion = $state(0);
+	/** Bumped when one of my orders (as buyer or merchant) changed. */
+	ordersVersion = $state(0);
+	/** Phase 5: bumped when my vehicles changed (mounted, parked, moved). */
+	vehiclesVersion = $state(0);
+	/** My parked vehicle within reach (F to ride), refreshed with the nearby list. */
+	reachable = $state<ParkedCard | null>(null);
+	/** Waiting for the server to answer a mount or dismount. */
+	pendingRide = $state(false);
 	/** Movement the server rejected (diagnostics). */
 	corrections = 0;
 	lastCorrection = '';
 
 	readonly remotes: RemotePlayers;
+	readonly parked: ParkedVehicles;
 	private socket: WorldSocket;
 	private unsubscribe: () => void = () => {};
 	private seq = 0;
@@ -52,13 +65,17 @@ export class WorldSession {
 
 	constructor(private city: CityController, url?: string) {
 		this.remotes = new RemotePlayers(city.scene, city.terrain);
+		this.parked = new ParkedVehicles(city.scene, city.terrain, city.collision);
 		this.socket = new WorldSocket({
 			url,
 			onMessage: (m) => this.receive(m),
 			onStatus: (status, detail) => {
 				this.status = status;
 				this.detail = detail ?? '';
-				if (status !== 'open') this.remotes.clear();
+				if (status !== 'open') {
+					this.remotes.clear();
+					this.parked.clearAll();
+				}
 			}
 		});
 	}
@@ -72,6 +89,7 @@ export class WorldSession {
 		this.unsubscribe();
 		this.socket.close();
 		this.remotes.clear();
+		this.parked.dispose();
 	}
 
 	// ── outgoing ──────────────────────────────────────────────────────────────────────
@@ -95,6 +113,8 @@ export class WorldSession {
 			this.listTimer = now;
 			this.nearby = this.remotes.list(st.x, st.z);
 			this.rtt = this.socket.rtt;
+			const reach = this.city.riding ? null : this.parked.mineWithin(st.x, st.z);
+			if (reach?.id !== this.reachable?.id) this.reachable = reach;
 		}
 	}
 
@@ -110,6 +130,35 @@ export class WorldSession {
 
 	travel(spawn: string): boolean {
 		return this.socket.send({ t: 'travel', spawn });
+	}
+
+	/** Fast travel to the pavement in front of a shop (the server places you). */
+	travelToShop(shopId: string): boolean {
+		return this.socket.send({ t: 'travel', shop: shopId });
+	}
+
+	/** Get on my vehicle (the server checks ownership and distance). */
+	mount(vehicleId: string): boolean {
+		if (this.pendingRide) return false;
+		const sent = this.socket.send({ t: 'mount', v: vehicleId });
+		this.pendingRide = sent;
+		return sent;
+	}
+
+	/** Park here (the server pulls over to the nearest legal spot within a few metres). */
+	dismount(): boolean {
+		if (this.pendingRide) return false;
+		const sent = this.socket.send({ t: 'dismount' });
+		this.pendingRide = sent;
+		return sent;
+	}
+
+	/** Where parking would put the vehicle on the client's map (null: pull over first). */
+	parkingSpot() {
+		const riding = this.city.riding;
+		if (!riding) return null;
+		const gap = MODES[riding.kind].parkingSpacing;
+		return this.city.parkingSpot((x, z) => this.parked.clear(x, z, gap));
 	}
 
 	invite(username: string): void {
@@ -178,7 +227,51 @@ export class WorldSession {
 				this.online = m.n;
 				break;
 			case 'error':
+				if (['TOO_FAR', 'VEHICLE_NOT_FOUND', 'ALREADY_RIDING', 'NOT_RIDING', 'PARKING_NOT_ALLOWED'].includes(m.code)) {
+					this.pendingRide = false;
+					this.toast(m.message, 'warning');
+					break;
+				}
 				this.pushChat({ channel: 'system', text: m.message, ts: Date.now() });
+				break;
+			case 'shops':
+				this.shopsVersion++;
+				break;
+			case 'order': {
+				const what: Record<string, string> = {
+					paid: 'New order',
+					merchant_accepted: 'accepted by the shop',
+					preparing: 'being prepared',
+					ready_for_pickup: 'ready for pickup',
+					completed: 'completed',
+					refunded: 'cancelled and refunded (demo)'
+				};
+				this.toast(
+					m.status === 'paid' ? `New order ${m.number} (demo payment)` : `Order ${m.number} is ${what[m.status] ?? m.status}.`,
+					'info'
+				);
+				this.ordersVersion++;
+				break;
+			}
+			case 'ride':
+				if (m.id === this.me?.id) {
+					this.pendingRide = false;
+					this.city.setRiding(
+						m.v ? { id: m.v.id, kind: m.v.k, color: m.v.c } : null,
+						m.x ?? this.city.localState().x,
+						m.z ?? this.city.localState().z,
+						m.yaw ?? this.city.localState().yaw
+					);
+					this.lastSent.at = 0;
+					this.vehiclesVersion++;
+				} else this.remotes.ride(m.id, m.v);
+				break;
+			case 'vspawn':
+				this.parked.spawn(m.v);
+				if (m.v.mine) this.vehiclesVersion++;
+				break;
+			case 'vdespawn':
+				this.parked.despawn(m.id);
 				break;
 			case 'kicked':
 				this.detail = {
@@ -214,12 +307,21 @@ export class WorldSession {
 			case 'moderation':
 				this.toast(m.text ?? 'A moderator contacted you.', 'warning');
 				break;
+			case 'vehicle_parked':
+				this.toast(m.text ?? 'Your vehicle is parked.', 'info');
+				this.vehiclesVersion++;
+				return;
 		}
 		this.socialVersion++;
 	}
 
 	private pushChat(line: Omit<ChatLine, 'key'>) {
 		this.chat = [...this.chat.slice(-(MAX_CHAT - 1)), { ...line, key: ++this.seq }];
+	}
+
+	/** Show a toast from the page (shopping feedback uses the same stack). */
+	say(text: string, kind: Toast['kind'] = 'info') {
+		this.toast(text, kind);
 	}
 
 	private toast(text: string, kind: Toast['kind'], from?: string) {

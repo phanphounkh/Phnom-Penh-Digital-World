@@ -50,6 +50,7 @@ from app.models.social import (
     UserMute,
     WorldRoom,
 )
+from app.models.transport import RoadEdge, RoadNode, Vehicle
 
 __all__ = [
     "REPORT_REASONS",
@@ -86,6 +87,8 @@ __all__ = [
     "PropertyTransfer",
     "Refund",
     "Road",
+    "RoadEdge",
+    "RoadNode",
     "RoleName",
     "RoleStatus",
     "Shop",
@@ -96,6 +99,7 @@ __all__ = [
     "UserMute",
     "UserProfile",
     "UserRole",
+    "Vehicle",
     "VirtualProperty",
     "WorldChunk",
     "WorldRoom",

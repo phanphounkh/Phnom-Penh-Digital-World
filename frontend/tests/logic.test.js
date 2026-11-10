@@ -47,9 +47,10 @@ test("every shipped GLB is a valid glTF 2 binary with meshes and embedded buffer
       count++;
     }
   }
-  // 29 CampusEats assets + Phnom Penh Digital World: avatar, 6 street props, 2 landmarks
-  // (the new ones are Meshopt-compressed; still valid, self-contained GLB 2.0).
-  assert.equal(count, 38);
+  // 29 CampusEats assets + Phnom Penh Digital World: avatar, 6 street props, 2 landmarks,
+  // 11 shop fittings and products, 2 vehicles (Meshopt-compressed; still valid, self-contained
+  // GLB 2.0).
+  assert.equal(count, 51);
 });
 
 test("inventory IDs also work on mobile LAN pages without randomUUID", () => {

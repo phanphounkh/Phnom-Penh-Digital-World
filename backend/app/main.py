@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.errors import error_body, register_error_handlers
 from app.core.security import tokens_match
+from app.marketplace import sweeper
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("ppw")
@@ -26,7 +27,8 @@ CSRF_EXEMPT_PATHS = {"/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/aut
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if settings.expose_dev_verification_codes:
         logger.warning("DEV MODE: verification codes are returned to clients. Never in production.")
-    yield
+    async with sweeper.running():
+        yield
     await engine.dispose()
 
 

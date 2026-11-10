@@ -122,7 +122,13 @@ def upgrade() -> None:
     op.bulk_insert(
         categories,
         [
-            dict(zip(("id", "slug", "name", "name_km", "policy", "policy_note", "min_age"), c, strict=True))
+            dict(
+                zip(
+                    ("id", "slug", "name", "name_km", "policy", "policy_note", "min_age"),
+                    c,
+                    strict=True,
+                )
+            )
             | {"sort_order": c[0]}
             for c in CATEGORIES
         ],

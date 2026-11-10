@@ -224,6 +224,11 @@ export interface ChunkRoad {
 	oneway: boolean;
 	bridge: boolean;
 	layer: number;
+	/** Phase 5: travel modes allowed along / against `pts` (bits: foot 1, bicycle 2, motorbike 4, car 8). */
+	af?: number;
+	ab?: number;
+	/** OSM speed limit (km/h) when tagged. */
+	vmax?: number | null;
 	pts: XZ[];
 }
 

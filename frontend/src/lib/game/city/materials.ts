@@ -9,6 +9,10 @@
  */
 import * as THREE from 'three';
 
+/** Walk-in shop doorways drawn at once (the nearest ones) and the opening height (m). */
+export const MAX_DOORS = 16;
+export const DOOR_HEIGHT = 2.9;
+
 const BAY = 128;
 
 function facadeCanvas(mask: boolean): HTMLCanvasElement {
@@ -116,27 +120,68 @@ export class CityMaterials {
 		this.installFacadeShader();
 	}
 
+	/**
+	 * Walk-in shop doorways (Phase 4): wall fragments inside an opening are discarded, so the
+	 * street frontage of a claimed unit opens into its interior without rebuilding the chunk.
+	 * A: (centre x, centre z, along-wall unit x, along-wall unit z); B: (base y, half width).
+	 */
+	readonly doorA = { value: Array.from({ length: MAX_DOORS }, () => new THREE.Vector4()) };
+	readonly doorB = { value: Array.from({ length: MAX_DOORS }, () => new THREE.Vector2()) };
+	readonly doorCount = { value: 0 };
+
+	setDoors(doors: { x: number; z: number; ux: number; uz: number; y: number; halfWidth: number }[]) {
+		const n = Math.min(MAX_DOORS, doors.length);
+		for (let i = 0; i < n; i++) {
+			const d = doors[i];
+			this.doorA.value[i].set(d.x, d.z, d.ux, d.uz);
+			this.doorB.value[i].set(d.y, d.halfWidth);
+		}
+		this.doorCount.value = n;
+	}
+
 	private installFacadeShader() {
 		const night = this.night;
 		const glass = this.glassMask;
+		const { doorA, doorB, doorCount } = this;
 		this.walls.onBeforeCompile = (shader) => {
 			shader.uniforms.uNight = night;
 			shader.uniforms.uGlass = { value: glass };
+			shader.uniforms.uDoorA = doorA;
+			shader.uniforms.uDoorB = doorB;
+			shader.uniforms.uDoorCount = doorCount;
 			shader.vertexShader = shader.vertexShader
 				.replace(
 					'#include <common>',
-					'#include <common>\nattribute vec2 facade;\nvarying vec2 vFacade;\nvarying vec2 vWall;'
+					'#include <common>\nattribute vec2 facade;\nvarying vec2 vFacade;\nvarying vec2 vWall;\nvarying vec3 vPpwWorld;'
 				)
-				.replace('#include <uv_vertex>', '#include <uv_vertex>\nvFacade = facade;\nvWall = uv;');
+				.replace(
+					'#include <uv_vertex>',
+					'#include <uv_vertex>\nvFacade = facade;\nvWall = uv;\nvPpwWorld = (modelMatrix * vec4(position, 1.0)).xyz;'
+				);
 			shader.fragmentShader = shader.fragmentShader
 				.replace(
 					'#include <common>',
 					`#include <common>
 uniform float uNight;
 uniform sampler2D uGlass;
+uniform vec4 uDoorA[${MAX_DOORS}];
+uniform vec2 uDoorB[${MAX_DOORS}];
+uniform int uDoorCount;
 varying vec2 vFacade;
 varying vec2 vWall;
+varying vec3 vPpwWorld;
 float ppwHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }`
+				)
+				.replace(
+					'#include <clipping_planes_fragment>',
+					`#include <clipping_planes_fragment>
+for (int i = 0; i < ${MAX_DOORS}; i++) {
+	if (i >= uDoorCount) break;
+	vec2 ppwD = vPpwWorld.xz - uDoorA[i].xy;
+	float ppwAlong = dot(ppwD, uDoorA[i].zw);
+	float ppwAcross = dot(ppwD, vec2(-uDoorA[i].w, uDoorA[i].z));
+	if (abs(ppwAlong) < uDoorB[i].y && abs(ppwAcross) < 0.3 && vPpwWorld.y < uDoorB[i].x + ${DOOR_HEIGHT.toFixed(2)}) discard;
+}`
 				)
 				.replace(
 					'#include <map_fragment>',
@@ -156,7 +201,7 @@ float ppwGlass = textureGrad(uGlass, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
 totalEmissiveRadiance += uNight * ppwLit * ppwGlass * vec3(1.0, 0.6, 0.28) * 1.2;`
 				);
 		};
-		this.walls.customProgramCacheKey = () => 'ppw-facade-v2';
+		this.walls.customProgramCacheKey = () => 'ppw-facade-v3';
 	}
 
 	area(kind: string | undefined): THREE.Material | undefined {

@@ -153,11 +153,15 @@ async def claim_out(session: AsyncSession, claim: PropertyClaim) -> ClaimOut:
     )
     merchant = await session.get(Merchant, claim.merchant_id)
     owner = await session.get(User, merchant.owner_id) if merchant else None
-    document = await session.get(MerchantVerification, claim.document_id) if claim.document_id else None
+    document = (
+        await session.get(MerchantVerification, claim.document_id) if claim.document_id else None
+    )
     shop_name = await session.scalar(select(Shop.name).where(Shop.claim_id == claim.id))
+    unit = await session.get(VirtualProperty, claim.property_id)  # never lazy-load in async
+    assert unit is not None
     return ClaimOut(
         id=claim.id,
-        unit=unit_out(claim.unit, claim, shop_name),
+        unit=unit_out(unit, claim, shop_name),
         status=claim.status,
         evidence_note=claim.evidence_note,
         decision_reason=claim.decision_reason,
@@ -218,7 +222,9 @@ async def end_claim(
     if actor:
         claim.decided_by_id, claim.decided_at = actor, now
     for shop in (
-        await session.scalars(select(Shop).where(Shop.claim_id == claim.id, Shop.status == "active"))
+        await session.scalars(
+            select(Shop).where(Shop.claim_id == claim.id, Shop.status == "active")
+        )
     ).all():
         shop.status, shop.is_open = "ended", False
     for transfer in (
@@ -291,12 +297,13 @@ async def claim_unit(session: AsyncSession, user: User, data: ClaimIn, ip: str) 
     else:
         _approve(claim)
     session.add(claim)
+    code = unit.code  # objects expire on rollback: never touch them afterwards
     try:
         await session.flush()
     except IntegrityError as exc:
         # Lost a race with another merchant for the same unit: the unique index decided.
         await session.rollback()
-        raise conflict("UNIT_TAKEN", f"Unit {unit.code} was just claimed by someone else.") from exc
+        raise conflict("UNIT_TAKEN", f"Unit {code} was just claimed by someone else.") from exc
     if claim.status == "approved":
         _open_shop(session, claim, merchant)
     audit.record(
@@ -318,7 +325,7 @@ async def _own_claim(
     session: AsyncSession, user: User, claim_id: uuid.UUID
 ) -> tuple[Merchant, PropertyClaim]:
     merchant = await require_merchant(session, user)
-    claim = await session.get(PropertyClaim, claim_id, with_for_update=True)
+    claim = await session.get(PropertyClaim, claim_id, with_for_update={"of": PropertyClaim})
     if claim is None or claim.merchant_id != merchant.id:
         raise not_found("Claim")
     return merchant, claim
@@ -330,7 +337,9 @@ async def release(session: AsyncSession, user: User, claim_id: uuid.UUID, ip: st
         raise conflict("CLAIM_NOT_LIVE", f"This claim is {claim.status}.")
     was_open = claim.status == "approved"
     await end_claim(session, claim, "released")
-    audit.record(session, "claim.released", actor=user.id, target_type="claim", target_id=claim.id, ip=ip)
+    audit.record(
+        session, "claim.released", actor=user.id, target_type="claim", target_id=claim.id, ip=ip
+    )
     await session.commit()
     if was_open:
         await _notify_world()
@@ -403,7 +412,9 @@ async def respond_transfer(
     session: AsyncSession, user: User, transfer_id: uuid.UUID, accept: bool, ip: str
 ) -> None:
     merchant = await require_merchant(session, user, lock=True)
-    transfer = await session.get(PropertyTransfer, transfer_id, with_for_update=True)
+    transfer = await session.get(
+        PropertyTransfer, transfer_id, with_for_update={"of": PropertyTransfer}
+    )
     if transfer is None or merchant.id not in (transfer.to_merchant_id, transfer.from_merchant_id):
         raise not_found("Transfer")
     if transfer.status != "pending":
@@ -420,7 +431,9 @@ async def respond_transfer(
         await session.commit()
         return
     require_selling(user, merchant)
-    claim = await session.get(PropertyClaim, transfer.claim_id, with_for_update=True)
+    claim = await session.get(
+        PropertyClaim, transfer.claim_id, with_for_update={"of": PropertyClaim}
+    )
     if claim is None or claim.status != "approved":
         raise conflict("CLAIM_NOT_ACTIVE", "This unit is no longer held by the sender.")
     if await _live_count(session, merchant.id) >= settings.max_units_per_merchant:
@@ -494,7 +507,9 @@ async def open_dispute(
     session: AsyncSession, user: User, data: DisputeIn, ip: str
 ) -> PropertyDispute:
     if not user.contact_verified:
-        raise AppError(status.HTTP_403_FORBIDDEN, "VERIFY_FIRST", "Verify your e-mail or phone first.")
+        raise AppError(
+            status.HTTP_403_FORBIDDEN, "VERIFY_FIRST", "Verify your e-mail or phone first."
+        )
     unit = await unit_by_code(session, data.unit_code)
     claim = await live_claim(session, unit.id)
     if claim is None:
@@ -570,7 +585,7 @@ async def admin_decide(
     reason: str | None,
     ip: str,
 ) -> PropertyClaim:
-    claim = await session.get(PropertyClaim, claim_id, with_for_update=True)
+    claim = await session.get(PropertyClaim, claim_id, with_for_update={"of": PropertyClaim})
     if claim is None:
         raise not_found("Claim")
     if action in ("approve", "reject") and claim.status != "pending":
@@ -626,14 +641,18 @@ async def resolve_dispute(
     note: str | None,
     ip: str,
 ) -> PropertyDispute:
-    dispute = await session.get(PropertyDispute, dispute_id, with_for_update=True)
+    dispute = await session.get(
+        PropertyDispute, dispute_id, with_for_update={"of": PropertyDispute}
+    )
     if dispute is None:
         raise not_found("Dispute")
     if dispute.status != "open":
         raise conflict("ALREADY_DECIDED", f"This dispute is {dispute.status}.")
     notify = False
     if uphold and dispute.claim_id:
-        claim = await session.get(PropertyClaim, dispute.claim_id, with_for_update=True)
+        claim = await session.get(
+            PropertyClaim, dispute.claim_id, with_for_update={"of": PropertyClaim}
+        )
         if claim is not None and claim.status in LIVE:
             notify = claim.status == "approved"
             await end_claim(
@@ -665,7 +684,7 @@ async def expire_due(session: AsyncSession) -> int:
         await session.scalars(
             select(PropertyClaim)
             .where(PropertyClaim.status.in_(LIVE), PropertyClaim.expires_at <= utcnow())
-            .with_for_update(skip_locked=True)
+            .with_for_update(skip_locked=True, of=PropertyClaim)
             .limit(200)
         )
     ).all()

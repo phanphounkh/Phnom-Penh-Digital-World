@@ -12,7 +12,9 @@
    │  MapLibre: location picker                                    ├─ services: accounts, onboarding, geo, world, audit
    │                                                               ├─ geography: projection, OSM parser, importer
    └─ static: /models/*.glb                                       ├─ multiplayer: world hub (rooms, presence, chat), social
-                                                                    └─ (marketplace, delivery, payments: Phases 4–7)
+                                                                    ├─ marketplace: units, claims, merchants, catalogue, checkout (demo)
+                                                                    ├─ transport: road graph, routing, vehicles, parking
+                                                                    └─ (delivery, wallet: Phases 6–7)
                                                                        │
                                                          PostgreSQL 17 + PostGIS 3.5 (+ pg_trgm)
 ```
@@ -67,6 +69,48 @@
 * **Chat.** Nearby (40 m) and room-wide channels, plus persistent direct messages over REST.
   All text is normalised and length-capped, with basic profanity masking (flagged messages are
   marked), rate limits, chat-mutes and reports that carry the chat as evidence.
+
+## Marketplace (Phase 4)
+
+* **Units are real frontages.** The importer cuts 6 × 8 m shop units into non-residential OSM
+  buildings whose wall faces a public street (1,680 in Daun Penh). Each has a permanent code
+  (`DP-0412`). Units at a named real business (an OSM shop, café, office…) are claimable only
+  with evidence and an administrator's review, and the real owner can dispute.
+* **Exclusive by construction.** A partial unique index allows one live claim per unit; claims
+  are transactional, time-limited (30 days, renewable), transferable and revocable.
+* **Walk-in storefronts.** An approved claim opens a shop at that frontage: the client cuts a
+  doorway (collision + shader), builds the interior from the shop's theme and shows the
+  merchant's catalogue; the server lets players onto that floor. Shop changes are pushed to
+  every client over the world socket (`{"t": "shops"}`).
+* **Server-priced, demo-paid.** Carts are repriced on every read and again under row locks at
+  checkout. A checkout is one idempotent demo payment intent and one order per merchant.
+  Nothing moves real money; the UI says so wherever money appears. The Phase 7 wallet will
+  debit these intents through a double-entry ledger.
+* **Media.** Product photos are re-encoded (metadata, including GPS, removed) and served from
+  `/api/v1/media`; verification documents are private files only administrators can download.
+* **Isolated E2E.** Browser tests run their own API (:8001) on `ppw_e2e`, so test bots never
+  join the development world.
+
+## Transport (Phase 5)
+
+```text
+ OSM ways (node ids) ──importer──▶ road_nodes / road_edges (access per direction and mode)
+                                        │
+             ┌──────────────────────────┴───────────────────────┐
+  GET /routes, /roads/* (A*, in memory per region)     world hub: TravelArea (ride/park rules)
+             │                                            mount / dismount / move validation
+  client: route line, lane path, autopilot ──ws──▶        parked vehicles (region cell index)
+```
+
+* **One graph, three uses.** The same OSM-derived edges drive routing, the server's "may this
+  vehicle be here" check and (through `af`/`ab` masks in the chunk payloads) the client's riding
+  limits, so client prediction and server validation agree (the server's margin is wider).
+* **Vehicles are world objects.** A parked vehicle stays where it was left, also while its
+  owner is offline, and is synced to nearby players like a player (spawn/despawn by interest
+  cells), never with the owner's identity, and not at all for hidden or blocked owners.
+* **Speeds are validated per mode** (walking, bicycle, motorbike); a rider is also kept on
+  roads the vehicle may use. One-way streets bind routes and the autopilot; riding the wrong way
+  by hand is flagged on the HUD, not refused (as in real traffic, it is illegal, not impossible).
 
 ## Geography pipeline
 

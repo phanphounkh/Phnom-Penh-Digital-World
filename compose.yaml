@@ -45,6 +45,10 @@ services:
       TRUST_PROXY_HEADERS: "true"
       EXPOSE_DEV_VERIFICATION_CODES: ${EXPOSE_DEV_VERIFICATION_CODES:-true}
       OSM_DATA_DIR: /app/tools/gis/data/osm
+      MEDIA_ROOT: /app/var/media
+      DEMO_PAYMENTS_ENABLED: ${DEMO_PAYMENTS_ENABLED:-true}
+    volumes:
+      - media:/app/var/media
     expose:
       - "8000"
     healthcheck:
@@ -72,3 +76,4 @@ services:
 
 volumes:
   postgres_data:
+  media:

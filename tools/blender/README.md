@@ -4,12 +4,16 @@
 |---|---|---|
 | `generate_avatars.py` | `frontend/static/models/characters/avatar.glb` | Modular player avatar (Phnom Penh Digital World) |
 | `generate_city_assets.py` | `frontend/static/models/city/*.glb`, `landmarks/*.glb` | Rain tree, ornamental tree, sugar palm, double-arm lamp, traffic signal, sign post; Phsar Thmei dome (real scale), Khmer stupa |
+| `generate_shop_assets.py` | `frontend/static/models/shop/*.glb` | Shop shelf, island table, awning, generic product models (Phase 4) |
+| `generate_vehicle_assets.py` | `frontend/static/models/vehicles/*.glb` | Step-through city bicycle with basket, generic underbone motorbike (Phase 5) |
 | `compress_glb.mjs` | (in place) | Meshopt compression of the Phnom Penh Digital World GLBs (`cd frontend && npm run assets:compress`) |
 | `generate_assets.py` | `frontend/static/models/**` (29 GLBs) | Original CampusEats characters, food, equipment and food court |
 
 ```bash
 blender --background --python-use-system-env --python tools/blender/generate_avatars.py
 blender --background --python-use-system-env --python tools/blender/generate_city_assets.py
+blender --background --python-use-system-env --python tools/blender/generate_shop_assets.py
+blender --background --python-use-system-env --python tools/blender/generate_vehicle_assets.py
 (cd frontend && npm run assets:compress)      # Meshopt; the client decodes with MeshoptDecoder
 blender --background --python tools/blender/generate_assets.py   # CAMPUSEATS_ASSET_FILTER=characters/ for a subset
 ```
@@ -38,6 +42,18 @@ Built with Blender 4.3.2. The glTF exporter needs NumPy in Blender's Python. If 
 * The landmark models are built at real scale and fitted to OSM footprints at runtime: the dome
   is 23 m in radius and 16 m tall; the stupa has a 10.4 m plinth and is 16.9 m tall.
 * Preview everything at **`/dev/assets`** (dev server only).
+
+## Vehicle contract (relied on by `frontend/src/lib/game/vehicles/VehicleModels.ts` and `Rider.ts`)
+
+* Metres, Y up, origin on the ground midway between the wheels; the vehicle faces **+Z** after
+  export (Blender −Y), like the avatar.
+* Nodes: `Body` (static), `Steer` (empty at the steering head; rotate about Y), `WheelFront`
+  (child of `Steer`) and `WheelRear` (origins at the hubs; spin about X).
+* Anchor empties for the rider: `Seat`, `GripL`/`GripR`, `PegL`/`PegR` (`L` = −X, the side of the
+  rig's `LeftArm`/`LeftLeg`); the bicycle also has `Crank` (the pedals turn about it).
+* Materials: `Paint` and `PaintDark` are recoloured per vehicle; `Light` and `TailLight` glow at
+  night; `Plate` is the (virtual) number plate.
+* Both models are generic: no real make or model is reproduced.
 
 All models are original, built from primitives and tailored surfaces; licence CC0. They are
 stylised low-poly, **not** photorealistic. City buildings are generated at runtime from OSM
