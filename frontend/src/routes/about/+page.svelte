@@ -2,13 +2,13 @@
 	import { ArrowLeft } from 'lucide-svelte';
 	const ROADMAP = [
 		['1', 'Foundation', 'Accounts, verification, roles, avatars, real map, one playable neighbourhood', 'now'],
-		['2', '3D city', 'Richer Blender assets, street furniture, day/night, collisions polish', 'next'],
-		['3', 'Multiplayer', 'See and chat with other online players in real time', ''],
-		['4', 'Marketplace', 'Claim virtual shop units, storefronts, carts and demo checkout', ''],
-		['5', 'Transport', 'Bicycle, motorbike, car and tuk-tuk on the real road network', ''],
-		['6', 'Delivery', 'Driver registration, simulated delivery jobs and tracking', ''],
-		['7', 'Payments', 'Ledger-based demo wallet with clearly labelled simulated credits', ''],
-		['8', 'Production', 'Streaming, caching, monitoring and deployment hardening', '']
+		['2', '3D city', 'Blender landmarks, street furniture, terrain and day/night', 'now'],
+		['3', 'Multiplayer', 'See and chat with other online players in real time', 'now'],
+		['4', 'Marketplace', 'Claim virtual shop units, storefronts, carts and demo checkout', 'now'],
+		['5', 'Transport', 'Bicycles and motorbikes on the real road network', 'now'],
+		['6', 'Delivery', 'Approved drivers, simulated delivery jobs and private buyer tracking', 'now'],
+		['7', 'Demo wallet', 'Balanced virtual credits, refunds and seller/driver earnings', 'now'],
+		['8', 'Production', 'Readiness checks, recovery, monitoring and backups; scaling and deployment setup continue', '']
 	];
 </script>
 
@@ -32,7 +32,7 @@
 				<li><strong>Streets and building footprints are real</strong>, imported from an OpenStreetMap snapshot of Daun Penh (Central Market, Wat Phnom, the riverside). They can be out of date or incomplete.</li>
 				<li><strong>Building heights, facade colours, windows and park trees are partly estimated.</strong> Where OSM has no height or storey count, a typical height for the building type is used and labelled as an estimate in the data.</li>
 				<li><strong>It is not a live replica</strong> of Phnom Penh. Nothing you see reflects real-time conditions.</li>
-				<li><strong>Players are real people.</strong> There are no fake accounts; you only see registered players who are online and chose to be visible.</li>
+				<li><strong>Players are real people.</strong> You only see registered players who are online and chose to be visible; the city has no simulated crowds.</li>
 				<li><strong>Virtual property is not real property.</strong> Claiming a virtual shop unit never grants rights to a real building or business.</li>
 				<li><strong>Money is simulated.</strong> Demo credits have no monetary value. Real payments will only be added through a licensed payment provider, after legal review.</li>
 			</ul>

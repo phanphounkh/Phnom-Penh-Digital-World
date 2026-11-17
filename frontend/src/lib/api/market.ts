@@ -190,6 +190,7 @@ export interface ShopDetail extends Shop {
 }
 
 export interface CartLine {
+    fulfillment: string[];
 	product_id: string;
 	name: string;
 	name_km: string | null;
@@ -359,7 +360,7 @@ export const shopping = {
 	setQuantity: (product_id: string, quantity: number) =>
 		api<Cart>(`/cart/items/${product_id}`, { method: 'PATCH', body: { quantity } }),
 	remove: (product_id: string) => api<Cart>(`/cart/items/${product_id}`, { method: 'DELETE' }),
-	checkout: (key: string, body: { expected_total_minor: number; note?: string; age_confirmed?: boolean }) =>
+	checkout: (key: string, body: { expected_total_minor: number; note?: string; age_confirmed?: boolean; fulfillment?: 'pickup' | 'delivery'; dropoff_spawn_id?: string }) =>
 		api<Payment>('/checkout', { method: 'POST', body: { fulfillment: 'pickup', ...body }, headers: { 'Idempotency-Key': key } }),
 	payment: (id: string) => api<Payment>(`/payments/${id}`),
 	confirm: (id: string) => api<Payment>(`/payments/${id}/confirm`, { method: 'POST' }),

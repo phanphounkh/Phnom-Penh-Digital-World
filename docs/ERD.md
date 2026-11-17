@@ -308,10 +308,21 @@ erDiagram
 `places` (city-wide search index, trigram-indexed `search_text`) and `dataset_imports`
 (provenance per import run) are standalone tables.
 
+## Commerce extension (migration 0005)
+
+`driver_profiles` stores availability and vehicle type. Each `delivery_jobs` row belongs to one
+order, carries public pickup/drop-off world points, and names its current assigned driver.
+A partial unique index permits one active job per driver. Assignment and state changes share
+the existing `order_events` history; separate assignment/event tables are unnecessary here.
+
+`wallet_accounts` holds integer USD demo balances. `ledger_transactions` has a unique reference;
+each transaction has two signed `ledger_entries` referencing accounts. Deferred PostgreSQL
+triggers require a zero-sum journal matching the transaction amount and prevent edits/deletion.
+Merchant and driver payouts are ledger transaction kinds rather than separate payout tables.
+`password_resets` stores expiring, single-use token hashes.
+
 ## Planned tables (later phases)
 
 | Phase | Tables |
 |---|---|
-| 6 Delivery | `driver_profiles`, `delivery_jobs`, `delivery_assignments`, `delivery_events` |
-| 7 Payments | `wallet_accounts`, `ledger_transactions`, `ledger_entries` (double entry, integer minor units), `merchant_payouts` (`payment_intents` and `refunds` exist since Phase 4) |
 | 8 Admin | `moderation_cases`, `notifications`, `platform_settings` |

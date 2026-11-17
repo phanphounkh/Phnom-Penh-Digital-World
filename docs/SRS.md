@@ -1,4 +1,4 @@
-# Software requirements specification (status as of Phase 5)
+# Software requirements specification (status as of Phase 7)
 
 Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in `backend/tests`
 (`B:`), `frontend/src/**/*.test.ts` (`U:`) and `frontend/tests/phase*.spec.ts` (`E:`).
@@ -56,8 +56,9 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-VEH-4 | Vehicle sync: riders shown on their vehicle; parked vehicles visible in the area without owner identity; hidden/blocked owners leave no trace | ✅ | B: test_riding_a_motorbike…, test_hidden_and_blocked_owners_leave_no_trace; E: phase5 (second browser) |
 | F-VEH-5 | Lane-aware guidance (right-hand lane, one-way lanes, pavement for walkers), route line and minimap, autopilot, re-planning, wrong-way warning | ✅ | U: route guidance, path follower; E: phase5 (autopilot rides 120 m with no off-road correction) |
 | F-VEH-6 | Cars and tuk-tuks | ⏳ | Mode bit and access rules exist; models and handling deferred |
-| F-DEL-* | Delivery jobs | ⏳ 6 | |
-| F-PAY-* | Demo wallet balance and double-entry ledger | ⏳ 7 | Phase 4 has the idempotent demo payment intent; the wallet debits it in Phase 7 |
+| F-DEL-* | Simulated delivery jobs, driver availability, atomic assignment, proximity checks, reconnects and buyer tracking | ✅ 6 | B: test_delivery_wallet; E: mobile-commerce.spec.ts |
+| F-PAY-* | Demo wallet balance, escrow, double-entry ledger, refunds and merchant/driver payouts | ✅ 7 | B: test_delivery_wallet (concurrency, insufficient funds, refunds, settlement, journal constraints) |
+| F-AUTH-6 | Single-use password recovery and configured production notification delivery | ✅ | B: test_recovery; SMTP/SMS credentials must be configured by the operator |
 
 ## Non-functional
 

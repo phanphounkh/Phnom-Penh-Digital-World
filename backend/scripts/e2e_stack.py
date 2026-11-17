@@ -74,7 +74,9 @@ def main() -> None:
         with psycopg.connect(admin_dsn.rsplit("/", 1)[0] + f"/{e2e_name}", autocommit=True) as conn:
             # Everything that references a user (merchants, claims, shops, products, carts,
             # orders, payments, chat, sessions...) goes with CASCADE; geography is untouched.
-            conn.execute("TRUNCATE users, world_rooms RESTART IDENTITY CASCADE")
+            conn.execute(
+                "TRUNCATE users, world_rooms, ledger_transactions RESTART IDENTITY CASCADE"
+            )
         print(f"Reset accounts and marketplace data in {e2e_name}")
     subprocess.run([python, "scripts/seed.py"], cwd=BACKEND, env=run_env, check=True)
     os.chdir(BACKEND)

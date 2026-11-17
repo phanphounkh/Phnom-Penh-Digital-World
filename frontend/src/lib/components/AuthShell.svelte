@@ -8,7 +8,7 @@
 	}: { title: string; subtitle?: string; children: Snippet; footer?: Snippet } = $props();
 </script>
 
-<main class="street-grid grid min-h-dvh place-items-center px-4 py-10">
+<main class="auth-shell street-grid grid min-h-dvh place-items-center px-4 py-10">
 	<div class="w-full max-w-md">
 		<a href="/" class="mb-6 flex items-center gap-3 text-river-900">
 			<span
@@ -28,3 +28,8 @@
 		{#if footer}<div class="mt-5 text-center text-sm text-ink-soft">{@render footer()}</div>{/if}
 	</div>
 </main>
+
+<style>
+	.auth-shell { padding-top: max(24px, env(safe-area-inset-top)); padding-bottom: max(24px, env(safe-area-inset-bottom)); }
+	@media (max-height: 700px) { .auth-shell { align-items: start; } }
+</style>

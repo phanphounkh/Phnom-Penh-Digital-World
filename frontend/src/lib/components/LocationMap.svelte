@@ -4,6 +4,7 @@
 	import type { Map as MapLibreMap, Marker, StyleSpecification } from 'maplibre-gl';
 	import { env } from '$env/dynamic/public';
 	import { geo } from '$lib/api/endpoints';
+	import { loadMapLibre } from '$lib/geo/maplibre';
 	import type { SpawnPoint } from '$lib/api/types';
 
 	let {
@@ -58,7 +59,7 @@
 	onMount(() => {
 		let disposed = false;
 		(async () => {
-			maplibre = await import('maplibre-gl');
+			maplibre = await loadMapLibre();
 			const style = await loadStyle();
 			if (disposed) return;
 			map = new maplibre.Map({

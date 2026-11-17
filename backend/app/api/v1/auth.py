@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from app.api.deps import ClientIP, CurrentSession, CurrentUser, SessionDep, get_auth
@@ -25,6 +26,42 @@ from app.services.onboarding import me_out
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class ResetRequest(BaseModel):
+    identifier: str = Field(min_length=3, max_length=255)
+
+
+class ResetConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
+
+
+@router.get("/capabilities")
+async def capabilities():
+    from app.services.notifier import capabilities
+
+    return capabilities()
+
+
+@router.post("/password/request", dependencies=[Depends(rate_limit("reset-request", 5, 900))])
+async def request_reset(data: ResetRequest, session: SessionDep):
+    from app.services import recovery
+
+    return await recovery.request_reset(session, data.identifier)
+
+
+@router.post(
+    "/password/reset",
+    response_model=Message,
+    dependencies=[Depends(rate_limit("reset-confirm", 10, 900))],
+)
+async def reset_password(data: ResetConfirm, session: SessionDep, response: Response):
+    from app.services import recovery
+
+    await recovery.reset(session, data.token, data.password)
+    _clear_cookies(response)
+    return Message(message="Password changed. Sign in with your new password.")
 
 
 async def _start_session(

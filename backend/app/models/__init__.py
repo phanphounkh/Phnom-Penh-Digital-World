@@ -1,4 +1,12 @@
 from app.models.admin import AuditLog
+from app.models.commerce import (
+    DeliveryJob,
+    DriverProfile,
+    LedgerEntry,
+    LedgerTransaction,
+    PasswordReset,
+    WalletAccount,
+)
 from app.models.enums import ContactChannel, Language, RoleName, RoleStatus
 from app.models.geo import (
     Building,
@@ -64,17 +72,22 @@ __all__ = [
     "ContactChannel",
     "ContactVerification",
     "DatasetImport",
+    "DeliveryJob",
+    "DriverProfile",
     "Friendship",
     "GeographicRegion",
     "Inventory",
     "LandArea",
     "Landmark",
     "Language",
+    "LedgerEntry",
+    "LedgerTransaction",
     "Merchant",
     "MerchantVerification",
     "Order",
     "OrderEvent",
     "OrderItem",
+    "PasswordReset",
     "PaymentIntent",
     "Place",
     "PlayerReport",
@@ -101,6 +114,7 @@ __all__ = [
     "UserRole",
     "Vehicle",
     "VirtualProperty",
+    "WalletAccount",
     "WorldChunk",
     "WorldRoom",
 ]

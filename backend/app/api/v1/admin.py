@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import aliased
 
 from app.api.deps import AdminUser, ClientIP, SessionDep
@@ -18,6 +18,48 @@ from app.services import audit
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/operations")
+async def operations(_: AdminUser, session: SessionDep):
+    from app.core.config import settings
+    from app.delivery.service import ACTIVE, job_out
+    from app.models import DeliveryJob
+
+    counts = {}
+    for name, sql in {
+        "migration": "SELECT version_num FROM alembic_version",
+        "waiting_deliveries": (
+            "SELECT count(*) FROM delivery_jobs j JOIN orders o ON o.id=j.order_id "
+            "WHERE j.status='waiting' AND o.status='ready_for_pickup'"
+        ),
+        "active_deliveries": (
+            "SELECT count(*) FROM delivery_jobs "
+            "WHERE status IN ('assigned','picked_up','in_transit')"
+        ),
+        "journal_total_minor": "SELECT coalesce(sum(amount_minor),0) FROM ledger_entries",
+        "wallet_mismatches": (
+            "SELECT count(*) FROM wallet_accounts a WHERE a.balance_minor <> "
+            "coalesce((SELECT sum(e.amount_minor) FROM ledger_entries e "
+            "WHERE e.account_key=a.key),0)"
+        ),
+    }.items():
+        counts[name] = await session.scalar(text(sql))
+    jobs = (
+        await session.scalars(
+            select(DeliveryJob)
+            .where(DeliveryJob.status.in_(ACTIVE))
+            .order_by(DeliveryJob.updated_at)
+            .limit(30)
+        )
+    ).all()
+    return {
+        "counts": counts,
+        "connected_players": len(hub.by_user),
+        "rooms": len(hub.rooms),
+        "chat_retention_days": settings.chat_retention_days,
+        "deliveries": [await job_out(session, job) for job in jobs],
+    }
 
 
 class RoleRequestOut(BaseModel):

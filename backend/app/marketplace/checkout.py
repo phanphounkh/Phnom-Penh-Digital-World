@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.errors import AppError, bad_request, conflict, not_found
+from app.delivery import service as delivery
 from app.marketplace.catalog import image_url
 from app.models import (
     Cart,
@@ -45,6 +46,7 @@ from app.models import (
     Shop,
     User,
 )
+from app.payments import wallet
 from app.schemas.market import (
     CartAddIn,
     CartGroupOut,
@@ -73,9 +75,9 @@ TRANSITIONS: dict[str, set[str]] = {
     "merchant_accepted": {"preparing", "refunded"},
     "preparing": {"ready_for_pickup", "refunded"},
     "ready_for_pickup": {"completed", "assigned_to_driver", "refunded"},
-    "assigned_to_driver": {"picked_up", "refunded"},
-    "picked_up": {"in_transit"},
-    "in_transit": {"delivered"},
+    "assigned_to_driver": {"ready_for_pickup", "picked_up", "refunded"},
+    "picked_up": {"in_transit", "refunded"},
+    "in_transit": {"delivered", "refunded"},
     "delivered": {"completed"},
     "completed": set(),
     "cancelled": set(),
@@ -98,16 +100,32 @@ ACTOR_MOVES: dict[str, set[tuple[str, str]]] = {
         ("paid", "refunded"),
         ("ready_for_pickup", "completed"),
     },
-    "system": {("pending_payment", "paid"), ("pending_payment", "cancelled")},
+    "system": {
+        ("pending_payment", "paid"),
+        ("pending_payment", "cancelled"),
+        ("delivered", "completed"),
+    },
+    "driver": {
+        ("ready_for_pickup", "assigned_to_driver"),
+        ("assigned_to_driver", "picked_up"),
+        ("assigned_to_driver", "ready_for_pickup"),
+        ("picked_up", "in_transit"),
+        ("in_transit", "delivered"),
+    },
     "admin": {(a, b) for a, targets in TRANSITIONS.items() for b in targets if b == "refunded"},
 }
-LIVE_ORDER = ("paid", "merchant_accepted", "preparing", "ready_for_pickup")
-REVENUE_STATES = (
-    *LIVE_ORDER,
+LIVE_ORDER = (
+    "paid",
+    "merchant_accepted",
+    "preparing",
+    "ready_for_pickup",
     "assigned_to_driver",
     "picked_up",
     "in_transit",
     "delivered",
+)
+REVENUE_STATES = (
+    *LIVE_ORDER,
     "completed",
 )
 
@@ -188,6 +206,7 @@ async def cart_out(session: AsyncSession, user: User) -> CartOut:
                 stock=stock,
                 min_age=p.category.min_age,
                 shop_id=item.shop_id,
+                fulfillment=list(p.fulfillment),
             )
         )
     out_groups = [
@@ -391,6 +410,22 @@ async def checkout(
             )
     if problems:
         raise conflict("ITEMS_UNAVAILABLE", "Some items are no longer available.", problems)
+    unsupported = [
+        str(i.product_id)
+        for i in items
+        if data.fulfillment not in products[i.product_id].fulfillment
+    ]
+    if unsupported:
+        raise conflict(
+            "FULFILLMENT_UNAVAILABLE",
+            "Some products do not support the selected fulfillment method.",
+            unsupported,
+        )
+    destination = (
+        await delivery.dropoff(session, data.dropoff_spawn_id)
+        if data.fulfillment == "delivery"
+        else None
+    )
     if any(products[i.product_id].category.min_age for i in items) and not data.age_confirmed:
         raise AppError(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -401,7 +436,10 @@ async def checkout(
     by_merchant: dict[uuid.UUID, list[CartItem]] = defaultdict(list)
     for item in items:
         by_merchant[products[item.product_id].merchant_id].append(item)
-    total = sum(products[i.product_id].price_minor * i.quantity for i in items)
+    fee = delivery.DELIVERY_FEE_MINOR if destination else 0
+    total = sum(products[i.product_id].price_minor * i.quantity for i in items) + fee * len(
+        by_merchant
+    )
     if total != data.expected_total_minor:
         raise conflict(
             "PRICE_CHANGED",
@@ -439,8 +477,8 @@ async def checkout(
             status="pending_payment",
             fulfillment=data.fulfillment,
             subtotal_minor=subtotal,
-            delivery_fee_minor=0,
-            total_minor=subtotal,
+            delivery_fee_minor=fee,
+            total_minor=subtotal + fee,
             note=data.note,
         )
         for line in lines:
@@ -462,6 +500,9 @@ async def checkout(
             )
         )
         session.add(order)
+        if destination:
+            await session.flush()
+            await delivery.create_job(session, order, *destination)
     await session.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     audit.record(
         session,
@@ -518,6 +559,8 @@ async def _move(
 ) -> None:
     """Apply one allowed transition with its side effects and history entry."""
     current = order.status
+    if to == "completed" and current == "ready_for_pickup" and order.fulfillment == "delivery":
+        raise conflict("DELIVERY_REQUIRED", "The assigned driver must deliver this order first.")
     if to not in TRANSITIONS[current] or (current, to) not in ACTOR_MOVES[role]:
         allowed = sorted(b for a, b in ACTOR_MOVES[role] if a == current)
         raise AppError(
@@ -530,6 +573,7 @@ async def _move(
         await _restore_stock(session, order)
         order.cancel_reason = (note or ("Refunded" if to == "refunded" else "Cancelled"))[:300]
     if to == "refunded":
+        await wallet.refund(session, order)
         session.add(
             Refund(
                 order_id=order.id,
@@ -542,7 +586,16 @@ async def _move(
     if to == "paid":
         order.paid_at = utcnow()
     if to == "completed":
+        await wallet.settle(session, order)
         order.completed_at = utcnow()
+    if to in ("cancelled", "refunded"):
+        from app.models import DeliveryJob
+
+        job = await session.scalar(
+            select(DeliveryJob).where(DeliveryJob.order_id == order.id).with_for_update()
+        )
+        if job:
+            job.status = "cancelled"
     order.status = to
     order.events.append(
         OrderEvent(from_status=current, to_status=to, actor_id=actor, actor_role=role, note=note)
@@ -620,6 +673,7 @@ async def confirm_payment(
     orders = await _locked_orders(session, intent)
     if sum(o.total_minor for o in orders) != intent.amount_minor:
         raise conflict("AMOUNT_MISMATCH", "The payment does not match the orders.")
+    await wallet.pay(session, user, intent.id, intent.amount_minor)
     intent.status = "succeeded"
     intent.succeeded_at = utcnow()
     intent.reference = "DEMO-" + secrets.token_hex(6).upper()
@@ -757,7 +811,16 @@ async def order_out(
         items=[OrderItemOut.model_validate(i) for i in order.items],
         events=[OrderEventOut.model_validate(e) for e in order.events],
         refunded_minor=int(refunded or 0),
-        allowed=sorted(b for a, b in ACTOR_MOVES.get(viewer, set()) if a == order.status),
+        allowed=sorted(
+            b
+            for a, b in ACTOR_MOVES.get(viewer, set())
+            if a == order.status
+            and not (
+                b == "completed"
+                and order.status == "ready_for_pickup"
+                and order.fulfillment == "delivery"
+            )
+        ),
     )
 
 
@@ -802,11 +865,13 @@ async def get_order(session: AsyncSession, user: User, order_id: uuid.UUID) -> O
 async def buyer_cancel(
     session: AsyncSession, user: User, order_id: uuid.UUID, reason: str | None
 ) -> OrderOut:
-    order, role = await _order_for(session, user, order_id, lock=True)
+    order, role = await _order_for(session, user, order_id)
     if role != "buyer":
         raise not_found("Order")
+    # Match confirmation/cancellation's lock order: payment first, then its orders.
+    intent = await _own_intent(session, user, order.payment_intent_id, lock=True)
+    order, role = await _order_for(session, user, order_id, lock=True)
     if order.status == "pending_payment":
-        intent = await _own_intent(session, user, order.payment_intent_id, lock=True)
         await _close_intent(session, intent, "cancelled", user.id, "buyer")
     else:
         await _move(

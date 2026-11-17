@@ -190,7 +190,7 @@ async def start_verification(
     )
     verification.code_hash = hash_verification_code(verification.id, code)
     session.add(verification)
-    deliver_verification_code(channel, destination, code)
+    await deliver_verification_code(channel, destination, code)
     return VerificationOut(
         channel=channel,
         destination=mask_destination(channel, destination),

@@ -86,6 +86,7 @@ async def imported_geography(migrated_database: None) -> dict[str, Any]:
 
 
 IDENTITY_TABLES = (
+    "delivery_jobs, driver_profiles, ledger_entries, ledger_transactions, wallet_accounts, password_resets, "
     "vehicles, refunds, order_events, order_items, orders, payment_intents, cart_items, carts, "
     "inventory, products, shops, property_disputes, property_transfers, property_claims, "
     "merchant_verifications, merchants, "

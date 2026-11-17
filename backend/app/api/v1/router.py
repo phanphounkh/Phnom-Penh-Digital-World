@@ -1,9 +1,13 @@
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
+from app.api.deps import SessionDep
 from app.api.v1 import (
     admin,
     admin_market,
     auth,
+    delivery,
     geo,
     market,
     me,
@@ -13,6 +17,7 @@ from app.api.v1 import (
     shopping,
     social,
     transport,
+    wallet,
     world,
 )
 
@@ -24,7 +29,20 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@api_router.get("/health/ready", tags=["health"])
+async def ready(session: SessionDep):
+    try:
+        version = await session.scalar(text("SELECT version_num FROM alembic_version"))
+        if version != "0005":
+            return JSONResponse({"status": "not_ready"}, status_code=503)
+    except Exception:
+        return JSONResponse({"status": "not_ready"}, status_code=503)
+    return {"status": "ready"}
+
+
 for module in (
+    delivery,
+    wallet,
     auth,
     me,
     geo,

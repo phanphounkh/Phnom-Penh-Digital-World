@@ -1,5 +1,28 @@
 # API (v1)
 
+Commerce and account additions (migration 0005):
+
+| Method & path | Auth | Purpose |
+|---|---|---|
+| `GET /auth/capabilities` | public | Configured verification channels |
+| `POST /auth/password/request {identifier}` | public, rate limited | Generic reset response; development token only outside production |
+| `POST /auth/password/reset {token,password}` | public, rate limited | Expiring single-use reset; revokes all sessions |
+| `GET /wallet` | signed in | Demo balance and recent journal activity; $100 starter credits once |
+| `POST /wallet/credits {amount_minor}` + `Idempotency-Key` | signed in, rate limited | Explicit free demo credits (100–100,000 minor units) |
+| `GET /driver` | approved driver | Availability, available jobs and own recent jobs |
+| `PUT /driver/availability {online,vehicle_kind}` | approved driver | Bicycle or motorbike availability |
+| `POST /driver/jobs/{id}/accept` | approved driver, online | Atomic one-job assignment |
+| `POST /driver/jobs/{id}/{pickup,start,deliver,release}` | assigned driver | Server position/region checks; release only before collection |
+| `GET /orders/{id}/delivery` | order's buyer or admin | Public world drop-off and assigned driver's current virtual position |
+| `GET /admin/operations` | admin | Delivery queues, world counts, journal and balance reconciliation |
+| `POST /admin/deliveries/{id}/refund {reason}` | admin | Cancel a failed active delivery and refund credits |
+| `GET /health/ready` | public | Database and migration readiness |
+
+`POST /checkout` now accepts `fulfillment: "pickup" | "delivery"` and an optional
+`dropoff_spawn_id` (required for delivery). Delivery adds 150 demo cents per merchant to the
+server-validated expected total. Every item must support the selected method. Payments debit
+the demo wallet into escrow; completed orders pay sellers/drivers, and refunds return credits.
+
 Interactive OpenAPI docs: **http://127.0.0.1:8000/api/docs**. Through the web app, the same
 paths are served at `/api/v1/*`.
 

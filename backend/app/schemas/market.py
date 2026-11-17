@@ -381,6 +381,7 @@ class CartLineOut(BaseModel):
     stock: int
     min_age: int | None
     shop_id: uuid.UUID | None
+    fulfillment: list[str] = ["pickup"]
 
 
 class CartGroupOut(BaseModel):
@@ -401,7 +402,8 @@ class CartOut(BaseModel):
 
 class CheckoutIn(BaseModel):
     expected_total_minor: int = Field(ge=1)
-    fulfillment: Literal["pickup"] = "pickup"
+    fulfillment: Literal["pickup", "delivery"] = "pickup"
+    dropoff_spawn_id: uuid.UUID | None = None
     note: str | None = Field(default=None, max_length=300)
     age_confirmed: bool = False
 

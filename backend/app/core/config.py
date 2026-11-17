@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     verification_max_attempts: int = Field(default=5, ge=1, le=10)
     verification_resend_seconds: int = Field(default=60, ge=0)
     expose_dev_verification_codes: bool = True
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    sms_webhook_url: str = ""
+    sms_webhook_token: str = ""
+    chat_retention_days: int = Field(default=30, ge=1, le=365)
 
     # Geography / world
     world_region_slug: str = "daun-penh-central"
@@ -91,6 +100,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def check_production_safety(self) -> "Settings":
         if self.app_env == "production":
+            if self.smtp_host and (not self.smtp_starttls or not self.smtp_from):
+                raise ValueError("Production SMTP requires STARTTLS and SMTP_FROM")
+            if self.sms_webhook_url and not self.sms_webhook_url.startswith("https://"):
+                raise ValueError("Production SMS_WEBHOOK_URL must use HTTPS")
             if self.jwt_secret in WEAK_SECRETS or len(self.jwt_secret) < 32:
                 raise ValueError("JWT_SECRET must be a random string of at least 32 characters")
             if not self.cookie_secure:

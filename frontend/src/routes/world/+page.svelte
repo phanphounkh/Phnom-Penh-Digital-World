@@ -1,16 +1,19 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
-		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square
+		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
+		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2
 	} from 'lucide-svelte';
 	import ChatBox from '$lib/components/world/ChatBox.svelte';
 	import PeoplePanel from '$lib/components/world/PeoplePanel.svelte';
 	import ShopPanel from '$lib/components/world/ShopPanel.svelte';
 	import CartPanel from '$lib/components/world/CartPanel.svelte';
 	import GaragePanel from '$lib/components/world/GaragePanel.svelte';
+	import DriverPanel from '$lib/components/world/DriverPanel.svelte';
+	import WalletPanel from '$lib/components/world/WalletPanel.svelte';
 	import VehicleIcon from '$lib/components/world/VehicleIcon.svelte';
 	import { transport, type Vehicle } from '$lib/api/transport';
 	import { formatDistance, formatDuration } from '$lib/game/vehicles/route';
@@ -30,13 +33,21 @@
 	const preferKhmer = session.user?.preferred_language === 'km';
 
 	let host: HTMLDivElement;
+	let worldShell: HTMLDivElement;
 	let minimap = $state<HTMLCanvasElement>();
 	let city: CityController | null = null;
 	let hud = $state<CityState | null>(null);
 	let progress = $state({ loaded: 0, total: 1 });
 	let ready = $state(false);
 	let failure = $state('');
-	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage'>('');
+	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage' | 'menu' | 'driver' | 'wallet'>('');
+	let compact = $state(false);
+	let chatOpen = $state(false);
+	let mapExpanded = $state(false);
+	const isDriver = $derived(!!session.user?.active_roles.includes('driver'));
+	const labels = preferKhmer
+		? { people: 'អ្នកលេង', places: 'ទីកន្លែង', garage: 'យានជំនិះ', cart: 'កន្ត្រក', more: 'បន្ថែម', chat: 'ជជែក' }
+		: { people: 'People', places: 'Places & shops', garage: 'My vehicles', cart: 'Cart', more: 'More', chat: 'Chat' };
 	// Transport (Phase 5)
 	let navTarget = $state<{ x: number; z: number; label: string; mode: TravelMode } | null>(null);
 	let navMode = $state<TravelMode>('foot');
@@ -71,10 +82,24 @@
 	let touch = $state(false);
 
 	// Menus pause your movement (not the world): other players keep moving and chatting.
-	$effect(() => city?.setPaused(panel !== '' && panel !== 'people' && panel !== 'garage'));
+	$effect(() => {
+		const paused = (panel !== '' && panel !== 'people' && panel !== 'garage') || (compact && chatOpen);
+		if (ready) city?.setPaused(paused);
+	});
 
 	onMount(() => {
 		touch = matchMedia('(pointer: coarse)').matches;
+		const viewport = matchMedia('(max-width: 900px), (max-height: 540px)');
+		const updateViewport = () => { compact = viewport.matches; };
+		updateViewport();
+		viewport.addEventListener('change', updateViewport);
+		const fitViewport = () => {
+			worldShell.style.height = `${window.visualViewport?.height ?? window.innerHeight}px`;
+			worldShell.style.top = `${window.visualViewport?.offsetTop ?? 0}px`;
+		};
+		fitViewport();
+		window.visualViewport?.addEventListener('resize', fitViewport);
+		window.visualViewport?.addEventListener('scroll', fitViewport);
 		let disposed = false;
 		let timer: ReturnType<typeof setInterval> | undefined;
 		(async () => {
@@ -145,9 +170,10 @@
 			if (e.key.toLowerCase() === 'e' && !panel) void interact();
 			if (e.key.toLowerCase() === 'c') panel = panel === 'cart' ? '' : 'cart';
 			if (e.key.toLowerCase() === 'p') panel = panel === 'people' ? '' : 'people';
-			if (e.key === 'Enter' && chatInput) {
+			if (e.key === 'Enter') {
 				e.preventDefault();
-				chatInput.focus();
+				chatOpen = true;
+				void tick().then(() => chatInput?.focus());
 			}
 			const emote = EMOTE_BUTTONS[Number(e.key) - 1];
 			if (emote && net) net.emote(emote[0]);
@@ -157,6 +183,9 @@
 			disposed = true;
 			clearInterval(timer);
 			window.removeEventListener('keydown', onKey);
+			viewport.removeEventListener('change', updateViewport);
+			window.visualViewport?.removeEventListener('resize', fitViewport);
+			window.visualViewport?.removeEventListener('scroll', fitViewport);
 			net?.stop();
 			net = null;
 			shops?.dispose();
@@ -347,17 +376,34 @@
 	const pad = (key: string) => ({
 		onpointerdown: (e: PointerEvent) => {
 			e.preventDefault();
+			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 			city?.setKey(key, true);
 		},
 		onpointerup: () => city?.setKey(key, false),
 		onpointerleave: () => city?.setKey(key, false),
 		onpointercancel: () => city?.setKey(key, false)
 	});
+
+	function dialogFocus(node: HTMLElement, _name: string) {
+		const previous = document.activeElement as HTMLElement | null;
+		const focus = () => void tick().then(() => node.querySelector<HTMLElement>('button, a, input, select')?.focus());
+		focus();
+		const keydown = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); panel = ''; }
+			if (event.key !== 'Tab') return;
+			const items = [...node.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].filter((item) => item.getClientRects().length);
+			const first = items[0], last = items.at(-1);
+			if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+			else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+		};
+		node.addEventListener('keydown', keydown);
+		return { update: focus, destroy() { node.removeEventListener('keydown', keydown); previous?.focus(); } };
+	}
 </script>
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div class="fixed inset-0 overflow-hidden bg-river-950 text-paper select-none">
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -380,44 +426,45 @@
 
 	{#if ready && hud}
 		<!-- Location card -->
-		<div class="pointer-events-none absolute top-3 left-3 max-w-[min(22rem,calc(100vw-7rem))] rounded-2xl bg-river-950/75 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-location">
+		<div class="world-location pointer-events-none absolute top-3 left-3 max-w-[min(22rem,calc(100vw-7rem))] rounded-2xl bg-river-950/75 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-location">
 			<p class="flex items-center gap-2 text-[11px] font-bold tracking-widest text-saffron-300 uppercase">
 				<Navigation size={12} style="transform: rotate({hud.heading}deg)" /> {compassLabel(hud.heading)} · Daun Penh
 				<span class="ml-auto font-mono normal-case tracking-normal text-river-200" data-testid="hud-clock" title={hud.timeMode === 'live' ? 'Phnom Penh time (live sun)' : 'Fixed time of day'}>{hud.clock}{hud.timeMode === 'live' ? '' : ' ·'}</span>
 			</p>
-			<p class="mt-1 truncate font-display text-lg leading-tight" data-testid="hud-street">
+			<p class="mt-1 truncate font-display text-lg leading-tight" data-testid="hud-street" title={insideShop?.name ?? hud.street ?? 'Off-street'}>
 				{insideShop ? insideShop.name : (hud.street ?? 'Off-street')}
 			</p>
 			{#if insideShop}<p class="truncate text-xs text-saffron-300" data-testid="hud-shop">Shop {insideShop.unit.code} · {insideShop.unit.street_name ?? ''}{insideShop.is_open ? '' : ' · closed'}</p>{/if}
 			{#if hud.streetAlt}<p class="khmer truncate text-xs text-river-200" lang={preferKhmer ? 'en' : 'km'}>{hud.streetAlt}</p>{/if}
 			{#if hud.landmark}
-				<p class="mt-1 flex items-center gap-1.5 truncate text-xs text-river-200"><Landmark size={12} /> Near {hud.landmark}</p>
+				<p class="location-detail mt-1 flex items-center gap-1.5 truncate text-xs text-river-200"><Landmark size={12} /> Near {hud.landmark}</p>
 			{/if}
-			<p class="mt-1 font-mono text-[10px] text-river-200/80" data-testid="hud-coords">
+			<p class="location-detail mt-1 font-mono text-[10px] text-river-200/80" data-testid="hud-coords">
 				{hud.lat.toFixed(5)}, {hud.lon.toFixed(5)} · x {hud.x.toFixed(0)} z {hud.z.toFixed(0)}
 			</p>
 		</div>
 
 		<!-- Toolbar -->
-		<div class="absolute top-3 right-3 flex flex-col gap-2">
+		<nav class="world-toolbar absolute top-3 right-3 flex flex-col gap-2" aria-label="World controls">
 			{#each [['people', Users, 'People (P)'], ['places', MapPin, 'Places & shops (M)'], ['garage', Bike, 'My vehicles (V)'], ['cart', ShoppingCart, 'Cart (C)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
-				<button class="relative grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800 {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={label} title={label} onclick={() => (panel = panel === id ? '' : id)}>
+				<button class="relative grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800 {id === 'settings' || id === 'help' ? 'secondary-control' : ''} {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={preferKhmer && id in labels ? labels[id as keyof typeof labels] : label} aria-expanded={panel === id} title={id in labels ? labels[id as keyof typeof labels] : label} onclick={() => (panel = panel === id ? '' : id)}>
 					<Icon size={19} />
 					{#if id === 'cart' && cart?.item_count}<span class="absolute -mt-7 ml-7 rounded-full bg-saffron-500 px-1.5 text-[10px] font-bold text-river-950" data-testid="cart-count">{cart.item_count}</span>{/if}
 				</button>
 			{/each}
-			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-brick-600" aria-label="Sign out" title="Sign out" onclick={signOut}><LogOut size={18} /></button>
-		</div>
+			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
+		</nav>
 
 		<!-- Minimap -->
-		<div class="absolute bottom-10 left-3 overflow-hidden rounded-2xl border-2 border-white/80 shadow-xl">
+		<div class="world-minimap absolute bottom-10 left-3 overflow-hidden rounded-2xl border-2 border-white/80 shadow-xl" class:expanded={mapExpanded}>
 			<canvas bind:this={minimap} width="170" height="170" class="block h-[150px] w-[150px] sm:h-[170px] sm:w-[170px]" aria-label="Minimap"></canvas>
 			<span class="absolute top-1.5 left-1/2 -translate-x-1/2 rounded bg-river-950/70 px-1.5 text-[10px] font-bold">N</span>
 			<span class="absolute right-2 bottom-1.5 rounded bg-river-950/70 px-1.5 text-[9px]">100 m ▬</span>
+			<button class="map-toggle absolute top-1 right-1 grid h-7 w-7 place-items-center rounded-lg bg-river-950/80 text-paper" aria-label={mapExpanded ? 'Shrink minimap' : 'Expand minimap'} aria-expanded={mapExpanded} onclick={() => mapExpanded = !mapExpanded}>{#if mapExpanded}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}</button>
 		</div>
 
 		<!-- Status -->
-		<div class="pointer-events-none absolute right-3 bottom-10 flex flex-col items-end gap-1.5 text-[11px]">
+		<div class="world-status pointer-events-none absolute right-3 bottom-10 flex flex-col items-end gap-1.5 text-[11px]">
 			{#if net}
 				<span class="flex items-center gap-1.5 rounded-full px-3 py-1 backdrop-blur {net.status === 'open' ? 'bg-river-950/70' : 'bg-brick-600/85'}" data-testid="hud-net" data-status={net.status}>
 					{#if net.status === 'open'}
@@ -427,11 +474,13 @@
 					{/if}
 				</span>
 			{/if}
-			<span class="flex items-center gap-1.5 rounded-full bg-river-950/70 px-3 py-1 backdrop-blur" data-testid="hud-perf"><Gauge size={12} /> {hud.fps} fps · {hud.chunks} chunks{hud.pending ? ` (+${hud.pending})` : ''}</span>
+			<span class="performance-status flex items-center gap-1.5 rounded-full bg-river-950/70 px-3 py-1 backdrop-blur" data-testid="hud-perf"><Gauge size={12} /> {hud.fps} fps · {hud.chunks} chunks{hud.pending ? ` (+${hud.pending})` : ''}</span>
 		</div>
 
 		{#if net}
-			<div class="pointer-events-none absolute bottom-10 left-[calc(170px+1.5rem)] flex flex-col gap-2 max-sm:bottom-52 max-sm:left-3">
+			{#if compact}<button class="chat-toggle absolute grid h-11 w-11 place-items-center rounded-full bg-river-950/85 shadow-lg" aria-label={chatOpen ? 'Close chat' : 'Open chat'} aria-expanded={chatOpen} onclick={() => chatOpen = !chatOpen}>{#if chatOpen}<X size={20} />{:else}<MessageCircle size={20} />{/if}</button>{/if}
+			{#if !compact || chatOpen}
+			<div class="world-chat pointer-events-none absolute bottom-10 left-[calc(170px+1.5rem)] flex flex-col gap-2">
 				<div class="pointer-events-auto flex gap-1.5" role="group" aria-label="Emotes (keys 1–4)">
 					{#each EMOTE_BUTTONS as [id, label], i (id)}
 						<button class="flex items-center gap-1 rounded-full bg-river-950/70 px-2.5 py-1 text-[11px] font-semibold backdrop-blur hover:bg-river-800" title={`${label} (${i + 1})`} onclick={() => net?.emote(id)} data-testid={`emote-${id}`}>
@@ -442,6 +491,7 @@
 				</div>
 				<ChatBox session={net} bind:input={chatInput} />
 			</div>
+			{/if}
 			<div class="absolute {hud.nav && navTarget ? 'top-24' : 'top-3'} left-1/2 flex w-[min(26rem,calc(100vw-8rem))] -translate-x-1/2 flex-col gap-2" aria-live="polite">
 				{#each net.toasts as t (t.key)}
 					<div class="flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm shadow-xl {t.kind === 'warning' ? 'bg-brick-600 text-white' : 'bg-paper text-ink'}" data-testid="toast">
@@ -456,7 +506,7 @@
 		{/if}
 
 		{#if hud.mode !== 'foot'}
-			<div class="pointer-events-none absolute right-3 bottom-[5.5rem] flex items-end gap-2" data-testid="hud-ride" data-mode={hud.mode} data-speed={hud.speedKmh}>
+			<div class="world-speed pointer-events-none absolute right-3 bottom-[5.5rem] flex items-end gap-2" data-testid="hud-ride" data-mode={hud.mode} data-speed={hud.speedKmh}>
 				{#if hud.wrongWay}
 					<span class="flex items-center gap-1.5 rounded-full bg-brick-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg" data-testid="hud-wrong-way"><TriangleAlert size={14} /> Wrong way: one-way street</span>
 				{:else if hud.oneWay}
@@ -473,7 +523,7 @@
 		{/if}
 
 		{#if hud.nav && navTarget}
-			<div class="absolute top-3 left-1/2 z-10 w-[min(24rem,calc(100vw-8rem))] -translate-x-1/2 rounded-2xl bg-river-950/85 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-nav" data-arrived={hud.nav.arrived} data-remaining={Math.round(hud.nav.remaining)}>
+			<div class="world-guidance absolute top-3 left-1/2 z-10 w-[min(24rem,calc(100vw-8rem))] -translate-x-1/2 rounded-2xl bg-river-950/85 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-nav" data-arrived={hud.nav.arrived} data-remaining={Math.round(hud.nav.remaining)}>
 				<div class="flex items-start gap-3">
 					<RouteIcon size={20} class="mt-0.5 shrink-0 text-saffron-300" />
 					<div class="min-w-0 flex-1">
@@ -497,7 +547,7 @@
 		{/if}
 
 		{#if net && (hud.mode !== 'foot' || net.reachable)}
-			<div class="absolute bottom-[11.5rem] left-1/2 -translate-x-1/2" data-testid="ride-prompt" data-kind={hud.mode !== 'foot' ? (canPark ? 'park' : 'pull_over') : 'ride'}>
+			<div class="world-action absolute bottom-[11.5rem] left-1/2 -translate-x-1/2" data-testid="ride-prompt" data-kind={hud.mode !== 'foot' ? (canPark ? 'park' : 'pull_over') : 'ride'}>
 				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur hover:bg-river-800 disabled:opacity-60" onclick={rideOrPark} disabled={net.pendingRide}>
 					<kbd class="mr-2 rounded bg-saffron-500 px-1.5 font-mono text-river-950">F</kbd>
 					{#if hud.mode !== 'foot'}
@@ -510,7 +560,7 @@
 		{/if}
 
 		{#if prompt || held}
-			<div class="pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
+			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
 				{#if held}
 					<div class="flex items-center gap-3 rounded-2xl bg-paper px-3 py-2 text-ink shadow-xl" data-testid="held-product">
 						{#if held.image_url}<img src={held.image_url} alt="" class="h-12 w-12 rounded-lg object-cover" />{:else}<Package size={28} class="text-ink-soft" />{/if}
@@ -522,9 +572,9 @@
 					</div>
 				{/if}
 				{#if prompt}
-					<p class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur">
+					<button class="pointer-events-auto rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur" onclick={interact}>
 						<kbd class="mr-2 rounded bg-saffron-500 px-1.5 font-mono text-river-950">E</kbd>{prompt.label}
-					</p>
+					</button>
 				{/if}
 			</div>
 		{/if}
@@ -535,12 +585,12 @@
 			</div>
 		{/if}
 
-		<p class="absolute right-0 bottom-0 left-0 bg-gradient-to-t from-river-950/80 to-transparent px-3 pt-4 pb-1.5 text-center text-[10px] text-river-200">
-			Map data © OpenStreetMap contributors (ODbL) · Geometry from OSM; heights, colours and trees are partly estimated · Not a live replica of Phnom Penh
+		<p class="world-attribution absolute right-0 bottom-0 left-0 bg-gradient-to-t from-river-950/80 to-transparent px-3 pt-4 pb-1.5 text-center text-[10px] text-river-200">
+			<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" class="underline">© OpenStreetMap contributors (ODbL)</a><span class="attribution-detail"> · Geometry from OSM; heights, colours and trees are partly estimated · Not a live replica of Phnom Penh</span>
 		</p>
 
-		{#if touch}
-			<div class="absolute right-4 bottom-44 grid grid-cols-3 gap-1.5">
+		{#if touch && !panel && !(compact && chatOpen)}
+			<div class="world-touch absolute right-4 bottom-44 grid grid-cols-3 gap-1.5" data-testid="touch-controls">
 				<span></span><button class="pad" aria-label="Forward" {...pad('w')}><ChevronUp /></button><span></span>
 				<button class="pad" aria-label="Left" {...pad('a')}><ChevronLeft /></button>
 				<button class="pad" aria-label="Run" {...pad('shift')}><Footprints size={18} /></button>
@@ -551,9 +601,27 @@
 	{/if}
 
 	{#if panel}
-		<div class="absolute top-3 right-17 {panel === 'people' ? 'w-[min(27rem,calc(100vw-5.5rem))]' : 'w-[min(22rem,calc(100vw-5.5rem))]'} rounded-2xl bg-paper p-5 text-ink shadow-2xl" role="dialog" aria-label={panel}>
+		<button class="world-backdrop" aria-label="Dismiss overlay" tabindex="-1" onclick={() => panel = ''}></button>
+		<div use:dialogFocus={panel} class="world-panel absolute top-3 right-17 {panel === 'people' ? 'w-[min(27rem,calc(100vw-5.5rem))]' : 'w-[min(22rem,calc(100vw-5.5rem))]'} rounded-2xl bg-paper p-5 text-ink shadow-2xl" role="dialog" aria-modal="true" aria-label={panel} tabindex="-1">
 			<button class="absolute top-3 right-3 rounded-lg p-1 text-ink-soft hover:bg-paper-2" aria-label="Close" onclick={() => (panel = '')}><X size={18} /></button>
-			{#if panel === 'people' && net}
+			{#if panel === 'menu'}
+				<h2 class="display mb-4 text-xl font-bold">Your city</h2>
+				<div class="grid gap-2">
+					<button class="btn-ghost justify-start" onclick={() => panel = 'wallet'}><WalletCards size={18} />Demo wallet</button>
+					{#if isDriver}<button class="btn-ghost justify-start" onclick={() => panel = 'driver'}><Truck size={18} />Delivery jobs</button>{/if}
+					<a class="btn-ghost justify-start" href="/orders"><Package size={18} />My orders</a>
+					<a class="btn-ghost justify-start" href="/seller"><Store size={18} />{isSeller ? 'Seller dashboard' : 'Open a shop'}</a>
+					{#if session.user?.active_roles.includes('admin')}<a class="btn-ghost justify-start" href="/admin"><Users size={18} />Administration</a>{/if}
+					<button class="btn-ghost justify-start" onclick={() => panel = 'settings'}><Settings2 size={18} />Settings</button>
+					<button class="btn-ghost justify-start" onclick={() => panel = 'help'}><CircleHelp size={18} />Controls & map information</button>
+					<button class="btn-quiet justify-start text-brick-600" onclick={signOut}><LogOut size={18} />Sign out</button>
+				</div>
+			{:else if panel === 'wallet'}
+				<h2 class="display mb-4 text-xl font-bold">Demo wallet</h2><WalletPanel />
+			{:else if panel === 'driver'}
+				<h2 class="display mb-4 text-xl font-bold">Delivery jobs</h2>
+				<DriverPanel onGuide={(point) => showRoute(point, city?.mode ?? 'foot')} />
+			{:else if panel === 'people' && net}
 				<h2 class="display mb-3 text-xl font-bold">People</h2>
 				<div class="h-[min(32rem,calc(100dvh-10rem))]"><PeoplePanel session={net} /></div>
 			{:else if panel === 'cart'}
@@ -620,6 +688,7 @@
 			{:else if panel === 'settings'}
 				<h2 class="display text-xl font-bold">Settings</h2>
 				<p class="label mt-4">Graphics</p>
+				<p class="hint">{hud?.fps ?? 0} fps · {hud?.chunks ?? 0} loaded chunks · {net?.rtt ?? '—'} ms latency</p>
 				<div class="grid grid-cols-2 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
 					{#each [['high', 'Quality'], ['low', 'Performance']] as const as [q, text] (q)}
 						<button class="rounded-lg py-2 {quality === q ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => setQuality(q)}>{text}</button>
@@ -669,6 +738,58 @@
 </div>
 
 <style>
+	.world-shell {
+		height: 100dvh;
+		--hud-top: max(12px, env(safe-area-inset-top));
+		--hud-left: max(12px, env(safe-area-inset-left));
+		--hud-right: max(12px, env(safe-area-inset-right));
+		--hud-bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px));
+	}
+	.world-location { top: var(--hud-top); left: var(--hud-left); }
+	.world-toolbar { top: var(--hud-top); right: var(--hud-right); }
+	.world-panel { z-index: 40; max-height: calc(100dvh - var(--hud-top) - var(--hud-bottom)); overflow-y: auto; overscroll-behavior: contain; }
+	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: rgb(11 37 36 / .3); }
+	.map-toggle { display: none; }
+	.world-attribution { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+	.compact .world-location { max-width: min(20rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 10px 12px; border-radius: 14px; }
+	.compact .location-detail { display: none; }
+	.compact .world-toolbar { flex-direction: row; gap: 6px; }
+	.compact .secondary-control { display: none; }
+	.compact .world-minimap { left: var(--hud-left); bottom: var(--hud-bottom); border-width: 1px; border-radius: 14px; }
+	.compact .world-minimap canvas { width: 104px; height: 104px; }
+	.compact .world-minimap.expanded canvas { width: min(230px, 50vw); height: min(230px, 50vw); }
+	.compact .map-toggle { display: grid; }
+	.compact .world-minimap > span { font-size: 8px; }
+	.compact .world-status { top: calc(var(--hud-top) + 86px); left: var(--hud-left); right: auto; bottom: auto; font-size: 10px; }
+	.compact .performance-status { display: none; }
+	.compact .world-touch { right: var(--hud-right); bottom: var(--hud-bottom); gap: 4px; }
+	.compact .pad { width: 42px; height: 42px; border: 1px solid rgb(255 255 255 / .14); border-radius: 13px; }
+	.compact .chat-toggle { z-index: 21; bottom: var(--hud-bottom); left: 50%; transform: translateX(-50%); border: 1px solid rgb(255 255 255 / .15); }
+	.compact .world-chat { z-index: 22; left: var(--hud-left); bottom: calc(var(--hud-bottom) + 54px); max-width: calc(100vw - var(--hud-left) - var(--hud-right)); }
+	.compact .world-chat :global([data-testid='chat']) { width: min(24rem, calc(100vw - var(--hud-left) - var(--hud-right))); }
+	.compact .world-chat :global([data-testid='chat-log']) { max-height: min(8rem, 26dvh); }
+	.compact[data-chat-open='true'] .world-minimap { visibility: hidden; }
+	.compact .world-attribution { padding-top: 0; font-size: 8px; line-height: 12px; }
+	.compact .attribution-detail { display: none; }
+	.compact .world-guidance { top: calc(var(--hud-top) + 54px); right: var(--hud-right); left: auto; width: min(24rem, calc(100vw - 22rem)); transform: none; padding: 10px 12px; }
+	.compact .world-action { bottom: calc(var(--hud-bottom) + 64px); max-width: calc(100vw - 19rem); text-align: center; }
+	.compact .world-action > button { min-height: 44px; font-size: 12px; }
+	.compact .world-speed { right: calc(var(--hud-right) + 144px); bottom: calc(var(--hud-bottom) + 54px); }
+	.compact .world-speed > :global(div) { padding: 6px 10px; }
+	.compact .world-panel { top: var(--hud-top); right: var(--hud-right); width: min(27rem, calc(100vw - var(--hud-left) - var(--hud-right))); padding: 20px; }
+	.compact[data-panel-open='true'] .world-toolbar, .compact[data-panel-open='true'] .chat-toggle { visibility: hidden; }
+	@media (max-width: 600px) {
+		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
+		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }
+		.compact .world-guidance { top: calc(var(--hud-top) + 166px); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
+		.compact .world-action { bottom: calc(var(--hud-bottom) + 150px); max-width: calc(100vw - 2rem); width: max-content; }
+		.compact .world-speed { right: var(--hud-right); bottom: calc(var(--hud-bottom) + 145px); }
+	}
+	@media (max-height: 400px) and (min-width: 601px) {
+		.compact .world-minimap canvas { width: 88px; height: 88px; }
+		.compact .world-minimap.expanded canvas { width: 180px; height: 180px; }
+		.compact .world-action { bottom: calc(var(--hud-bottom) + 36px); }
+	}
 	.pad {
 		display: grid;
 		place-items: center;

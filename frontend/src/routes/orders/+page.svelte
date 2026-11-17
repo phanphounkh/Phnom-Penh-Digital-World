@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import DeliveryTracking from '$lib/components/DeliveryTracking.svelte';
 	import { ApiError } from '$lib/api/client';
 	import { money, ORDER_LABEL, shopping, type Order } from '$lib/api/market';
 
@@ -15,7 +16,11 @@
 		}
 		loaded = true;
 	}
-	onMount(load);
+	onMount(() => {
+		void load();
+		const timer = setInterval(() => { if (!document.hidden) void load(); }, 5000);
+		return () => clearInterval(timer);
+	});
 
 	async function act(fn: () => Promise<unknown>) {
 		error = '';
@@ -28,6 +33,7 @@
 	}
 
 	const STEPS = ['paid', 'merchant_accepted', 'preparing', 'ready_for_pickup', 'completed'];
+	const DELIVERY_STEPS = ['paid', 'merchant_accepted', 'preparing', 'ready_for_pickup', 'assigned_to_driver', 'picked_up', 'in_transit', 'delivered', 'completed'];
 </script>
 
 <svelte:head><title>My orders · Phnom Penh Digital World</title></svelte:head>
@@ -45,15 +51,16 @@
 		{#if error}<p class="alert-error">{error}</p>{/if}
 		{#if loaded && !orders.length}<p class="card p-5 text-sm text-ink-soft">No orders yet. Walk into a shop in the city to buy something.</p>{/if}
 		{#each orders as o (o.id)}
+			{@const steps = o.fulfillment === 'delivery' ? DELIVERY_STEPS : STEPS}
 			<article class="card space-y-3 p-5" data-testid="buyer-order" data-status={o.status}>
 				<div class="flex flex-wrap items-baseline justify-between gap-2">
 					<p class="font-semibold">{o.number} · {o.merchant_name}</p>
 					<span class="chip">{ORDER_LABEL[o.status]}</span>
 				</div>
-				{#if STEPS.includes(o.status)}
+				{#if steps.includes(o.status)}
 					<ol class="flex gap-1" aria-label="Progress">
-						{#each STEPS as s, i (s)}
-							<li class="h-1.5 flex-1 rounded-full {i <= STEPS.indexOf(o.status) ? 'bg-river-700' : 'bg-paper-2'}" title={ORDER_LABEL[s as keyof typeof ORDER_LABEL]}></li>
+						{#each steps as s, i (s)}
+							<li class="h-1.5 flex-1 rounded-full {i <= steps.indexOf(o.status) ? 'bg-river-700' : 'bg-paper-2'}" title={ORDER_LABEL[s as keyof typeof ORDER_LABEL]}></li>
 						{/each}
 					</ol>
 				{/if}
@@ -62,9 +69,10 @@
 				</ul>
 				<p class="text-sm">
 					<strong>{money(o.total_minor)}</strong>
-					{#if o.pickup_shop} · pick up at {o.pickup_shop} ({o.pickup_unit}){/if}
+					{#if o.pickup_shop} · {o.fulfillment === 'delivery' ? 'from' : 'pick up at'} {o.pickup_shop} ({o.pickup_unit}){/if}
 					{#if o.refunded_minor} · refunded {money(o.refunded_minor)} (demo){/if}
 				</p>
+				{#if o.fulfillment === 'delivery'}<DeliveryTracking orderId={o.id} />{/if}
 				{#if o.cancel_reason}<p class="text-xs text-ink-soft">{o.cancel_reason}</p>{/if}
 				<div class="flex flex-wrap gap-2">
 					{#if o.status === 'pending_payment'}

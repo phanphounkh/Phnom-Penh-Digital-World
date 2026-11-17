@@ -53,6 +53,7 @@
 		</div>
 		{#if error}<p class="alert-error" role="alert">{error}</p>{/if}
 		<button class="btn-primary w-full" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+		<a class="block py-2 text-center text-sm font-semibold text-river-800 underline" href="/forgot-password">Forgot your password?</a>
 	</form>
 	{#snippet footer()}
 		New here? <a class="font-semibold text-river-800 underline" href="/register">Create an account</a>

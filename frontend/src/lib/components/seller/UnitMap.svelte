@@ -7,6 +7,7 @@
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import type { GeoJSONSource, Map as MapLibreMap, StyleSpecification } from 'maplibre-gl';
 	import { env } from '$env/dynamic/public';
+	import { loadMapLibre } from '$lib/geo/maplibre';
 	import { market, type Unit } from '$lib/api/market';
 
 	let {
@@ -24,6 +25,7 @@
 	let units: Unit[] = [];
 	let note = $state('');
 	let offline = $state(false);
+	let ready = $state(false);
 	const MIN_ZOOM = 16;
 
 	const FALLBACK: StyleSpecification = {
@@ -94,7 +96,7 @@
 	onMount(() => {
 		let disposed = false;
 		(async () => {
-			const maplibre = await import('maplibre-gl');
+			const maplibre = await loadMapLibre();
 			const s = await style();
 			if (disposed) return;
 			map = new maplibre.Map({
@@ -133,6 +135,7 @@
 				map.on('mouseenter', 'units-fill', () => map && (map.getCanvas().style.cursor = 'pointer'));
 				map.on('mouseleave', 'units-fill', () => map && (map.getCanvas().style.cursor = ''));
 				map.on('moveend', refresh);
+				ready = true;
 				refresh();
 			});
 		})();
@@ -151,7 +154,7 @@
 </script>
 
 <div class="relative h-full min-h-72 overflow-hidden rounded-2xl border border-river-900/10">
-	<div bind:this={host} class="absolute inset-0"></div>
+	<div bind:this={host} class="absolute inset-0" data-testid="unit-map" data-ready={ready}></div>
 	<div class="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
 		<span class="rounded bg-[#3d7a4f] px-1.5 py-0.5 text-white">Available</span>
 		<span class="rounded bg-[#e8a33d] px-1.5 py-0.5 text-river-950">Real business: verification</span>

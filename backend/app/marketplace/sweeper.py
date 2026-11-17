@@ -5,9 +5,15 @@ functions also run lazily when the affected rows are read."""
 import asyncio
 import contextlib
 import logging
+from datetime import timedelta
 
+from sqlalchemy import delete
+
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.marketplace import checkout, claims
+from app.models import ChatMessage, PasswordReset
+from app.utils.time import utcnow
 
 logger = logging.getLogger("ppw.sweeper")
 INTERVAL_SECONDS = 60
@@ -18,6 +24,16 @@ async def sweep_once() -> dict[str, int]:
         expired_claims = await claims.expire_due(session)
     async with SessionLocal() as session:
         expired_payments = await checkout.expire_due_payments(session)
+    async with SessionLocal() as session:
+        await session.execute(
+            delete(ChatMessage).where(
+                ChatMessage.created_at < utcnow() - timedelta(days=settings.chat_retention_days)
+            )
+        )
+        await session.execute(
+            delete(PasswordReset).where(PasswordReset.expires_at < utcnow() - timedelta(days=1))
+        )
+        await session.commit()
     return {"claims": expired_claims, "payments": expired_payments}
 
 

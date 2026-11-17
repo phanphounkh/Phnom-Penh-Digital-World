@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { api } from '$lib/api/client';
+	import type { DeliveryJob } from '$lib/api/commerce';
 	import { admin } from '$lib/api/endpoints';
 	import { ApiError } from '$lib/api/client';
 	import type { PlayerReport, RoleRequest } from '$lib/api/types';
 	import { marketAdmin, money, type AdminMerchant, type AdminProduct, type Claim, type Dispute } from '$lib/api/market';
 
 	let { data } = $props();
-	let section = $state<'roles' | 'reports' | 'merchants' | 'claims' | 'products'>('merchants');
+	let section = $state<'roles' | 'reports' | 'merchants' | 'claims' | 'products' | 'operations'>('merchants');
+	let operations = $state<{ counts: Record<string, number | string>; connected_players: number; rooms: number; chat_retention_days: number; deliveries: DeliveryJob[] } | null>(null);
 	let merchantStatus = $state<'pending' | 'approved' | 'rejected' | 'suspended'>('pending');
 	let merchants = $state<AdminMerchant[]>([]);
 	let claims = $state<Claim[]>([]);
@@ -24,7 +27,8 @@
 	async function load() {
 		error = '';
 		try {
-			if (section === 'roles') requests = await admin.roleRequests(status);
+			if (section === 'operations') operations = await api('/admin/operations');
+			else if (section === 'roles') requests = await admin.roleRequests(status);
 			else if (section === 'reports') reports = await admin.reports(reportStatus);
 			else if (section === 'merchants') merchants = await marketAdmin.merchants(merchantStatus);
 			else if (section === 'claims') [claims, disputes] = await Promise.all([marketAdmin.claims('pending'), marketAdmin.disputes('open')]);
@@ -68,6 +72,7 @@
 	}
 
 	const TITLES = {
+		operations: 'Operations',
 		roles: 'Seller & driver requests',
 		reports: 'Player reports',
 		merchants: 'Merchant applications',
@@ -96,14 +101,24 @@
 			<p class="alert-error">Administrator access is required.</p>
 		{:else}
 			<div class="flex flex-wrap gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
-				{#each [['merchants', 'Merchants'], ['claims', 'Claims & disputes'], ['products', 'Products'], ['roles', 'Role requests'], ['reports', 'Reports']] as const as [id, label] (id)}
+				{#each [['merchants', 'Merchants'], ['claims', 'Claims & disputes'], ['products', 'Products'], ['roles', 'Role requests'], ['reports', 'Reports'], ['operations', 'Operations']] as const as [id, label] (id)}
 					<button class="rounded-lg px-3 py-2 {section === id ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => { section = id; notice = ''; load(); }} data-testid={`admin-${id}`}>{label}</button>
 				{/each}
 			</div>
 			{#if error}<p class="alert-error">{error}</p>{/if}
 			{#if notice}<p class="alert border-river-500/30 bg-river-200/40">{notice}</p>{/if}
 
-			{#if section === 'merchants'}
+			{#if section === 'operations' && operations}
+				<div class="grid gap-3 sm:grid-cols-3">
+					{#each [['Players connected', operations.connected_players], ['World rooms', operations.rooms], ...Object.entries(operations.counts).map(([key, value]) => [key.replaceAll('_', ' '), value])] as [label, value]}
+						<div class="card p-4"><p class="text-xs capitalize text-ink-soft">{label}</p><p class="mt-2 font-mono text-2xl">{value}</p></div>
+					{/each}
+				</div>
+				<p class="text-sm text-ink-soft">Journal total and wallet mismatches should both be 0. Chat messages expire after {operations.chat_retention_days} days. <button class="font-semibold underline" onclick={load}>Refresh</button></p>
+				{#each operations.deliveries as job (job.id)}
+					<article class="card space-y-3"><p class="font-semibold">{job.number} · {job.shop_name}</p><p class="text-sm">{job.status.replaceAll('_', ' ')} · {job.driver_online ? 'Driver connected' : 'Driver disconnected'}</p><label class="label" for={`refund-${job.id}`}>Reason for cancellation and refund</label><input id={`refund-${job.id}`} class="input" minlength="10" maxlength="300" bind:value={reasons[job.id]} placeholder="Explain the delivery issue (at least 10 characters)" /><button class="btn-ghost text-brick-600" disabled={(reasons[job.id]?.trim().length ?? 0) < 10} onclick={() => confirm(`Cancel and refund ${job.number}?`) && market(() => api(`/admin/deliveries/${job.id}/refund`, { method: 'POST', body: { reason: reasons[job.id] } }))}>Cancel delivery & refund demo credits</button></article>
+				{:else}<p class="card text-sm text-ink-soft">No deliveries in progress.</p>{/each}
+			{:else if section === 'merchants'}
 				<div class="flex gap-2">
 					{#each ['pending', 'approved', 'rejected', 'suspended'] as const as s (s)}
 						<button class="chip py-2 {merchantStatus === s ? 'bg-river-900 text-paper' : ''}" onclick={() => { merchantStatus = s; load(); }}>{s}</button>

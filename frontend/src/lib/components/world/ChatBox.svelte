@@ -72,7 +72,9 @@
 			bind:value={text}
 			onkeydown={keydown}
 			maxlength="280"
-			class="min-w-0 flex-1 rounded-xl border border-white/15 bg-river-950/75 px-3 py-2 text-sm text-paper placeholder:text-river-200/60 backdrop-blur focus:border-saffron-500 focus:outline-none"
+			class="min-w-0 flex-1 rounded-xl border border-white/15 bg-river-950/75 px-3 py-2 text-base text-paper placeholder:text-river-200/60 backdrop-blur focus:border-saffron-500 focus:outline-none"
+			autocomplete="off"
+			enterkeyhint="send"
 			placeholder={channel === 'nearby' ? 'Say something to players nearby…' : 'Message everyone in this room…'}
 			aria-label="Chat message"
 			data-testid="chat-input"

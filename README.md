@@ -10,8 +10,8 @@ map data**. This repository grew out of two existing projects, which are left un
   core (config, Argon2 auth, CSRF, error envelope, rate limiting, Alembic, real-DB tests) is
   reused. Its canteen ordering and demo-payment code are the reference for Phases 4 and 7.
 
-**Status: Phases 1 (Foundation), 2 (3D city), 3 (Multiplayer), 4 (Marketplace) and 5
-(Transportation) are complete.** A new user can register, verify, build an avatar, choose roles, pick a private
+**Status: Phases 1–7 are implemented: foundation, 3D city, multiplayer, marketplace,
+transportation, simulated delivery and the demo wallet.** A new user can register, verify, build an avatar, choose roles, pick a private
 delivery address and a public spawn area on a real map, then walk the real streets of Daun Penh
 in 3D with other real players (chat, emotes, friends, invites, moderation). **Sellers** apply
 with their business details, are approved by an administrator, claim one of 1,680 virtual shop
@@ -22,7 +22,10 @@ order. Players take a free **bicycle or motorbike**, ride it on the real streets
 checks every move at that vehicle's speed and keeps it on roads it may use), get directions on a
 routing graph built from the OSM road network (one-way streets respected, right-hand lane), let
 the autopilot ride the route, and park at the kerb; other players see riders and parked vehicles.
-Delivery and the demo wallet come next (`docs/ROADMAP.md`).
+Approved drivers can now accept simulated deliveries, collect at shop doors, and follow routes
+to public virtual drop-off points. Buyers track orders, while a balanced demo-credit ledger
+handles payments, refunds and seller/driver earnings. See [operations and setup](docs/OPERATIONS.md)
+and the remaining work in [the roadmap](docs/ROADMAP.md).
 
 | | |
 |---|---|
@@ -45,7 +48,7 @@ showing B as an online friend).*
 
 | Layer | Technology |
 |---|---|
-| Web | SvelteKit 2 · Svelte 5 · TypeScript · Tailwind CSS 4 · Three.js 0.180 · MapLibre GL 5 · proj4 |
+| Web | SvelteKit 2 · Svelte 5 · TypeScript · Tailwind CSS 4 · Three.js 0.180 · MapLibre GL 6 · proj4 |
 | API | Python 3.13 · FastAPI · Pydantic 2 · SQLAlchemy 2 (async) · Alembic · GeoAlchemy2 · Shapely · pyproj · uv |
 | Data | PostgreSQL 17 + PostGIS 3.5 + pg_trgm (Docker) · OpenStreetMap snapshots |
 | 3D assets | Blender 4.3 (`bpy` scripts) → GLB |
@@ -75,9 +78,10 @@ npm run dev                               # http://localhost:5173
 > If your Docker CLI points at Docker Desktop but the system daemon is the one running, prefix
 > commands with `DOCKER_HOST=unix:///var/run/docker.sock`.
 
-**Verification codes:** no SMS or e-mail provider is connected yet. In development, the code is
-shown in a dashed "Developer mode" box on the Verify screen and logged by the API. The API
-refuses to start with this enabled when `APP_ENV=production`.
+**Verification codes:** development codes appear in a dashed "Developer mode" box and in API
+logs. Production uses configured SMTP email or an HTTPS SMS gateway; provider credentials
+must be supplied. The API refuses production mode with developer codes enabled. Password
+recovery is available at `/forgot-password`.
 
 **Admin:** sign in as the seeded admin and open `/admin` to approve seller and driver applications.
 
@@ -88,7 +92,45 @@ docker compose --profile full up -d --build   # http://localhost:3000
 ```
 
 The API container migrates, imports the OSM snapshot if the database has none, then serves.
+Both `http://localhost:3000` and `http://127.0.0.1:3000` are allowed locally. For a custom
+address, set `PUBLIC_ORIGIN` in `.env` to the exact browser origin (scheme, hostname and port),
+then rerun the command above to apply it to the backend and frontend.
 `infrastructure/nginx/ppw.conf` is an example TLS front proxy.
+
+To create the administrator and an optional local demo shop:
+
+```bash
+docker compose exec backend python scripts/seed.py
+docker compose exec backend python scripts/seed_demo.py
+```
+
+Each seed prints a new account's random password once and never changes existing passwords.
+The demo shop contains three products and is refused in production. See
+[the operating guide](docs/OPERATIONS.md) for delivery, wallet, notifications, backups and monitoring.
+
+### Delivery, wallet and mobile update (2026-11-17)
+
+- Checkout validates each product's fulfillment options. Virtual delivery costs $1.50 in demo
+  credits per shop, with a public drop-off selected by the buyer; private addresses stay private.
+- Approved drivers use `/driver` or More → Delivery jobs in the world. One active job per driver,
+  atomic acceptance, pickup/drop-off proximity checks, release before pickup, and reconnect support.
+- `/orders` refreshes delivery tracking every five seconds. Admin Operations can refund abandoned
+  jobs with an audited reason.
+- `/wallet` starts with $100 demo credits, permits explicit free demo credit additions, and shows
+  payments, refunds and payouts. PostgreSQL enforces balanced, immutable ledger entries.
+- Mobile landscape/portrait HUDs use safe areas, a compact toolbar, collapsible chat, an expandable
+  minimap, touch actions and scrollable dialogs with keyboard focus management.
+- SMTP/SMS integration, single-use password recovery, readiness checks, admin reconciliation,
+  configurable chat retention, a backup script and a CI workflow are included. Provider/domain
+  configuration, off-machine backup scheduling, scale-out and full Khmer translation remain operator
+  or future development work.
+
+Validation for this update: **149 backend tests**, **70 frontend unit tests** and the legacy
+frontend checks pass; frontend type checking has zero errors/warnings, and the production
+build succeeds. Production browser coverage includes onboarding, terrain/day-night,
+multiplayer, pickup shopping, vehicles, mobile portrait/landscape controls, wallet credits,
+delivery checkout/assignment/tracking and password recovery. After correcting MapLibre 6's
+worker bundling, the affected onboarding and commerce suites were rerun: **5 passed**.
 
 ## Using it
 

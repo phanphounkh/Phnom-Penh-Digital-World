@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
+	import { api } from '$lib/api/client';
 	import AuthShell from '$lib/components/AuthShell.svelte';
 	import { auth } from '$lib/api/endpoints';
 	import { ApiError } from '$lib/api/client';
@@ -7,6 +9,13 @@
 	import { session } from '$lib/stores/session.svelte';
 
 	let contactMode = $state<'email' | 'phone'>('email');
+	let channels = $state({ email: true, phone: true });
+	onMount(() => {
+		api<typeof channels>('/auth/capabilities').then((value) => {
+			channels = value;
+			if (!value.email && value.phone) contactMode = 'phone';
+		}).catch(() => {});
+	});
 	let form = $state({
 		username: '',
 		email: '',
@@ -97,6 +106,8 @@
 							? 'bg-white text-river-900 shadow'
 							: 'text-ink-soft'}"
 						aria-pressed={contactMode === mode}
+						disabled={!channels[mode]}
+						title={!channels[mode] ? `${mode === 'email' ? 'Email' : 'Phone'} verification is currently unavailable` : undefined}
 						onclick={() => (contactMode = mode)}>{mode === 'email' ? 'Email' : 'Phone'}</button
 					>
 				{/each}

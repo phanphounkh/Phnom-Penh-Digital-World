@@ -7,9 +7,9 @@
 | 3 | Multiplayer | ✅ Done |
 | 4 | Marketplace (shop claims, storefronts, cart, demo checkout) | ✅ Done |
 | 5 | Transportation (bicycle, motorbike, routing, parking; car and tuk-tuk later) | **✅ Done (this build)** |
-| 6 | Delivery (simulated jobs, tracking) | Next |
-| 7 | Demo wallet and double-entry ledger | Planned |
-| 8 | Optimisation and production readiness | Planned |
+| 6 | Delivery (simulated jobs, tracking) | ✅ Implemented |
+| 7 | Demo wallet and double-entry ledger | ✅ Implemented |
+| 8 | Optimisation and production readiness | Partial: mobile HUD, recovery, provider integration, CI, readiness, admin metrics, retention and backups; scaling and deployment setup remain |
 
 The first playable MVP (PRD, Part 17) is reached at the end of Phase 6 with a simulated
 delivery. Phases 3 and 4 can overlap.
@@ -147,9 +147,29 @@ delivery. Phases 3 and 4 can overlap.
 5. Buying, selling or renting vehicles comes with the Phase 7 wallet (today: free starters).
 6. A Khmer voice/UI for directions (step text is English; street names are bilingual).
 
-## Phase 6: next (delivery)
+## Phase 6: delivered (2026-11-17)
 
 Simulated delivery jobs on the routing graph: driver profiles (the driver role), job offers
 from paid orders with "delivery" fulfilment, pickup at the shop's door, a route to the buyer's
 virtual drop-off point, tracking on the buyer's order page, and delivery states on the order
-machine that already exist.
+machine that already exist. Driver availability, one-job concurrency limits, safe release,
+server-position checks at pickup/drop-off, reconnect support, and admin refunds are implemented.
+The buyer page polls tracking every five seconds. Drop-offs are public world points; no private
+address is copied into a delivery job. See `docs/OPERATIONS.md`.
+
+## Phase 7: delivered (2026-11-17)
+
+Demo wallets start with $100 in virtual credits and support explicit free credit additions.
+Payments debit into escrow; refunds return the debit; completed pickup or delivery pays the
+merchant and, for delivery, the driver. Ledger entries are immutable, balanced at database commit,
+and identified by unique references to prevent duplicate transfers. No credits have cash value.
+
+## Next priorities
+
+1. Configure real email/SMS credentials, a hostname and TLS before public registration.
+2. Schedule protected off-machine backups and rehearse restoration into an isolated database.
+3. Expand browser/device and GPU load coverage; CI currently runs static checks, unit/API tests
+   and the production build, with browser checks run separately.
+4. Add a shared rate-limit store, room ownership and cross-process messaging before adding API replicas.
+5. Translate the remaining UI into Khmer with native review. Mobile HUD labels and bilingual
+   geography exist, while most product screens remain English.

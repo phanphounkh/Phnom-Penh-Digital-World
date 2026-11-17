@@ -41,18 +41,28 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ppw}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ppw}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      # Accept both local browser addresses; PUBLIC_ORIGIN sets a custom deployment origin.
+      ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
       TRUST_PROXY_HEADERS: "true"
       EXPOSE_DEV_VERIFICATION_CODES: ${EXPOSE_DEV_VERIFICATION_CODES:-true}
       OSM_DATA_DIR: /app/tools/gis/data/osm
       MEDIA_ROOT: /app/var/media
       DEMO_PAYMENTS_ENABLED: ${DEMO_PAYMENTS_ENABLED:-true}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMS_WEBHOOK_URL: ${SMS_WEBHOOK_URL:-}
+      SMS_WEBHOOK_TOKEN: ${SMS_WEBHOOK_TOKEN:-}
+      CHAT_RETENTION_DAYS: ${CHAT_RETENTION_DAYS:-30}
     volumes:
       - media:/app/var/media
     expose:
       - "8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready')\""]
       interval: 10s
       timeout: 5s
       retries: 10

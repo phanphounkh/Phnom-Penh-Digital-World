@@ -6,6 +6,9 @@
 	 */
 	import { Minus, Plus, Trash2, BadgeCheck, TriangleAlert } from 'lucide-svelte';
 	import { ApiError } from '$lib/api/client';
+	import { onMount } from 'svelte';
+	import { geo } from '$lib/api/endpoints';
+	import type { SpawnPoint } from '$lib/api/types';
 	import { money, shopping, ORDER_LABEL, type Cart, type Payment } from '$lib/api/market';
 
 	let { cart, onCart }: { cart: Cart | null; onCart: (cart: Cart) => void } = $props();
@@ -17,6 +20,18 @@
 	let note = $state('');
 	let adult = $state(false);
 	let attemptKey = '';
+	let fulfillment = $state<'pickup' | 'delivery'>('pickup');
+	let dropoffId = $state('');
+	let points = $state<SpawnPoint[]>([]);
+	const fee = $derived(fulfillment === 'delivery' ? (cart?.groups.length ?? 0) * 150 : 0);
+	const total = $derived((cart?.total_minor ?? 0) + fee);
+	const supported = $derived(cart?.groups.every((group) => group.lines.every((line) => line.fulfillment.includes(fulfillment))) ?? false);
+	onMount(() => { geo.spawnPoints().then((value) => points = value).catch(() => {}); });
+	let fingerprint = '';
+	$effect(() => {
+		const next = JSON.stringify([total, fulfillment, dropoffId, note, adult]);
+		if (next !== fingerprint) { fingerprint = next; attemptKey = ''; }
+	});
 
 	function fail(e: unknown, fallback: string) {
 		error = e instanceof ApiError ? e.message : fallback;
@@ -42,7 +57,9 @@
 		attemptKey ||= crypto.randomUUID();
 		try {
 			payment = await shopping.checkout(attemptKey, {
-				expected_total_minor: cart.total_minor,
+				expected_total_minor: total,
+				fulfillment,
+				dropoff_spawn_id: fulfillment === 'delivery' ? dropoffId : undefined,
 				note: note || undefined,
 				age_confirmed: adult
 			});
@@ -118,20 +135,32 @@
 		</div>
 		{#if cart?.item_count}
 			<div class="mt-3 space-y-2 border-t border-river-900/10 pt-3">
-				<p class="flex justify-between font-semibold"><span>Total ({cart.item_count} items)</span><span data-testid="cart-total">{money(cart.total_minor)}</span></p>
-				<p class="text-xs text-ink-soft">Pickup at the shop. {cart.groups.length > 1 ? `${cart.groups.length} shops: one order each.` : ''} Delivery arrives with Phase 6.</p>
+				<label class="label" for="fulfillment">How would you like your order?</label>
+				<select id="fulfillment" class="input py-2 text-sm" bind:value={fulfillment}>
+					<option value="pickup">Pick up at the shop · free</option>
+					<option value="delivery">Virtual delivery · $1.50 per shop</option>
+				</select>
+				{#if fulfillment === 'delivery'}
+					<label class="label mt-2" for="dropoff">Public drop-off point</label>
+					<select id="dropoff" class="input py-2 text-sm" bind:value={dropoffId}><option value="">Choose a place in the city</option>{#each points as point (point.id)}<option value={point.id}>{point.name}</option>{/each}</select>
+					<p class="hint">Your real address is never shared. A driver meets you at this virtual point.</p>
+				{/if}
+				{#if !supported}<p class="error-text" role="alert">Some items do not support {fulfillment}. Choose another method or remove those items.</p>{/if}
+				{#if fee}<p class="flex justify-between text-sm text-ink-soft"><span>Delivery ({cart.groups.length} shops)</span><span>{money(fee)}</span></p>{/if}
+				<p class="flex justify-between font-semibold"><span>Total ({cart.item_count} items)</span><span data-testid="cart-total">{money(total)}</span></p>
 				<input class="input py-2 text-sm" placeholder="Note for the shop (optional)" maxlength="300" bind:value={note} />
 				{#if cart.needs_age_confirmation}
 					<label class="flex items-center gap-2 text-xs"><input type="checkbox" bind:checked={adult} /> I am 18 or older (age-restricted items)</label>
 				{/if}
-				<button class="btn-primary w-full" disabled={busy || !cart.can_checkout || (cart.needs_age_confirmation && !adult)} onclick={placeOrder} data-testid="place-order">
-					Place order · {money(cart.total_minor)}
+				<button class="btn-primary w-full" disabled={busy || !cart.can_checkout || !supported || (fulfillment === 'delivery' && !dropoffId) || (cart.needs_age_confirmation && !adult)} onclick={placeOrder} data-testid="place-order">
+					{busy ? 'Reserving order…' : `Place order · ${money(total)}`}
 				</button>
 			</div>
 		{/if}
 	{:else if step === 'pay' && payment}
 		<div class="mt-3 flex-1 space-y-3">
 			<p class="text-sm">Orders reserved. Pay within 15 minutes or they are released.</p>
+			<p class="hint">Payment uses your <a class="underline" href="/wallet" target="_blank" rel="noopener">demo wallet</a>. Each new wallet starts with $100 in virtual credits.</p>
 			{#each payment.orders as o (o.id)}
 				<p class="flex justify-between rounded-lg bg-white px-3 py-2 text-sm"><span>{o.number} · {o.merchant_name}</span><span>{money(o.total_minor)}</span></p>
 			{/each}
