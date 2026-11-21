@@ -58,6 +58,33 @@ evidence of hitches. When the page submits frames faster than the GPU process pr
 the driver periodically blocks for 200–400 ms. With vsync on, those stalls disappear entirely
 (0 frames over 50 ms in the same scenes). Use the capped mode to judge smoothness.
 
+## Gameplay polish: follow camera and see-through canopies
+
+Same machine and settings. `master` (before) and the change (after) were served side by side
+and measured back to back at the same spots, reached by in-game fast travel.
+
+**Cost.** The camera placement went from 2.0–4.6 µs to 2.9–5.9 µs per frame. That was
+measured in Node on Central Market's 1,216 real buildings over 200,000 orbiting frames at
+7.5, 14 and 22 m zoom. The leaf shader patch was measured with a same-frame A/B render that
+alternated the original shader, the patched shader with the fade off and the fade on
+(`renderer.render` + `gl.finish`, median ms per render). Zoomed out over the Wat Phnom park it
+measured 1.44 / 1.43 / 1.35 ms. Beside a tree with its canopy faded it measured
+1.18 / 1.07 / 1.33 ms. Both differences are within noise. Whole-scene runs hold a median of
+60 fps with p5 ≥ 59.5 in every scene, before and after. Occasional 100 ms–1.2 s stalls appeared
+in both builds and tracked the machine's load, not the build.
+
+**Obstruction.** Before → after:
+
+| Scenario | Before | After |
+|---|---|---|
+| Building between camera and head, 92 Central Market street spots orbiting at 7.5 / 14 / 22 m (deterministic, Node) | 0.04–5.3 % of frames, at up to 56 of 92 spots | **0 %** |
+| Avatar pixels visible, orbiting beside a Wat Phnom tree at default zoom (GPU render, mean) | 73.9 % | **91.2 %** |
+| … samples where the avatar is hidden (< 10 % visible) | 22.8 % | **1.9 %** |
+| Same, zoomed out: mean visible / hidden | 59.8 % / 33.1 % | **85.0 % / 3.2 %** |
+| Running through the park: mean visible / hidden | 86.6 % / 9.0 % | **94.2 % / 1.3 %** |
+
+The remaining hidden samples are mostly trunks, which stay solid on purpose.
+
 ## Not yet measured
 
 * Real devices other than this machine: discrete GPUs, older laptops, phones (mobile defaults

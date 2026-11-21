@@ -233,6 +233,38 @@ export function escapeFootprint(
 }
 
 /**
+ * Keep a point at height `y` (the camera lens) at least `radius` away from walls taller than
+ * it, pushing it sideways; lower walls, walk-only obstacles and doorway openings are ignored.
+ * Stops the near plane clipping into a facade when the camera runs alongside it.
+ */
+export function clearOfWalls(
+	world: CollisionWorld,
+	x: number,
+	y: number,
+	z: number,
+	radius: number
+): { x: number; z: number; pushed: boolean } {
+	let moved = false;
+	for (let iteration = 0; iteration < 3; iteration++) {
+		let pushed = false;
+		for (const w of world.query(x, z, radius + 0.1, scratch)) {
+			if (w.h <= y) continue;
+			const [cx, cz] = closestOnSegment(x, z, w);
+			const nx = x - cx,
+				nz = z - cz;
+			const d = Math.hypot(nx, nz);
+			if (d >= radius || d < 1e-6) continue; // clear, or exactly on the wall (no side to pick)
+			if (world.doors.length && y < DOORWAY_HEIGHT && world.inDoor(cx, cz)) continue;
+			x = cx + (nx / d) * radius;
+			z = cz + (nz / d) * radius;
+			pushed = moved = true;
+		}
+		if (!pushed) break;
+	}
+	return { x, z, pushed: moved };
+}
+
+/**
  * Fraction (0–1) along the 3D segment from `a` to `b` where it first passes through a wall
  * that is taller than the segment at that point; 1 when unobstructed. Used by the camera.
  */

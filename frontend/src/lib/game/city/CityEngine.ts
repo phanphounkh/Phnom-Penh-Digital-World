@@ -13,7 +13,10 @@ import { PlayerAnimations } from '$lib/game/player/PlayerAnimations.js';
 import { EmotePlayer } from '$lib/game/avatar/emotes';
 import type { EmoteName } from '$lib/game/net/protocol';
 import { ChunkManager } from './ChunkManager';
-import { CollisionWorld, escapeFootprint, moveCircle, rayFraction } from './collision';
+import { CollisionWorld, escapeFootprint, moveCircle } from './collision';
+import { FoliageFade } from './foliageFade';
+import { FollowCamera } from '$lib/game/camera/followCamera';
+import { approachSpeed, turnSpeedScale, turnTowards } from '$lib/game/player/locomotion';
 import { DayNight, type TimeMode } from './lighting';
 import { CityMaterials } from './materials';
 import { PropLibrary } from './props';
@@ -227,6 +230,9 @@ export async function createCity(
 	const materials = new CityMaterials();
 	const props = new PropLibrary();
 	await props.load();
+	// Tree canopies between the camera and the player are dithered away (see foliageFade.ts).
+	const foliage = new FoliageFade();
+	foliage.apply(props.materials);
 	const hills = terrainMesh(terrain, materials.terrain);
 	scene.add(hills);
 	const collision = new CollisionWorld();
@@ -300,10 +306,18 @@ export async function createCity(
 		routeDone = undefined;
 		done?.(arrived);
 	};
+	// Orbit input (mouse/touch drag, wheel, chase/autopilot swing); FollowCamera smooths it,
+	// keeps buildings out of the view and eases the focus after the player.
 	let camYaw = yaw + Math.PI; // behind the player
 	let camPitch = 0.38;
 	let camDistance = 7.5;
 	const cameraTarget = new THREE.Vector3();
+	const follow = new FollowCamera();
+	/** Snap the camera behind/around the player (start, fast travel, server teleport). */
+	const resetCamera = () => {
+		follow.reset({ x: px, y: terrain.height(px, pz) + EYE, z: pz, yaw: camYaw, pitch: camPitch, distance: camDistance });
+		placeCamera(0, terrain.height(px, pz) + EYE, camDistance);
+	};
 
 	const initial = projection.keysAround(px, pz, 220).filter((k) => region.chunk_keys.includes(k));
 	let done = 0;
@@ -327,24 +341,29 @@ export async function createCity(
 	};
 	const onKeyUp = (e: KeyboardEvent) => keys.delete(e.key.toLowerCase());
 	const onBlur = () => keys.clear();
-	let dragging = false;
+	// Orbit drag follows one pointer: a second finger on a touch screen no longer makes the
+	// camera jump between the two touch points.
+	let dragId: number | null = null;
 	let lastX = 0;
 	let lastY = 0;
 	const onPointerDown = (e: PointerEvent) => {
-		dragging = true;
+		if (dragId !== null) return;
+		dragId = e.pointerId;
 		lastX = e.clientX;
 		lastY = e.clientY;
 		renderer.domElement.setPointerCapture(e.pointerId);
 	};
 	const onPointerMove = (e: PointerEvent) => {
-		if (!dragging) return;
+		if (e.pointerId !== dragId) return;
 		camYaw -= (e.clientX - lastX) * 0.006;
 		lastDrag = performance.now() / 1000;
 		camPitch = THREE.MathUtils.clamp(camPitch + (e.clientY - lastY) * 0.004, 0.08, 1.25);
 		lastX = e.clientX;
 		lastY = e.clientY;
 	};
-	const onPointerUp = () => (dragging = false);
+	const onPointerUp = (e: PointerEvent) => {
+		if (e.pointerId === dragId) dragId = null;
+	};
 	const onWheel = (e: WheelEvent) => {
 		e.preventDefault();
 		camDistance = THREE.MathUtils.clamp(camDistance * (1 + Math.sign(e.deltaY) * 0.1), 2.5, 22);
@@ -355,6 +374,8 @@ export async function createCity(
 	renderer.domElement.addEventListener('pointerdown', onPointerDown);
 	renderer.domElement.addEventListener('pointermove', onPointerMove);
 	renderer.domElement.addEventListener('pointerup', onPointerUp);
+	renderer.domElement.addEventListener('pointercancel', onPointerUp); // e.g. a system gesture
+	renderer.domElement.addEventListener('lostpointercapture', onPointerUp);
 	renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
 
 	const resize = () => {
@@ -395,7 +416,6 @@ export async function createCity(
 	let frames = 0;
 	let fps = 60;
 	let slowTime = 0;
-	const desired = new THREE.Vector3();
 	const SHADOW_SNAP = 12;
 	let shadowX = NaN;
 	let shadowZ = NaN;
@@ -430,16 +450,17 @@ export async function createCity(
 			behind = Math.atan2(Math.sin(behind), Math.cos(behind));
 			camYaw += behind * (1 - Math.exp(-dt * 2.5));
 		}
-		const target = len > 0 ? (keys.has('shift') || autoRun ? RUN : WALK) : 0;
-		speed += (target - speed) * (1 - Math.exp(-dt * 8));
+		let target = len > 0 ? (keys.has('shift') || autoRun ? RUN : WALK) : 0;
 		let travel = 0;
 		if (len > 0) {
 			mx /= len;
 			mz /= len;
-			let delta = Math.atan2(mx, mz) - yaw;
-			delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-			yaw += delta * (1 - Math.exp(-dt * 12));
+			const want = Math.atan2(mx, mz);
+			// Ease off while still turning through a sharp corner, so U-turns stay tight.
+			target *= turnSpeedScale(want - yaw);
+			yaw = turnTowards(yaw, want, dt);
 		}
+		speed = approachSpeed(speed, target, dt);
 		if (speed > 0.02) {
 			const result = moveCircle(collision, px, pz, Math.sin(yaw) * speed * dt, Math.cos(yaw) * speed * dt, RADIUS);
 			travel = Math.hypot(result.x - px, result.z - pz);
@@ -463,23 +484,19 @@ export async function createCity(
 		updateWorld();
 	}
 
-	/** Camera: orbit, pulled in when a building stands between it and the player. */
+	/** Camera: smoothed orbit, pulled in when a building stands between it and the player
+	 * (camera/followCamera.ts); tree canopies in the way are faded instead (foliageFade.ts). */
 	function placeCamera(dt: number, head: number, distance: number) {
-		desired.set(
-			px + Math.sin(camYaw) * Math.cos(camPitch) * distance,
-			head + Math.sin(camPitch) * distance,
-			pz + Math.cos(camYaw) * Math.cos(camPitch) * distance
+		const p = follow.update(
+			dt,
+			{ x: px, y: head, z: pz, yaw: camYaw, pitch: camPitch, distance },
+			collision,
+			(x, z) => terrain.height(x, z)
 		);
-		const f = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
-		if (f < 1) {
-			const k = Math.max(0.18, f - 0.4 / distance);
-			desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
-		}
-		desired.y = Math.max(desired.y, terrain.height(desired.x, desired.z) + 0.8);
-		camera.position.lerp(desired, 1 - Math.exp(-dt * (f < 1 ? 20 : 8)));
-		camera.position.y = Math.max(camera.position.y, terrain.height(camera.position.x, camera.position.z) + 0.6);
-		cameraTarget.set(px, head, pz);
+		camera.position.set(p.x, p.y, p.z);
+		cameraTarget.set(follow.focus.x, follow.focus.y, follow.focus.z);
 		camera.lookAt(cameraTarget);
+		foliage.setView(camera.position, cameraTarget);
 	}
 
 	/** Streaming, the cached shadow window and the route line follow the player. */
@@ -652,6 +669,20 @@ export async function createCity(
 		renderer,
 		materials,
 		programs: () => renderer.info.programs?.length ?? 0,
+		/** Camera diagnostics for tests/perf: where it is, what it looks at, and whether a
+		 * building blocks the line of sight to the player. */
+		foliage,
+		view: () => ({
+			camera: camera.position.toArray(),
+			focus: cameraTarget.toArray(),
+			yaw: camYaw,
+			pitch: camPitch,
+			distance: camDistance,
+			boom: follow.boom,
+			zoom: follow.zoom,
+			sightBlocked: follow.sightBlocked(collision),
+			foliageMaterials: foliage.patched.map((m) => m.name)
+		}),
 		reset() {
 			Object.assign(perf, { step: 0, render: 0, frames: 0, maxStep: 0, maxRender: 0, spikes: 0 });
 			chunks.assembleMs = 0;
@@ -701,8 +732,7 @@ export async function createCity(
 			slowTime = Math.max(0, slowTime - 0.25);
 		}
 	}
-	const startGround = terrain.height(px, pz);
-	camera.position.set(px + Math.sin(camYaw) * camDistance, startGround + EYE + 3, pz + Math.cos(camYaw) * camDistance);
+	resetCamera();
 	loop();
 
 	const controller: CityController = {
@@ -812,8 +842,7 @@ export async function createCity(
 			ride.speed = 0;
 			if (far) {
 				endAuto(false);
-				const g = terrain.height(px, pz);
-				camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
+				resetCamera();
 				chunks.update(px, pz);
 			}
 		},
@@ -842,8 +871,7 @@ export async function createCity(
 				camYaw = yaw + Math.PI;
 			}
 			speed = 0;
-			const g = terrain.height(px, pz);
-			camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
+			resetCamera();
 		},
 		setKey(key, down) {
 			if (down) keys.add(key);
@@ -862,6 +890,7 @@ export async function createCity(
 			window.removeEventListener('keyup', onKeyUp);
 			window.removeEventListener('blur', onBlur);
 			chunks.dispose();
+			foliage.dispose();
 			routeLine.dispose();
 			rider?.detach(null);
 			vehicle?.dispose();

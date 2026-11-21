@@ -89,10 +89,13 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/game/city/props.ts` | Meshopt-aware GLB loader; flattens Blender props to one geometry per material; instancing; shared materials by name |
 | `lib/game/city/lighting.ts`, `sun.ts` | Day/night: NOAA-style solar position for Phnom Penh, presets, sun/moon, sky, fog, exposure, night factor |
 | `lib/game/city/terrain.ts` | Mound terrain (mirror of `app/geography/terrain.py`) |
-| `lib/game/city/collision.ts` | Grid of wall segments per chunk, plus small circular posts (trunks, poles); circle movement with sub-steps and sliding; escape-from-footprint; height-aware camera ray |
+| `lib/game/city/collision.ts` | Grid of wall segments per chunk, plus small circular posts (trunks, poles); circle movement with sub-steps and sliding; escape-from-footprint; height-aware camera ray; camera-lens clearance from facades (`clearOfWalls`) |
+| `lib/game/city/foliageFade.ts` | Patches the shared leaf materials (`Leaves`, `LeavesLight`, `PalmLeaves`): canopy fragments inside a cone from the camera to the player's head are dithered away (4×4 ordered dither, opaque pass); two shared uniforms per frame |
 | `lib/game/city/ChunkManager.ts` | Worker pool (2), nearest-first streaming, one assembly per frame, unload with hysteresis, detail LOD, a change flag for the shadow cache, street and landmark lookup |
-| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, avatar and `PlayerAnimations`, orbit camera with occlusion and terrain clamp, input, adaptive quality, minimap, perf counters (`window.__ppwPerf`) |
-| `lib/game/player/PlayerAnimations.js` etc. | Reused unchanged from CampusEats World |
+| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, avatar and `PlayerAnimations`, orbit input (single-pointer drag, wheel), adaptive quality, minimap, perf counters and camera diagnostics (`window.__ppwPerf`, `view()`) |
+| `lib/game/camera/followCamera.ts` | Follow camera: smoothed orbit on the arc, eased focus, boom that pulls in at once for buildings and eases back out, lens kept clear of facades, terrain clamp |
+| `lib/game/player/locomotion.ts` | On-foot feel: acceleration/braking, turning towards the input, slowing through sharp turns (never faster than walk/run, so server validation is unaffected) |
+| `lib/game/player/PlayerAnimations.js` etc. | From CampusEats World; gait selection now has hysteresis, and walk ↔ run ↔ carry crossfades keep the stride phase |
 
 ### Rendering pipeline (Phase 2)
 

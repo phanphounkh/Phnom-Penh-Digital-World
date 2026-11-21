@@ -5,6 +5,31 @@ import {
   Vector3,
   MathUtils,
 } from "three";
+/** Gait thresholds (m/s) with hysteresis, so a speed hovering near a threshold (sliding along
+ * a wall, network jitter on remote players) does not flicker between clips. */
+export const GAIT = {
+  idleBelow: 0.07,
+  moveAbove: 0.1,
+  runAbove: 4.3,
+  walkBelow: 3.7,
+  /** Crossfade to/from standing still, and between walk/run/carry (same stride cycle). */
+  idleFade: 0.16,
+  strideFade: 0.25,
+};
+const STRIDES = new Set(["walk", "run", "carry"]);
+
+/** Next gait clip for `speed`, given the current one (hysteresis on both thresholds). */
+export function gaitState(current, speed, holding = false) {
+  const moving =
+    current && current !== "idle"
+      ? speed >= GAIT.idleBelow
+      : speed > GAIT.moveAbove;
+  if (!moving) return "idle";
+  if (holding) return "carry";
+  const running = current === "run" ? speed > GAIT.walkBelow : speed > GAIT.runAbove;
+  return running ? "run" : "walk";
+}
+
 /** Distance-driven gait and two-bone arms use the articulated Blender pivots. */
 export class PlayerAnimations {
   constructor(model, { pushing = false } = {}) {
@@ -96,11 +121,17 @@ export class PlayerAnimations {
     travel = 0,
     direction = 1,
   ) {
-    const state =
-      speed < 0.07 ? "idle" : holding ? "carry" : speed > 4 ? "run" : "walk";
+    const state = gaitState(this.state, speed, holding);
     if (this.state !== state) {
-      this.actions[this.state]?.fadeOut(0.16);
-      this.actions[state].reset().fadeIn(0.16).play();
+      const previous = this.actions[this.state];
+      // Walk ↔ run ↔ carry share one stride cycle (1 s clips, same foot timing): carry the
+      // phase over so the feet do not jump back to the start of the step.
+      const stride = STRIDES.has(this.state) && STRIDES.has(state);
+      const fade = stride ? GAIT.strideFade : GAIT.idleFade;
+      previous?.fadeOut(fade);
+      const next = this.actions[state].reset();
+      if (stride && previous) next.time = previous.time;
+      next.fadeIn(fade).play();
       this.state = state;
     }
     this.actions[state].timeScale =

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { XZ } from '$lib/api/types';
-import { CollisionWorld, escapeFootprint, moveCircle, pointInRing, rayFraction } from './collision';
+import { CollisionWorld, clearOfWalls, escapeFootprint, moveCircle, pointInRing, rayFraction } from './collision';
 
 // A 10 × 10 m building, 12 m tall, from x 0..10, z 0..10.
 const BOX: XZ[] = [
@@ -82,6 +82,28 @@ describe('rayFraction (camera occlusion)', () => {
 		const w = new CollisionWorld();
 		w.addRing('0_0', BOX, 0);
 		expect(rayFraction(w, -5, 2, 5, 15, 2, 5)).toBe(1);
+	});
+});
+
+describe('clearOfWalls (camera lens clearance)', () => {
+	it('nudges a lens that is too close to a facade out to the clearance radius', () => {
+		const r = clearOfWalls(world(), -0.1, 3, 5, 0.3);
+		expect(r.pushed).toBe(true);
+		expect(r.x).toBeCloseTo(-0.3, 6);
+		expect(r.z).toBeCloseTo(5, 6);
+	});
+
+	it('leaves a lens alone when it is clear, above the roof, or by water', () => {
+		expect(clearOfWalls(world(), -1, 3, 5, 0.3)).toEqual({ x: -1, z: 5, pushed: false });
+		expect(clearOfWalls(world(), -0.1, 14, 5, 0.3).pushed).toBe(false); // higher than the 12 m roof
+		const water = new CollisionWorld();
+		water.addRing('0_0', BOX, 0);
+		expect(clearOfWalls(water, -0.1, 3, 5, 0.3).pushed).toBe(false);
+	});
+
+	it('clears both walls in a corner', () => {
+		const r = clearOfWalls(world(), -0.1, 3, -0.1, 0.3);
+		expect(Math.hypot(r.x, r.z)).toBeGreaterThanOrEqual(0.3 - 1e-6);
 	});
 });
 
