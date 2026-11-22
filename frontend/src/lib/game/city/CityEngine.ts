@@ -8,9 +8,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import type { WorldBootstrap } from '$lib/api/types';
 import { WorldProjection, compassHeading, yawForHeading } from '$lib/geo/projection';
-import { createAvatar, type AvatarInstance } from '$lib/game/avatar/avatar';
-import { PlayerAnimations } from '$lib/game/player/PlayerAnimations.js';
-import { EmotePlayer } from '$lib/game/avatar/emotes';
+import { createCharacter, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { EmoteName } from '$lib/game/net/protocol';
 import { ChunkManager } from './ChunkManager';
 import { CollisionWorld, escapeFootprint, moveCircle, rayFraction } from './collision';
@@ -21,7 +19,6 @@ import { Terrain, type Mound } from './terrain';
 import type { XZ } from '$lib/api/types';
 import { RoadNetwork } from '$lib/game/vehicles/RoadNetwork';
 import { createVehicle, setVehicleNight, type VehicleInstance } from '$lib/game/vehicles/VehicleModels';
-import { Rider } from '$lib/game/vehicles/Rider';
 import { pursuitSteer, rideState, rideStep } from '$lib/game/vehicles/kinematics';
 import { MODES, PULL_OVER_M, type TravelMode, type VehicleKind } from '$lib/game/vehicles/specs';
 import { RouteLine } from '$lib/game/vehicles/RouteLine';
@@ -111,6 +108,10 @@ export interface CityController {
 	followRoute(onDone?: (arrived: boolean) => void): void;
 	readonly following: boolean;
 	playEmote(name: EmoteName): void;
+	/** Realistic or classic avatars (a local display preference; rebuilds the player's model). */
+	setAvatarStyle(style: AvatarStyle): Promise<void>;
+	/** The avatar style in use (realistic falls back to classic if its models cannot load). */
+	readonly avatarStyle: AvatarStyle;
 	setQuality(q: Quality): void;
 	setTimeMode(mode: TimeMode): void;
 	setPaused(paused: boolean): void;
@@ -126,6 +127,7 @@ export interface CityOptions {
 	preferKhmer?: boolean;
 	quality?: Quality;
 	timeMode?: TimeMode;
+	avatarStyle?: AvatarStyle;
 }
 
 const WALK = 2.6;
@@ -244,13 +246,19 @@ export async function createCity(
 	lighting.update();
 
 	// ── player ────────────────────────────────────────────────────────────────────────
-	const avatar: AvatarInstance = await createAvatar(boot.player.avatar, { batch: true });
-	const player = avatar.root;
-	// The avatar uses the contact blob below instead of the cached shadow map.
-	player.traverse((n) => ((n as THREE.Mesh).castShadow = false));
+	// `player` is a stable holder: the avatar model inside it can be swapped (avatar style) while
+	// shops, vehicles and the camera keep their reference.
+	const player = new THREE.Group();
+	player.name = 'player';
+	let character: GameCharacter = await createCharacter(boot.player.avatar, options.avatarStyle ?? 'realistic');
+	let styleToken = 0;
+	const wear = (c: GameCharacter) => {
+		// The avatar uses the contact blob below instead of the cached shadow map.
+		c.root.traverse((n) => ((n as THREE.Mesh).castShadow = false));
+		player.add(c.root);
+	};
+	wear(character);
 	scene.add(player);
-	const animations = new PlayerAnimations(player);
-	const emotes = new EmotePlayer(player);
 	const frameCallbacks = new Set<(dt: number) => void>();
 	const shadowBlob = new THREE.Mesh(
 		new THREE.CircleGeometry(0.42, 24),
@@ -269,7 +277,7 @@ export async function createCity(
 	const network = new RoadNetwork();
 	let riding: RidingVehicle | null = null;
 	let vehicle: VehicleInstance | null = null;
-	let rider: Rider | null = null;
+	let rider: Mount | null = null;
 	let rideToken = 0;
 	const ride = rideState();
 	let lastDrag = -10;
@@ -455,8 +463,8 @@ export async function createCity(
 		player.position.set(px, ground, pz);
 		player.rotation.y = yaw;
 		shadowBlob.position.set(px, ground + 0.09, pz);
-		animations.update(dt, dt > 0 ? travel / dt : 0, holding, false, null, travel, 1);
-		emotes.update(dt, speed > 0.3);
+		character.animations.update(dt, dt > 0 ? travel / dt : 0, holding, false, null, travel, 1);
+		character.emotes.update(dt, speed > 0.3);
 
 		shadowBlob.scale.set(1, 1, 1);
 		placeCamera(dt, ground + EYE, camDistance);
@@ -652,6 +660,13 @@ export async function createCity(
 		renderer,
 		materials,
 		programs: () => renderer.info.programs?.length ?? 0,
+		/** The local avatar: style in use, model name, bone count (e2e checks). */
+		avatar: () => {
+			let bones = 0;
+			player.traverse((n) => (bones += (n as THREE.Bone).isBone ? 1 : 0));
+			const gait = (character.animations as { gait?: string }).gait ?? null;
+			return { style: character.style, model: character.root.name, bones, riding: !!rider, gait, emote: character.emotes.playing };
+		},
 		reset() {
 			Object.assign(perf, { step: 0, render: 0, frames: 0, maxStep: 0, maxRender: 0, spikes: 0 });
 			chunks.assembleMs = 0;
@@ -759,7 +774,7 @@ export async function createCity(
 				vehicle = v;
 				scene.add(v.root);
 				player.rotation.set(0, 0, 0);
-				rider = new Rider(player, animations, v);
+				rider = character.mount(v, player);
 			});
 		},
 		parkingSpot(free) {
@@ -818,7 +833,25 @@ export async function createCity(
 			}
 		},
 		playEmote(name) {
-			if (!riding) emotes.play(name);
+			if (!riding) character.emotes.play(name);
+		},
+		async setAvatarStyle(style) {
+			const token = ++styleToken;
+			const next = await createCharacter(boot.player.avatar, style);
+			if (token !== styleToken || disposed) return next.dispose();
+			const mounted = rider && vehicle ? vehicle : null;
+			rider?.detach(scene);
+			rider = null;
+			character.dispose();
+			character = next;
+			wear(next);
+			if (mounted) {
+				player.rotation.set(0, 0, 0);
+				rider = character.mount(mounted, player);
+			}
+		},
+		get avatarStyle() {
+			return character.style;
 		},
 		setQuality(q) {
 			quality = q;
@@ -865,8 +898,7 @@ export async function createCity(
 			routeLine.dispose();
 			rider?.detach(null);
 			vehicle?.dispose();
-			animations.dispose();
-			avatar.dispose();
+			character.dispose();
 			hills.traverse((n) => (n as THREE.Mesh).geometry?.dispose());
 			materials.dispose();
 			props.dispose();

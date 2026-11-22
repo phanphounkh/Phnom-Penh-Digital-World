@@ -1,0 +1,129 @@
+{
+  "palette": {
+    "size": 128,
+    "cell": 16,
+    "cells": {
+      "Aglet": [
+        0,
+        0
+      ],
+      "Backpack": [
+        16,
+        0
+      ],
+      "BackpackAccent": [
+        32,
+        0
+      ],
+      "Drawstring": [
+        48,
+        0
+      ],
+      "Gold": [
+        64,
+        0
+      ],
+      "Hoodie": [
+        80,
+        0
+      ],
+      "HoodieRib": [
+        96,
+        0
+      ],
+      "Lace": [
+        112,
+        0
+      ],
+      "Pants": [
+        0,
+        16
+      ],
+      "PantsRib": [
+        16,
+        16
+      ],
+      "ShoeAccent": [
+        32,
+        16
+      ],
+      "ShoeSole": [
+        48,
+        16
+      ],
+      "ShoeUpper": [
+        64,
+        16
+      ],
+      "Silver": [
+        80,
+        16
+      ],
+      "Sock": [
+        96,
+        16
+      ],
+      "Strap": [
+        112,
+        16
+      ],
+      "SunglassFrame": [
+        0,
+        32
+      ],
+      "SunglassLens": [
+        16,
+        32
+      ],
+      "Watch": [
+        32,
+        32
+      ]
+    }
+  },
+  "kind": "female",
+  "file": "female_avatar_game.glb",
+  "height_m": 1.62,
+  "skin_tone": "#cf9c80",
+  "hair_color": "#17110f",
+  "hair_texture_mean": 0.5,
+  "colors": {
+    "hoodie": "#d8d4d3",
+    "hoodie_print": "#9a6a3c",
+    "pants": "#1d1b1e",
+    "shoe_upper": "#f0eff3",
+    "shoe_accent": "#9a86d8",
+    "shoe_sole": "#e9e6ee",
+    "backpack": "#1b1a1f",
+    "backpack_accent": "#8a4fd6",
+    "sunglasses": "#141416",
+    "lens": "#24202c",
+    "gold": "#d4b16a",
+    "silver": "#c9cbd0",
+    "watch": "#1c1b20",
+    "watch_screen": "#8f63ff"
+  },
+  "clips": [
+    "Cheer",
+    "Dance",
+    "Greet",
+    "Idle",
+    "Run",
+    "Sit",
+    "Talk",
+    "Walk",
+    "Wave"
+  ],
+  "morphs": [
+    "Blink",
+    "Excited",
+    "MouthOpen",
+    "Smile",
+    "Surprised",
+    "Thinking",
+    "Wink"
+  ],
+  "triangles": 25806,
+  "walk_speed": 1.67,
+  "run_speed": 3.003
+}

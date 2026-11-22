@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Avatar Viewer</title>
+	<link rel="icon" href="data:," />
+	<style>
+		:root { --bg: #17181c; --panel: #222329ee; --text: #e9e8ee; --muted: #9a99a6; --accent: #8f6bff; }
+		* { box-sizing: border-box; }
+		html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+		#app { position: fixed; inset: 0; }
+		canvas { display: block; }
+		.panel { position: fixed; top: 12px; left: 12px; width: 270px; max-height: calc(100% - 24px); overflow: auto;
+			background: var(--panel); border-radius: 10px; padding: 12px 14px; }
+		.panel h1 { font-size: 14px; margin: 0 0 8px; }
+		.panel h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+		.row { display: flex; gap: 6px; flex-wrap: wrap; }
+		button, select { background: #30313a; color: var(--text); border: 1px solid #44454f; border-radius: 6px; padding: 5px 9px; font: inherit; cursor: pointer; }
+		button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); }
+		label.slider { display: grid; grid-template-columns: 80px 1fr 32px; align-items: center; gap: 6px; margin: 3px 0; }
+		input[type=range] { width: 100%; accent-color: var(--accent); }
+		#stats { position: fixed; right: 12px; bottom: 12px; background: var(--panel); border-radius: 10px; padding: 10px 12px;
+			font: 12px/1.5 ui-monospace, monospace; white-space: pre; }
+		#status { color: var(--muted); }
+		@media (max-width: 640px) { .panel { width: calc(100% - 24px); max-height: 42%; } #stats { display: none; } }
+	</style>
+	<script type="importmap">
+		{ "imports": { "three": "/three/build/three.module.js", "three/addons/": "/three/examples/jsm/" } }
+	</script>
+</head>
+<body>
+	<div id="app"></div>
+	<div class="panel">
+		<h1>Phnom Penh Digital World · avatars</h1>
+		<div id="status">Loading…</div>
+		<h2>Quality</h2>
+		<div class="row" id="quality">
+			<button data-q="high" aria-pressed="true">High (close-up)</button>
+			<button data-q="game" aria-pressed="false">Game</button>
+		</div>
+		<h2>Animation</h2>
+		<div class="row"><select id="clip"><option value="">A-pose (rest)</option></select>
+			<button id="pause" aria-pressed="false">Pause</button></div>
+		<h2>Expression</h2>
+		<div id="morphs"></div>
+		<h2>View</h2>
+		<div class="row">
+			<button data-view="both">Both</button><button data-view="male">Male</button>
+			<button data-view="female">Female</button><button data-view="face">Faces</button>
+			<button id="wire" aria-pressed="false">Wireframe</button>
+		</div>
+	</div>
+	<div id="stats"></div>
+	<script type="module" src="./main.js"></script>
+</body>
+</html>

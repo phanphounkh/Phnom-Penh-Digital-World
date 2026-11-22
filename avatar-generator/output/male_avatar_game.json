@@ -1,0 +1,142 @@
+{
+  "palette": {
+    "size": 128,
+    "cell": 16,
+    "cells": {
+      "Aglet": [
+        0,
+        0
+      ],
+      "Backpack": [
+        16,
+        0
+      ],
+      "BackpackAccent": [
+        32,
+        0
+      ],
+      "Drawstring": [
+        48,
+        0
+      ],
+      "HeadphoneGlow": [
+        64,
+        0
+      ],
+      "HeadphonePad": [
+        80,
+        0
+      ],
+      "Headphones": [
+        96,
+        0
+      ],
+      "Hoodie": [
+        112,
+        0
+      ],
+      "HoodieRib": [
+        0,
+        16
+      ],
+      "Jacket": [
+        16,
+        16
+      ],
+      "JacketPanel": [
+        32,
+        16
+      ],
+      "JacketTrim": [
+        48,
+        16
+      ],
+      "Lace": [
+        64,
+        16
+      ],
+      "Pants": [
+        80,
+        16
+      ],
+      "PantsRib": [
+        96,
+        16
+      ],
+      "ShoeAccent": [
+        112,
+        16
+      ],
+      "ShoeSole": [
+        0,
+        32
+      ],
+      "ShoeUpper": [
+        16,
+        32
+      ],
+      "Sock": [
+        32,
+        32
+      ],
+      "Strap": [
+        48,
+        32
+      ],
+      "Watch": [
+        64,
+        32
+      ],
+      "Zip": [
+        80,
+        32
+      ]
+    }
+  },
+  "kind": "male",
+  "file": "male_avatar_game.glb",
+  "height_m": 1.72,
+  "skin_tone": "#b5815f",
+  "hair_color": "#141012",
+  "hair_texture_mean": 0.5,
+  "colors": {
+    "hoodie": "#18181b",
+    "hoodie_print": "#e9e6df",
+    "jacket": "#d9dade",
+    "jacket_panel": "#25469c",
+    "jacket_trim": "#1d1f26",
+    "pants": "#1b1b1e",
+    "shoe_upper": "#eceef1",
+    "shoe_accent": "#2b4ea0",
+    "shoe_sole": "#e6e3dc",
+    "backpack": "#16171a",
+    "backpack_accent": "#2f6fe0",
+    "headphones": "#121316",
+    "headphones_glow": "#3aa2ff",
+    "watch": "#1a1b1f",
+    "watch_screen": "#3d7bff"
+  },
+  "clips": [
+    "Cheer",
+    "Dance",
+    "Greet",
+    "Idle",
+    "Run",
+    "Sit",
+    "Talk",
+    "Walk",
+    "Wave"
+  ],
+  "morphs": [
+    "Blink",
+    "Excited",
+    "MouthOpen",
+    "Smile",
+    "Surprised",
+    "Thinking",
+    "Wink"
+  ],
+  "triangles": 30495,
+  "walk_speed": 1.823,
+  "run_speed": 3.303
+}

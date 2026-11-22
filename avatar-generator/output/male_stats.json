@@ -1,0 +1,183 @@
+{
+  "high": {
+    "file": "male_avatar.glb",
+    "bytes": 6114412,
+    "meshes": 69,
+    "triangles": 71280,
+    "vertices": 41147,
+    "materials": 34,
+    "draw_calls_estimate": 73,
+    "textures": {
+      "bag_print.png": [
+        512,
+        512
+      ],
+      "male_skin.jpg": [
+        2048,
+        2048
+      ],
+      "male_print.png": [
+        512,
+        512
+      ],
+      "male_brows.png": [
+        512,
+        512
+      ],
+      "male_lashes.png": [
+        512,
+        512
+      ],
+      "male_eyes.png": [
+        512,
+        512
+      ],
+      "flag_patch.png": [
+        512,
+        336
+      ],
+      "fabric_twill.png": [
+        512,
+        512
+      ],
+      "fabric_rib.png": [
+        512,
+        512
+      ],
+      "male_hair.png": [
+        1024,
+        1024
+      ],
+      "male_strands.png": [
+        1024,
+        1024
+      ],
+      "teeth.png": [
+        512,
+        512
+      ],
+      "tongue01_diffuse.png": [
+        1024,
+        1024
+      ],
+      "male_watch.png": [
+        256,
+        256
+      ]
+    },
+    "texture_pixels": 9674752,
+    "bones": 52,
+    "morph_targets": [
+      "Blink",
+      "Excited",
+      "MouthOpen",
+      "Smile",
+      "Surprised",
+      "Thinking",
+      "Wink"
+    ],
+    "animations": [
+      "Cheer",
+      "Dance",
+      "Greet",
+      "Idle",
+      "Run",
+      "Sit",
+      "Talk",
+      "Walk",
+      "Wave"
+    ],
+    "per_mesh_triangles": {
+      "male.body": 17842,
+      "male.teeth": 7120,
+      "male.jacket": 6714,
+      "male.hair_cards": 5736,
+      "male.sneakers": 4832,
+      "male.hair": 3344,
+      "male.pants": 2576,
+      "male.eyes": 2040,
+      "male.hoodie": 1540,
+      "male.jacket_edge": 1344,
+      "male.backpack": 1200,
+      "male.hood": 1028
+    }
+  },
+  "game": {
+    "file": "male_avatar_game.glb",
+    "bytes": 2790248,
+    "meshes": 7,
+    "triangles": 30495,
+    "vertices": 20456,
+    "materials": 7,
+    "draw_calls_estimate": 7,
+    "textures": {
+      "male_skin.jpg": [
+        1024,
+        1024
+      ],
+      "male_eyes.png": [
+        256,
+        256
+      ],
+      "teeth.png": [
+        256,
+        256
+      ],
+      "male_game_browslashes.png": [
+        512,
+        256
+      ],
+      "male_game_hair.png": [
+        1024,
+        512
+      ],
+      "male_game_decals.png": [
+        512,
+        512
+      ],
+      "male_palette_base.png": [
+        128,
+        128
+      ],
+      "male_palette_mr.png": [
+        128,
+        128
+      ],
+      "male_palette_emit.png": [
+        128,
+        128
+      ]
+    },
+    "texture_pixels": 2146304,
+    "bones": 52,
+    "morph_targets": [
+      "Blink",
+      "Excited",
+      "MouthOpen",
+      "Smile",
+      "Surprised",
+      "Thinking",
+      "Wink"
+    ],
+    "animations": [
+      "Cheer",
+      "Dance",
+      "Greet",
+      "Idle",
+      "Run",
+      "Sit",
+      "Talk",
+      "Walk",
+      "Wave"
+    ],
+    "per_mesh_triangles": {
+      "male.game.outfit": 13932,
+      "male.game.hair": 7742,
+      "male.game.body": 5886,
+      "male.game.eyes": 1020,
+      "male.game.teeth": 853,
+      "male.game.browslashes": 560,
+      "male.game.decals": 502
+    }
+  }
+}

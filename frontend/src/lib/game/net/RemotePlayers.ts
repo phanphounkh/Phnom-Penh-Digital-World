@@ -4,12 +4,9 @@
  * decides who exists and where.
  */
 import * as THREE from 'three';
-import { createAvatar, type AvatarInstance } from '$lib/game/avatar/avatar';
-import { EmotePlayer } from '$lib/game/avatar/emotes';
-import { PlayerAnimations } from '$lib/game/player/PlayerAnimations.js';
+import { createCharacter, loadAvatarStyle, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { Terrain } from '$lib/game/city/terrain';
 import { createVehicle, type VehicleInstance } from '$lib/game/vehicles/VehicleModels';
-import { Rider } from '$lib/game/vehicles/Rider';
 import { HANDLING } from '$lib/game/vehicles/specs';
 import { Interpolator } from './Interpolator';
 import type { EmoteName, PlayerCard, PlayerState, RideCard } from './protocol';
@@ -21,9 +18,9 @@ interface Remote {
 	card: PlayerCard;
 	interp: Interpolator;
 	group: THREE.Group;
-	avatar?: AvatarInstance;
-	animations?: PlayerAnimations;
-	emotes?: EmotePlayer;
+	character?: GameCharacter;
+	/** Bumped when the avatar is (re)built, so a slow load cannot replace a newer one. */
+	avatarToken: number;
 	tag: THREE.Sprite;
 	bubble?: { sprite: THREE.Sprite; until: number };
 	x: number;
@@ -31,7 +28,7 @@ interface Remote {
 	removed: boolean;
 	/** Riding (Phase 5): the vehicle, the rider rig and the visual state derived from motion. */
 	vehicle?: VehicleInstance;
-	rider?: Rider;
+	rider?: Mount;
 	rideToken: number;
 	yaw: number;
 	wheel: number;
@@ -100,7 +97,18 @@ function disposeSprite(s: THREE.Sprite) {
 export class RemotePlayers {
 	private players = new Map<number, Remote>();
 
-	constructor(private scene: THREE.Scene, private terrain: Terrain) {}
+	constructor(
+		private scene: THREE.Scene,
+		private terrain: Terrain,
+		private style: AvatarStyle = loadAvatarStyle()
+	) {}
+
+	/** Draw every remote avatar in `style` (rebuilds the loaded ones). */
+	setStyle(style: AvatarStyle): void {
+		if (style === this.style) return;
+		this.style = style;
+		for (const remote of this.players.values()) this.dress(remote);
+	}
 
 	get count(): number {
 		return this.players.size;
@@ -121,19 +129,27 @@ export class RemotePlayers {
 		group.add(tag);
 		const remote: Remote = {
 			card, interp: new Interpolator(), group, tag, x: card.x, z: card.z, removed: false,
-			rideToken: 0, yaw: card.yaw, wheel: 0, lean: 0, steer: 0
+			rideToken: 0, avatarToken: 0, yaw: card.yaw, wheel: 0, lean: 0, steer: 0
 		};
 		remote.interp.push({ t: performance.now(), x: card.x, z: card.z, yaw: card.yaw, s: 0 });
 		group.position.set(card.x, this.terrain.height(card.x, card.z), card.z);
 		this.scene.add(group);
 		this.players.set(card.id, remote);
-		createAvatar(card.av, { batch: true }).then((avatar) => {
-			if (remote.removed) return avatar.dispose();
-			remote.avatar = avatar;
-			remote.animations = new PlayerAnimations(avatar.root);
-			remote.emotes = new EmotePlayer(avatar.root);
-			avatar.root.traverse((n) => ((n as THREE.Mesh).castShadow = false));
-			group.add(avatar.root);
+		this.dress(remote);
+	}
+
+	/** Load (or reload, after a style change) a remote player's avatar. */
+	private dress(remote: Remote): void {
+		const token = ++remote.avatarToken;
+		createCharacter(remote.card.av, this.style).then((character) => {
+			if (remote.removed || token !== remote.avatarToken) return character.dispose();
+			const wasRiding = !!remote.rider;
+			if (wasRiding) this.dismount(remote);
+			remote.character?.dispose();
+			remote.character = character;
+			character.root.traverse((n) => ((n as THREE.Mesh).castShadow = false));
+			character.root.rotation.y = remote.yaw;
+			remote.group.add(character.root);
 			if (remote.card.v) this.mount(remote, remote.card.v);
 		});
 	}
@@ -143,7 +159,7 @@ export class RemotePlayers {
 		const remote = this.players.get(id);
 		if (!remote) return;
 		remote.card = { ...remote.card, v: v ?? undefined };
-		if (!remote.avatar) return; // mounted once the avatar has loaded
+		if (!remote.character) return; // mounted once the avatar has loaded
 		if (v) this.mount(remote, v);
 		else this.dismount(remote);
 	}
@@ -158,11 +174,12 @@ export class RemotePlayers {
 		this.dismount(remote);
 		const token = ++remote.rideToken;
 		createVehicle(v.k, v.c).then((instance) => {
-			if (remote.removed || token !== remote.rideToken || !remote.avatar || !remote.animations) return instance.dispose();
+			const character = remote.character;
+			if (remote.removed || token !== remote.rideToken || !character) return instance.dispose();
 			remote.vehicle = instance;
 			remote.group.add(instance.root);
-			remote.emotes?.stop();
-			remote.rider = new Rider(remote.avatar.root, remote.animations, instance);
+			character.emotes.stop();
+			remote.rider = character.mount(instance, character.root);
 			remote.tag.position.y = 2.4;
 		});
 	}
@@ -182,8 +199,7 @@ export class RemotePlayers {
 		if (!remote) return;
 		remote.removed = true;
 		this.dismount(remote);
-		remote.animations?.dispose();
-		remote.avatar?.dispose();
+		remote.character?.dispose();
 		disposeSprite(remote.tag);
 		if (remote.bubble) disposeSprite(remote.bubble.sprite);
 		remote.group.removeFromParent();
@@ -196,7 +212,7 @@ export class RemotePlayers {
 	}
 
 	emote(id: number, e: EmoteName): void {
-		this.players.get(id)?.emotes?.play(e);
+		this.players.get(id)?.character?.emotes.play(e);
 	}
 
 	say(id: number, text: string): void {
@@ -237,10 +253,13 @@ export class RemotePlayers {
 				remote.vehicle.pose(remote.wheel, remote.steer, remote.lean);
 				remote.rider.update(dt, remote.wheel);
 			} else {
-				if (remote.avatar) remote.avatar.root.rotation.y = snap.yaw;
-				const speed = dt > 0 ? Math.min(travel / dt, 8) : 0;
-				remote.animations?.update(dt, speed, false, false, null, travel, 1);
-				remote.emotes?.update(dt, speed > 0.3);
+				const character = remote.character;
+				if (character) {
+					character.root.rotation.y = snap.yaw;
+					const speed = dt > 0 ? Math.min(travel / dt, 8) : 0;
+					character.animations.update(dt, speed, false, false, null, travel, 1);
+					character.emotes.update(dt, speed > 0.3);
+				}
 			}
 			remote.yaw = snap.yaw;
 			remote.tag.visible = remote.group.position.distanceTo(viewer) < TAG_DISTANCE;

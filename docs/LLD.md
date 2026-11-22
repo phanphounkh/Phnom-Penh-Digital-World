@@ -81,7 +81,12 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/api/*` | Typed client (CSRF echo, error envelope → `ApiError` with `fieldErrors`), endpoint functions, types |
 | `lib/stores/session.svelte.ts` | Session store: request-scoped `page.data.user` during SSR (no cross-request leaks), client override after mutations; routing helpers |
 | `lib/geo/projection.ts` | proj4 mirror of the backend projection; chunk keys; compass/yaw helpers |
-| `lib/game/avatar/avatar.ts` | Loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
+| `lib/game/avatar/avatar.ts` | Classic avatar: loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
+| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider) for either style; `realistic` (default) or `classic`, a local display preference in `localStorage` (`ppw.avatarStyle`); falls back to classic if the realistic models cannot load |
+| `lib/game/avatar/realistic.ts` | Realistic avatars (`avatar-generator/`): loads `characters/realistic/{male,female}.glb` + `manifest.json`, clones with `SkeletonUtils`, recolours per player (skin tint, hair factor, repainted palette cells), adds a `RightWrist` socket for held products |
+| `lib/game/avatar/RealisticAnimations.ts` | Gait clips (Idle/Walk/Run with hysteresis, stride phase kept, speed-matched playback), emote clips (Wave, Greet = sampeah, Cheer, Dance), IK carry pose; `RealisticEmotes` facade |
+| `lib/game/avatar/ik.ts` | Rig-agnostic bone aiming and two-bone IK (any bone orientation) |
+| `lib/game/vehicles/RealisticRider.ts` | Seats a realistic avatar: hips on the seat, IK feet to pegs/pedals and hands to grips; on the first frame it slides forward and leans until the grips are in reach |
 | `lib/game/city/chunkGeometry.ts` | **Worker-safe** chunk → typed arrays: mitred road ribbons that follow the terrain, sidewalks, dashed centre lines, area polygons, buildings (walls with facade attributes, roofs, terrain-aware bases), tiered Khmer roofs, prop instance matrices, light pools, colliders, label/sign/model specs |
 | `lib/game/city/chunk.worker.ts` | Web Worker: fetch → parse → `buildChunkData` → zero-copy `postMessage` |
 | `lib/game/city/assemble.ts` | Main thread: typed arrays → meshes, instanced props, landmark GLBs, label sprites, per-chunk street-sign atlas, a "detail" group for LOD |
@@ -91,7 +96,7 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/game/city/terrain.ts` | Mound terrain (mirror of `app/geography/terrain.py`) |
 | `lib/game/city/collision.ts` | Grid of wall segments per chunk, plus small circular posts (trunks, poles); circle movement with sub-steps and sliding; escape-from-footprint; height-aware camera ray |
 | `lib/game/city/ChunkManager.ts` | Worker pool (2), nearest-first streaming, one assembly per frame, unload with hysteresis, detail LOD, a change flag for the shadow cache, street and landmark lookup |
-| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, avatar and `PlayerAnimations`, orbit camera with occlusion and terrain clamp, input, adaptive quality, minimap, perf counters (`window.__ppwPerf`) |
+| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, the player (a stable holder group around a swappable `GameCharacter`), orbit camera with occlusion and terrain clamp, input, adaptive quality, minimap, perf counters (`window.__ppwPerf`) |
 | `lib/game/player/PlayerAnimations.js` etc. | Reused unchanged from CampusEats World |
 
 ### Rendering pipeline (Phase 2)
@@ -228,6 +233,21 @@ centreline; one-way: w/2 − 1.7 m; alleys: centre; walking: w/2 + 0.8 m on the 
 joins them; `RouteLine` draws it, `RouteGuide` projects the player onto the route (forward-only
 window) for the next step and remaining distance; `PathFollower` + pure pursuit drive the
 autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at the end).
+
+## Realistic avatar contract (`avatar-generator/`, installed by `scripts/install_to_game.py`)
+
+* `static/models/characters/realistic/{male,female}.glb` (Build A → male, Build B → female),
+  meshopt-compressed, metres, facing +Z, feet at y = 0; 52-bone Mixamo skeleton
+  (`mixamorig:*`, anatomical left at +X); clips `Idle Walk Run Wave Sit Talk Dance Greet Cheer`;
+  morphs `Smile Excited Surprised Thinking Wink Blink MouthOpen`.
+* `manifest.json`: per build the palette cell of every original material (16 px cells of the
+  `<kind>.Outfit` texture), the baked skin tone, the default hair colour (hair texture is neutral
+  grey with mean 0.5), measured foot-sliding-free walk/run speeds, height.
+* Colour choices map to cells in `RECOLOR` (`realistic.ts`): top → jacket (male) or hoodie
+  (female); bottom → pants; shoes → shoe upper; accent → panels, backpack and shoe accents.
+  Hair style, garment styles and accessories apply to the classic style only.
+* `realistic.test.ts` fails if a GLB lacks a bone, clip, recolourable material or palette cell
+  the game uses.
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

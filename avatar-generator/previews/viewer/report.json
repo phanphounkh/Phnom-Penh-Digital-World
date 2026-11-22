@@ -1,0 +1,831 @@
+{
+  "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)",
+  "qualities": {
+    "high": {
+      "quality": "high",
+      "triangles": 134280,
+      "drawCalls": 305,
+      "textures": 75,
+      "geometries": 317,
+      "bytes": {
+        "male": 6114412,
+        "female": 5990988
+      },
+      "loadMs": {
+        "male": 354,
+        "female": 320
+      },
+      "fps": 60.1,
+      "p95_frame_ms": 16.8
+    },
+    "game": {
+      "quality": "game",
+      "triangles": 56301,
+      "drawCalls": 29,
+      "textures": 110,
+      "geometries": 331,
+      "bytes": {
+        "male": 1400516,
+        "female": 1468992
+      },
+      "loadMs": {
+        "male": 233,
+        "female": 239
+      },
+      "fps": 60.2,
+      "p95_frame_ms": 16.7
+    }
+  },
+  "clips": {
+    "high/male/Idle": {
+      "moved": 0.318
+    },
+    "high/female/Idle": {
+      "moved": 0.275
+    },
+    "high/male/Walk": {
+      "moved": 0.386,
+      "feet_alternate": [
+        0.79,
+        -0.79
+      ]
+    },
+    "high/female/Walk": {
+      "moved": 0.365,
+      "feet_alternate": [
+        0.72,
+        -0.72
+      ]
+    },
+    "high/male/Run": {
+      "moved": 0.784,
+      "feet_alternate": [
+        1,
+        -1
+      ]
+    },
+    "high/female/Run": {
+      "moved": 0.738,
+      "feet_alternate": [
+        0.9,
+        -0.9
+      ]
+    },
+    "high/male/Wave": {
+      "moved": 0.72,
+      "hand_vs_head": 0.24
+    },
+    "high/female/Wave": {
+      "moved": 0.654,
+      "hand_vs_head": 0.19
+    },
+    "high/male/Sit": {
+      "moved": 0.491,
+      "hips_drop": 0.4
+    },
+    "high/female/Sit": {
+      "moved": 0.433,
+      "hips_drop": 0.35
+    },
+    "high/male/Talk": {
+      "moved": 0.311
+    },
+    "high/female/Talk": {
+      "moved": 0.269
+    },
+    "high/male/Dance": {
+      "moved": 0.299
+    },
+    "high/female/Dance": {
+      "moved": 0.275
+    },
+    "high/male/Greet": {
+      "moved": 0.535,
+      "hand_gap": 0.024
+    },
+    "high/female/Greet": {
+      "moved": 0.496,
+      "hand_gap": 0.024
+    },
+    "high/male/Cheer": {
+      "moved": 0.768,
+      "hands_above_head": [
+        0.32,
+        0.32
+      ]
+    },
+    "high/female/Cheer": {
+      "moved": 0.7,
+      "hands_above_head": [
+        0.27,
+        0.27
+      ]
+    },
+    "game/male/Idle": {
+      "moved": 0.318
+    },
+    "game/female/Idle": {
+      "moved": 0.275
+    },
+    "game/male/Walk": {
+      "moved": 0.386,
+      "feet_alternate": [
+        0.79,
+        -0.79
+      ]
+    },
+    "game/female/Walk": {
+      "moved": 0.365,
+      "feet_alternate": [
+        0.72,
+        -0.72
+      ]
+    },
+    "game/male/Run": {
+      "moved": 0.784,
+      "feet_alternate": [
+        1,
+        -1
+      ]
+    },
+    "game/female/Run": {
+      "moved": 0.738,
+      "feet_alternate": [
+        0.9,
+        -0.9
+      ]
+    },
+    "game/male/Wave": {
+      "moved": 0.72,
+      "hand_vs_head": 0.24
+    },
+    "game/female/Wave": {
+      "moved": 0.654,
+      "hand_vs_head": 0.19
+    },
+    "game/male/Sit": {
+      "moved": 0.491,
+      "hips_drop": 0.4
+    },
+    "game/female/Sit": {
+      "moved": 0.433,
+      "hips_drop": 0.35
+    },
+    "game/male/Talk": {
+      "moved": 0.311
+    },
+    "game/female/Talk": {
+      "moved": 0.269
+    },
+    "game/male/Dance": {
+      "moved": 0.298
+    },
+    "game/female/Dance": {
+      "moved": 0.275
+    },
+    "game/male/Greet": {
+      "moved": 0.535,
+      "hand_gap": 0.024
+    },
+    "game/female/Greet": {
+      "moved": 0.496,
+      "hand_gap": 0.024
+    },
+    "game/male/Cheer": {
+      "moved": 0.768,
+      "hands_above_head": [
+        0.32,
+        0.32
+      ]
+    },
+    "game/female/Cheer": {
+      "moved": 0.7,
+      "hands_above_head": [
+        0.27,
+        0.27
+      ]
+    }
+  },
+  "morphs": {
+    "high/Smile": [
+      1,
+      1
+    ],
+    "high/Excited": [
+      1,
+      1
+    ],
+    "high/Surprised": [
+      1,
+      1
+    ],
+    "high/Thinking": [
+      1,
+      1
+    ],
+    "high/Wink": [
+      1,
+      1
+    ],
+    "high/Blink": [
+      1,
+      1
+    ],
+    "high/MouthOpen": [
+      1,
+      1
+    ],
+    "game/Smile": [
+      1,
+      1
+    ],
+    "game/Excited": [
+      1,
+      1
+    ],
+    "game/Surprised": [
+      1,
+      1
+    ],
+    "game/Thinking": [
+      1,
+      1
+    ],
+    "game/Wink": [
+      1,
+      1
+    ],
+    "game/Blink": [
+      1,
+      1
+    ],
+    "game/MouthOpen": [
+      1,
+      1
+    ]
+  },
+  "checks": [
+    {
+      "name": "high: 9 animation clips",
+      "ok": true,
+      "detail": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Sit",
+        "Talk",
+        "Dance",
+        "Greet",
+        "Cheer"
+      ]
+    },
+    {
+      "name": "high: 7 face morphs",
+      "ok": true,
+      "detail": [
+        "Smile",
+        "Excited",
+        "Surprised",
+        "Thinking",
+        "Wink",
+        "Blink",
+        "MouthOpen"
+      ]
+    },
+    {
+      "name": "high: loads both characters",
+      "ok": true,
+      "detail": {
+        "quality": "high",
+        "triangles": 134280,
+        "drawCalls": 305,
+        "textures": 75,
+        "geometries": 317,
+        "bytes": {
+          "male": 6114412,
+          "female": 5990988
+        },
+        "loadMs": {
+          "male": 354,
+          "female": 320
+        },
+        "fps": 60
+      }
+    },
+    {
+      "name": "high: male stands on the ground (A-pose)",
+      "ok": true,
+      "detail": [
+        -0.30849545770155806,
+        0.06995480008913174,
+        0.009810802638948303
+      ]
+    },
+    {
+      "name": "high: female stands on the ground (A-pose)",
+      "ok": true,
+      "detail": [
+        0.6622351252763032,
+        0.06672929329232735,
+        0.024445276851890813
+      ]
+    },
+    {
+      "name": "high: male Idle",
+      "ok": true,
+      "detail": {
+        "moved": 0.318
+      }
+    },
+    {
+      "name": "high: female Idle",
+      "ok": true,
+      "detail": {
+        "moved": 0.275
+      }
+    },
+    {
+      "name": "high: male Walk",
+      "ok": true,
+      "detail": {
+        "moved": 0.386,
+        "feet_alternate": [
+          0.79,
+          -0.79
+        ]
+      }
+    },
+    {
+      "name": "high: female Walk",
+      "ok": true,
+      "detail": {
+        "moved": 0.365,
+        "feet_alternate": [
+          0.72,
+          -0.72
+        ]
+      }
+    },
+    {
+      "name": "high: male Run",
+      "ok": true,
+      "detail": {
+        "moved": 0.784,
+        "feet_alternate": [
+          1,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "high: female Run",
+      "ok": true,
+      "detail": {
+        "moved": 0.738,
+        "feet_alternate": [
+          0.9,
+          -0.9
+        ]
+      }
+    },
+    {
+      "name": "high: male Wave",
+      "ok": true,
+      "detail": {
+        "moved": 0.72,
+        "hand_vs_head": 0.24
+      }
+    },
+    {
+      "name": "high: female Wave",
+      "ok": true,
+      "detail": {
+        "moved": 0.654,
+        "hand_vs_head": 0.19
+      }
+    },
+    {
+      "name": "high: male Sit",
+      "ok": true,
+      "detail": {
+        "moved": 0.491,
+        "hips_drop": 0.4
+      }
+    },
+    {
+      "name": "high: female Sit",
+      "ok": true,
+      "detail": {
+        "moved": 0.433,
+        "hips_drop": 0.35
+      }
+    },
+    {
+      "name": "high: male Talk",
+      "ok": true,
+      "detail": {
+        "moved": 0.311
+      }
+    },
+    {
+      "name": "high: female Talk",
+      "ok": true,
+      "detail": {
+        "moved": 0.269
+      }
+    },
+    {
+      "name": "high: male Dance",
+      "ok": true,
+      "detail": {
+        "moved": 0.299
+      }
+    },
+    {
+      "name": "high: female Dance",
+      "ok": true,
+      "detail": {
+        "moved": 0.275
+      }
+    },
+    {
+      "name": "high: male Greet",
+      "ok": true,
+      "detail": {
+        "moved": 0.535,
+        "hand_gap": 0.024
+      }
+    },
+    {
+      "name": "high: female Greet",
+      "ok": true,
+      "detail": {
+        "moved": 0.496,
+        "hand_gap": 0.024
+      }
+    },
+    {
+      "name": "high: male Cheer",
+      "ok": true,
+      "detail": {
+        "moved": 0.768,
+        "hands_above_head": [
+          0.32,
+          0.32
+        ]
+      }
+    },
+    {
+      "name": "high: female Cheer",
+      "ok": true,
+      "detail": {
+        "moved": 0.7,
+        "hands_above_head": [
+          0.27,
+          0.27
+        ]
+      }
+    },
+    {
+      "name": "high: morph Smile",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph Excited",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph Surprised",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph Thinking",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph Wink",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph Blink",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "high: morph MouthOpen",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: 9 animation clips",
+      "ok": true,
+      "detail": [
+        "Idle",
+        "Walk",
+        "Run",
+        "Wave",
+        "Sit",
+        "Talk",
+        "Dance",
+        "Greet",
+        "Cheer"
+      ]
+    },
+    {
+      "name": "game: 7 face morphs",
+      "ok": true,
+      "detail": [
+        "Smile",
+        "Excited",
+        "Surprised",
+        "Thinking",
+        "Wink",
+        "Blink",
+        "MouthOpen"
+      ]
+    },
+    {
+      "name": "game: loads both characters",
+      "ok": true,
+      "detail": {
+        "quality": "game",
+        "triangles": 56301,
+        "drawCalls": 29,
+        "textures": 110,
+        "geometries": 331,
+        "bytes": {
+          "male": 1400516,
+          "female": 1468992
+        },
+        "loadMs": {
+          "male": 233,
+          "female": 239
+        },
+        "fps": 60
+      }
+    },
+    {
+      "name": "game: male stands on the ground (A-pose)",
+      "ok": true,
+      "detail": [
+        -0.3084954567224606,
+        0.06995480288959272,
+        0.009810864632146645
+      ]
+    },
+    {
+      "name": "game: female stands on the ground (A-pose)",
+      "ok": true,
+      "detail": [
+        0.6622352985810391,
+        0.06672929042700337,
+        0.02444560148376075
+      ]
+    },
+    {
+      "name": "game: male Idle",
+      "ok": true,
+      "detail": {
+        "moved": 0.318
+      }
+    },
+    {
+      "name": "game: female Idle",
+      "ok": true,
+      "detail": {
+        "moved": 0.275
+      }
+    },
+    {
+      "name": "game: male Walk",
+      "ok": true,
+      "detail": {
+        "moved": 0.386,
+        "feet_alternate": [
+          0.79,
+          -0.79
+        ]
+      }
+    },
+    {
+      "name": "game: female Walk",
+      "ok": true,
+      "detail": {
+        "moved": 0.365,
+        "feet_alternate": [
+          0.72,
+          -0.72
+        ]
+      }
+    },
+    {
+      "name": "game: male Run",
+      "ok": true,
+      "detail": {
+        "moved": 0.784,
+        "feet_alternate": [
+          1,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "game: female Run",
+      "ok": true,
+      "detail": {
+        "moved": 0.738,
+        "feet_alternate": [
+          0.9,
+          -0.9
+        ]
+      }
+    },
+    {
+      "name": "game: male Wave",
+      "ok": true,
+      "detail": {
+        "moved": 0.72,
+        "hand_vs_head": 0.24
+      }
+    },
+    {
+      "name": "game: female Wave",
+      "ok": true,
+      "detail": {
+        "moved": 0.654,
+        "hand_vs_head": 0.19
+      }
+    },
+    {
+      "name": "game: male Sit",
+      "ok": true,
+      "detail": {
+        "moved": 0.491,
+        "hips_drop": 0.4
+      }
+    },
+    {
+      "name": "game: female Sit",
+      "ok": true,
+      "detail": {
+        "moved": 0.433,
+        "hips_drop": 0.35
+      }
+    },
+    {
+      "name": "game: male Talk",
+      "ok": true,
+      "detail": {
+        "moved": 0.311
+      }
+    },
+    {
+      "name": "game: female Talk",
+      "ok": true,
+      "detail": {
+        "moved": 0.269
+      }
+    },
+    {
+      "name": "game: male Dance",
+      "ok": true,
+      "detail": {
+        "moved": 0.298
+      }
+    },
+    {
+      "name": "game: female Dance",
+      "ok": true,
+      "detail": {
+        "moved": 0.275
+      }
+    },
+    {
+      "name": "game: male Greet",
+      "ok": true,
+      "detail": {
+        "moved": 0.535,
+        "hand_gap": 0.024
+      }
+    },
+    {
+      "name": "game: female Greet",
+      "ok": true,
+      "detail": {
+        "moved": 0.496,
+        "hand_gap": 0.024
+      }
+    },
+    {
+      "name": "game: male Cheer",
+      "ok": true,
+      "detail": {
+        "moved": 0.768,
+        "hands_above_head": [
+          0.32,
+          0.32
+        ]
+      }
+    },
+    {
+      "name": "game: female Cheer",
+      "ok": true,
+      "detail": {
+        "moved": 0.7,
+        "hands_above_head": [
+          0.27,
+          0.27
+        ]
+      }
+    },
+    {
+      "name": "game: morph Smile",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph Excited",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph Surprised",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph Thinking",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph Wink",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph Blink",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "game: morph MouthOpen",
+      "ok": true,
+      "detail": [
+        1,
+        1
+      ]
+    },
+    {
+      "name": "no console errors",
+      "ok": true,
+      "detail": []
+    }
+  ],
+  "consoleErrors": []
+}

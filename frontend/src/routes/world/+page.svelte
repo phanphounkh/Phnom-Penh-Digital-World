@@ -26,6 +26,7 @@
 	import type { SpawnPoint } from '$lib/api/types';
 	import { compassLabel } from '$lib/geo/projection';
 	import type { CityController, CityState, Quality, TimeMode } from '$lib/game/city/CityEngine';
+	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
 	import { session } from '$lib/stores/session.svelte';
 
 	let { data } = $props();
@@ -71,6 +72,8 @@
 	const EMOTE_BUTTONS: [EmoteName, string][] = [['wave', 'Wave'], ['sampeah', 'Sampeah'], ['cheer', 'Cheer'], ['dance', 'Dance']];
 	let places = $state<SpawnPoint[]>([]);
 	let quality = $state<Quality>('high');
+	let avatarStyle = $state<AvatarStyle>(loadAvatarStyle());
+	let avatarSwitching = $state(false);
 	let timeMode = $state<TimeMode>('live');
 	const TIME_MODES: [TimeMode, string][] = [
 		['live', 'Live'],
@@ -108,12 +111,14 @@
 				const created = await createCity(host, boot, {
 					preferKhmer,
 					quality: touch ? 'low' : 'high',
+					avatarStyle,
 					onState: (s) => (hud = s),
 					onProgress: (loaded, total) => (progress = { loaded, total })
 				});
 				if (disposed) return created.dispose();
 				city = created;
 				quality = touch ? 'low' : 'high';
+				avatarStyle = created.avatarStyle; // realistic falls back to classic if it cannot load
 				ready = true;
 				const { WorldSession } = await import('$lib/game/net/WorldSession.svelte');
 				net = new WorldSession(created);
@@ -358,6 +363,20 @@
 	function setQuality(q: Quality) {
 		quality = q;
 		city?.setQuality(q);
+	}
+
+	async function setAvatarStyle(style: AvatarStyle) {
+		if (!city || avatarSwitching || style === avatarStyle) return;
+		avatarSwitching = true;
+		try {
+			saveAvatarStyle(style);
+			await city.setAvatarStyle(style);
+			avatarStyle = city.avatarStyle;
+			net?.remotes.setStyle(avatarStyle);
+			shops?.rebindAvatar();
+		} finally {
+			avatarSwitching = false;
+		}
 	}
 
 	function setTime(mode: TimeMode) {
@@ -695,6 +714,13 @@
 					{/each}
 				</div>
 				<p class="hint">Performance mode turns off shadows and streams fewer chunks. It switches on automatically if the frame rate stays low.</p>
+				<p class="label mt-4">Avatars</p>
+				<div class="grid grid-cols-2 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold" role="radiogroup" aria-label="Avatar style" data-testid="avatar-style">
+					{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [style, text] (style)}
+						<button role="radio" aria-checked={avatarStyle === style} disabled={avatarSwitching} class="rounded-lg py-2 {avatarStyle === style ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => setAvatarStyle(style)}>{text}</button>
+					{/each}
+				</div>
+				<p class="hint">Realistic avatars use your build, skin, hair and clothing colours on fixed outfits. Classic shows every hairstyle, garment and accessory. This only changes how avatars look on this device.</p>
 				<p class="label mt-4">Time of day</p>
 				<div class="grid grid-cols-5 gap-1 rounded-xl bg-paper-2 p-1 text-xs font-semibold" role="radiogroup" aria-label="Time of day">
 					{#each TIME_MODES as [mode, text] (mode)}
