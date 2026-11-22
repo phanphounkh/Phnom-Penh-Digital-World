@@ -1,6 +1,7 @@
 /**
- * Enterable building specs (written by tools/blender/generate_house.py next to each GLB) and the
- * placement frame that puts a building into the world.
+ * Enterable building specs (written by tools/blender/generate_house.py next to each GLB, format
+ * version 2: rooms, light groups, several doors, seats, tables, things to inspect and appliances)
+ * and the placement frame that puts a building into the world.
  *
  * Model coordinates: metres, x across the front, z out of the front door (+Z), y up, origin at
  * ground level in the centre of the footprint. A placement rotates the model by `yaw` (like
@@ -11,6 +12,8 @@ export type XZ = [number, number];
 
 export interface DoorSpec {
 	id: string;
+	/** Shown in prompts: "Door" → "Open Door", "Bedroom Door" → "Open Bedroom Door". */
+	label: string;
 	/** GLB node whose origin is on the hinge axis; it opens by +rotation.y. */
 	node: string;
 	hinge: XZ;
@@ -18,7 +21,7 @@ export interface DoorSpec {
 	thickness: number;
 	height: number;
 	openYaw: number;
-	/** Middle of the doorway (mid-wall) and the direction out of the building. */
+	/** Middle of the doorway (mid-wall) and the direction away from the side it swings into. */
 	center: XZ;
 	outward: XZ;
 }
@@ -36,25 +39,75 @@ export interface SeatSpec {
 	stand: XZ;
 }
 
+/** A room: its floor rectangles [x0, x1, z0, z1] and the light group (lightmap channel) it is lit by. */
+export interface RoomSpec {
+	id: string;
+	name: string;
+	rects: [number, number, number, number][];
+	light: number;
+}
+
+/** A group of lamps switched together: its lightmap channel, wall switches [x, z, y] and the
+ * glowing materials (bulbs, shades) that go dark when it is off. */
+export interface LightSpec {
+	id: string;
+	label: string;
+	channel: number;
+	switches: [number, number, number][];
+	materials: string[];
+}
+
+/** Something to look at closely: E shows its title and text. */
+export interface ItemSpec {
+	id: string;
+	label: string;
+	title: string;
+	text: string;
+	x: number;
+	z: number;
+	y: number;
+}
+
+/** An appliance that turns on and off: a TV screen or a stove's flames (a GLB node). */
+export interface ToggleSpec {
+	id: string;
+	label: string;
+	node: string;
+	kind: 'tv' | 'flame';
+	x: number;
+	z: number;
+	y: number;
+}
+
+/** A table or desk: E near it sits on the nearest of its chairs. */
+export interface TableSpec {
+	id: string;
+	label: string;
+	rect: [number, number, number, number];
+	seats: string[];
+}
+
 export interface BuildingSpec {
-	version: 1;
+	version: 2;
 	name: string;
 	model: string;
-	lightmap: string;
-	/** The same room lit by its lamps only (no sun); blended in by the city's night factor. */
-	lightmapNight?: string;
-	/** The lightmap PNG stores light / lightmapScale (sRGB-encoded). */
-	lightmapScale: number;
+	/** Baked interior light: `day` (sun and sky, sRGB RGB / dayScale) and `lamps` (one light
+	 * group per channel, luminance^(1/2.2) / lampScale, times lampColor). */
+	lightmaps: { day: string; lamps: string; dayScale: number; lampScale: number; lampColor: [number, number, number] };
 	/** Floor height above the ground under the building (m). */
 	floor: number;
 	wallTop: number;
+	/** The roof ridge: walls block the camera up to here (never into the roof space). */
+	roofTop?: number;
 	footprint: XZ[];
 	interior: { min: XZ; max: XZ; ceiling: number };
-	/** Wall pieces (rectangles); the doorway is the gap between two of them. */
+	rooms: RoomSpec[];
+	lights: LightSpec[];
+	/** Wall pieces (rectangles); doorways are gaps between them. */
 	walls: XZ[][];
-	/** Over a doorway: blocks the camera above `base`, never walking. */
+	/** Over doorways and arches: block the camera above `base`, never walking. */
 	lintels: { ring: XZ[]; base: number }[];
-	door: DoorSpec;
+	doors: DoorSpec[];
 	/** Raised ground outside: porch and steps (height above the ground). */
 	steps: { ring: XZ[]; height: number }[];
 	/** Round obstacles: [x, z, radius]. */
@@ -62,8 +115,10 @@ export interface BuildingSpec {
 	/** Furniture footprints (block walking, not the camera). */
 	blockers: XZ[][];
 	seats: SeatSpec[];
-	lamps: { x: number; z: number; y: number }[];
-	fan?: { node: string; rpm: number };
+	tables: TableSpec[];
+	items: ItemSpec[];
+	toggles: ToggleSpec[];
+	fans: { node: string; rpm: number }[];
 }
 
 /** Where a building stands in the world. */
@@ -138,6 +193,17 @@ export function floorAt(spec: BuildingSpec, frame: Frame, x: number, z: number):
 	if (inBounds(bounds(spec.footprint), lx, lz)) return frame.ground + spec.floor;
 	for (const step of spec.steps) if (inBounds(bounds(step.ring), lx, lz)) return frame.ground + step.height;
 	return null;
+}
+
+/** The room at a model-space point, if any. */
+export function roomAt(spec: BuildingSpec, lx: number, lz: number): RoomSpec | null {
+	for (const room of spec.rooms) for (const [x0, x1, z0, z1] of room.rects) if (lx >= x0 && lx <= x1 && lz >= z0 && lz <= z1) return room;
+	return null;
+}
+
+/** Distance from a point to a rectangle [x0, x1, z0, z1] (0 inside). */
+export function rectDistance([x0, x1, z0, z1]: [number, number, number, number], x: number, z: number): number {
+	return Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(z0 - z, 0, z - z1));
 }
 
 /** Inside the room (the interior volume), with a margin (negative = further in). */

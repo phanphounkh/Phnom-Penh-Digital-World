@@ -102,9 +102,37 @@ export class Door {
 		return reach < this.spec.width + r && inward > -r && along > -r;
 	}
 
-	/** The prompt for the door ("Open Door" / "Close Door"). */
+	/** The prompt for the door ("Open Door" / "Close Door", "Open Bedroom Door" …). */
 	get label(): string {
-		return this.state.open ? 'Close Door' : 'Open Door';
+		return `${this.state.open ? 'Close' : 'Open'} ${this.spec.label ?? 'Door'}`;
+	}
+}
+
+/** Something that is on or off (a light group, the TV, a stove), with the same shareable state
+ * as a door: { on, changedAt }, newest wins. */
+export interface SwitchState {
+	on: boolean;
+	changedAt: number;
+}
+
+export class Switch {
+	state: SwitchState;
+
+	constructor(on = false) {
+		this.state = { on, changedAt: 0 };
+	}
+
+	get on(): boolean {
+		return this.state.on;
+	}
+
+	toggle(now = Date.now()): SwitchState {
+		return this.apply({ on: !this.state.on, changedAt: now });
+	}
+
+	apply(state: SwitchState): SwitchState {
+		if (state.changedAt >= this.state.changedAt) this.state = { ...state };
+		return this.state;
 	}
 }
 

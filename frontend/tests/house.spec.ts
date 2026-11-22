@@ -1,7 +1,8 @@
 /**
  * The enterable house at the Riverside (isolated stack): a player walks up to the door, sees
  * "Press E to Open Door", is stopped by the closed door, opens it, walks in (no teleport), gets
- * the indoor camera, sits in the armchair, stands up, walks out and closes the door.
+ * the indoor camera, switches the living-room lights on, opens the bedroom door, sits at the
+ * dining table, stands up, inspects the painting, walks out and closes the front door.
  * Screenshots go to test-results/house/ (not committed).
  */
 import { expect, test, type Page } from '@playwright/test';
@@ -10,14 +11,25 @@ const SHOTS = 'test-results/house';
 /** Software rendering (SwiftShader, ~1–5 fps): give frame-driven state time. */
 const FRAMES = { timeout: 60_000 };
 
-type State = { x: number; z: number; inside: string | null; door: { open: boolean; t: number } | null; prompt: string | null; gait: string | null; seated: boolean };
+type State = {
+	x: number;
+	z: number;
+	inside: string | null;
+	door: { open: boolean; t: number } | null;
+	doors: Record<string, { open: boolean; t: number }>;
+	lights: Record<string, boolean>;
+	prompt: string | null;
+	gait: string | null;
+	seated: boolean;
+};
 const ev = <T>(page: Page, fn: string) => page.evaluate(fn) as Promise<T>;
 const state = (page: Page) =>
 	ev<State>(
 		page,
 		`(() => {
 			const b = globalThis.__ppwBuildings, st = globalThis.__ppwNet.city.localState();
-			return { x: st.x, z: st.z, inside: b.insideOf, door: b.list[0]?.door ?? null, gait: globalThis.__ppwPerf.avatar().gait, seated: globalThis.__ppwNet.city.seated,
+			const l = b.list[0];
+			return { x: st.x, z: st.z, inside: b.insideOf, door: l?.door ?? null, doors: l?.doors ?? {}, lights: l?.lights ?? {}, gait: globalThis.__ppwPerf.avatar().gait, seated: globalThis.__ppwNet.city.seated,
 				prompt: document.querySelector('[data-testid="house-prompt"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null };
 		})()`
 	);
@@ -26,8 +38,15 @@ const world = (page: Page, pts: [number, number][]) => ev<[number, number][]>(pa
 /** Walk like a player (the engine's autopilot: collision, no teleport); resolves on arrival. */
 const walk = async (page: Page, pts: [number, number][]) =>
 	expect(await ev<boolean>(page, `new Promise((r) => globalThis.__ppwNet.city.walkTo(${JSON.stringify(await world(page, pts))}, r))`)).toBe(true);
+/** Walk to `stand`, then settle on it facing `target` (a walk stops within 35 cm, and a player
+ * turns towards what they want before pressing E). */
+const approach = async (page: Page, pts: [number, number][], stand: [number, number], target: [number, number]) => {
+	await walk(page, [...pts, stand]);
+	const [[sx, sz], [tx, tz]] = await world(page, [stand, target]);
+	await ev(page, `globalThis.__ppwNet.city.setPosition(${sx}, ${sz}, ${Math.atan2(tx - sx, tz - sz)})`);
+};
 
-test('a player opens the house door, walks in, sits in the armchair and walks out again', async ({ browser, baseURL }) => {
+test('a player opens the house door, walks in, switches the lights, sits at the table, inspects the painting and walks out', async ({ browser, baseURL }) => {
 	test.setTimeout(600_000);
 	const id = Date.now().toString(36).slice(-6);
 	const username = `house_${id}`;
@@ -60,8 +79,8 @@ test('a player opens the house door, walks in, sits in the armchair and walks ou
 	await expect.poll(() => ev<number>(page, 'globalThis.__ppwBuildings?.list.length ?? 0'), FRAMES).toBe(1);
 	await page.getByTestId('world-canvas').click({ position: { x: 20, y: 300 } });
 
-	// Up the porch towards the door: the prompt.
-	await walk(page, [[-1.6, 6], [-1.6, 3.95]]);
+	// Up the porch towards the front door: the prompt.
+	await walk(page, [[-2.4, 6.4], [-2.4, 5.0]]);
 	await expect(page.getByTestId('house-prompt')).toHaveText(/Press\s*E\s*to Open Door/, FRAMES);
 	await page.screenshot({ path: `${SHOTS}/porch.png` });
 	// The closed door is solid.
@@ -71,23 +90,34 @@ test('a player opens the house door, walks in, sits in the armchair and walks ou
 	expect((await state(page)).inside).toBeNull();
 
 	// E opens it (the leaf swings), and the prompt offers to close it.
-	await walk(page, [[-1.6, 5], [-1.6, 3.95]]);
+	await approach(page, [[-2.4, 6.0]], [-2.4, 5.0], [-2.4, 4.3]);
 	await page.keyboard.press('e');
-	await expect.poll(async () => (await state(page)).door, FRAMES).toEqual({ open: true, t: 1 });
+	await expect.poll(async () => (await state(page)).doors.front, FRAMES).toEqual({ open: true, t: 1 });
 	await expect(page.getByTestId('house-prompt')).toHaveText(/Close Door/, FRAMES);
 	await page.screenshot({ path: `${SHOTS}/door-open.png` });
 
-	// Walk in through the doorway (collision as for any step; the camera follows behind): the
-	// indoor camera takes over.
-	await walk(page, [[-1.6, 1.6]]);
+	// Walk in through the doorway (collision as for any step): the indoor camera takes over.
+	await walk(page, [[-2.4, 2.6]]);
 	await expect.poll(async () => (await state(page)).inside, FRAMES).toBe('riverside-house');
 	await page.waitForTimeout(1500);
 	await page.screenshot({ path: `${SHOTS}/inside.png` });
 
-	// The armchair: in front of it, E sits down; E again stands up.
-	const seat = await ev<{ stand: [number, number] }>(page, `globalThis.__ppwBuildings.list[0].spec.seats.find((s) => s.id === 'armchair')`);
-	await walk(page, [[-0.3, -0.5], seat.stand]);
-	await expect(page.getByTestId('house-prompt')).toHaveText(/Sit Down/, FRAMES);
+	// The light switch by the front door: the living and dining room lamps (off by day).
+	await approach(page, [[-2.75, 2.6]], [-2.75, 3.45], [-3.12, 4.15]);
+	await expect(page.getByTestId('house-prompt')).toHaveText(/Turn Lights On/, FRAMES);
+	await page.keyboard.press('e');
+	await expect.poll(async () => (await state(page)).lights.front, FRAMES).toBe(true);
+	await expect(page.getByTestId('house-prompt')).toHaveText(/Turn Lights Off/, FRAMES);
+
+	// The bedroom door opens from the living room.
+	await approach(page, [[-2.0, 2.2]], [-2.0, 1.15], [-2.0, 0.3]);
+	await expect(page.getByTestId('house-prompt')).toHaveText(/Open Bedroom Door/, FRAMES);
+	await page.keyboard.press('e');
+	await expect.poll(async () => (await state(page)).doors.bedroom, FRAMES).toEqual({ open: true, t: 1 });
+
+	// Sit at the dining table (the nearest chair), then stand up again.
+	await approach(page, [[0.6, 2.6], [1.6, 3.85], [2.8, 3.9]], [2.8, 3.5], [2.8, 2.35]);
+	await expect(page.getByTestId('house-prompt')).toHaveText(/Sit at the Table/, FRAMES);
 	await page.keyboard.press('e');
 	await expect.poll(async () => (await state(page)).gait, FRAMES).toBe('sit');
 	await expect(page.getByTestId('house-prompt')).toHaveText(/Stand Up/, FRAMES);
@@ -95,14 +125,26 @@ test('a player opens the house door, walks in, sits in the armchair and walks ou
 	await page.screenshot({ path: `${SHOTS}/seated.png` });
 	await page.keyboard.press('e');
 	await expect.poll(async () => (await state(page)).seated, FRAMES).toBe(false);
-	expect((await state(page)).gait).not.toBe('sit');
+
+	// Inspect the painting above the sofa: a card with its story; E closes it. (Round the dining
+	// table from whichever side the avatar stood up on.)
+	const [lx] = await ev<[number, number]>(page, `(() => { const s = globalThis.__ppwNet.city.localState(); return globalThis.__ppwBuildings.list[0].frame.toLocal(s.x, s.z); })()`);
+	const round: [number, number][] = lx > 2.8 ? [[4.1, 2.3], [3.9, 1.0], [1.6, 1.0]] : [[1.4, 3.6]];
+	await approach(page, [...round, [-2.6, 2.8]], [-3.7, 2.65], [-3.7, 0.42]);
+	await expect(page.getByTestId('house-prompt')).toHaveText(/Inspect Painting/, FRAMES);
+	await page.keyboard.press('e');
+	await expect(page.getByTestId('inspect-card')).toContainText('Sunset over the temples', FRAMES);
+	await page.screenshot({ path: `${SHOTS}/inspect.png` });
+	await page.keyboard.press('e');
+	await expect(page.getByTestId('inspect-card')).toHaveCount(0, FRAMES);
 
 	// Out through the doorway, then close the door from the porch.
-	await walk(page, [[-1.6, 1.4], [-1.6, 5.4], [-1.6, 4.4]]);
+	await walk(page, [[-2.4, 3.0], [-2.4, 6.2]]);
 	expect((await state(page)).inside).toBeNull();
+	await approach(page, [[-2.4, 6.2]], [-2.4, 5.1], [-2.4, 4.3]);
 	await expect(page.getByTestId('house-prompt')).toHaveText(/Close Door/, FRAMES);
 	await page.keyboard.press('e');
-	await expect.poll(async () => (await state(page)).door, FRAMES).toEqual({ open: false, t: 0 });
+	await expect.poll(async () => (await state(page)).doors.front, FRAMES).toEqual({ open: false, t: 0 });
 	await page.screenshot({ path: `${SHOTS}/closed.png` });
 
 	expect(errors, errors.join('\n')).toEqual([]);

@@ -51,6 +51,8 @@ const MOON_DIR = new THREE.Vector3(0.35, 0.8, 0.45).normalize();
 const INDOOR_FILL = 1.7;
 const INDOOR_SKY = new THREE.Color('#ffe2bd');
 const INDOOR_GROUND = new THREE.Color('#9c7a5c');
+/** Indoors by day with the lamps off: soft daylight from the windows. */
+const INDOOR_DAY = new THREE.Color('#eef0ec');
 
 export class DayNight {
 	mode: TimeMode = 'live';
@@ -74,13 +76,18 @@ export class DayNight {
 	private hemiSky = new THREE.Color();
 	private hemiGround = new THREE.Color();
 	private indoor = 0;
+	private indoorLamp = 1;
 	private indoorShadows = true;
+	private tmpIndoor = new THREE.Color();
 
 	/** Indoors (0 … 1, eased by the engine): the avatar and other lit objects take the room's
-	 * warm lamp light instead of the sun and sky. Cheap: call every frame; no new lights. */
-	setIndoor(k: number, shadows: boolean): void {
-		if (Math.abs(k - this.indoor) < 1e-4 && shadows === this.indoorShadows) return;
+	 * light instead of the sun and sky: warm when its lamps are on (`lamp` 0 … 1), daylight
+	 * through the windows by day, dim in a dark room at night. Cheap: call every frame; no new
+	 * lights. */
+	setIndoor(k: number, shadows: boolean, lamp = 1): void {
+		if (Math.abs(k - this.indoor) < 1e-4 && Math.abs(lamp - this.indoorLamp) < 1e-4 && shadows === this.indoorShadows) return;
 		this.indoor = k;
+		this.indoorLamp = lamp;
 		this.indoorShadows = shadows;
 		this.applyIndoor();
 	}
@@ -90,8 +97,10 @@ export class DayNight {
 		const k = this.indoor;
 		// With shadows the roof already shades the sun; without them, soften it more.
 		sun.intensity = this.sunIntensity * (1 - k * (this.indoorShadows ? 0.25 : 0.6));
-		hemi.intensity = THREE.MathUtils.lerp(this.hemiIntensity, INDOOR_FILL, k);
-		hemi.color.copy(this.hemiSky).lerp(INDOOR_SKY, k);
+		const lit = Math.max(this.indoorLamp, 1 - this.night);
+		hemi.intensity = THREE.MathUtils.lerp(this.hemiIntensity, INDOOR_FILL * (0.25 + 0.75 * lit), k);
+		this.tmpIndoor.copy(INDOOR_DAY).lerp(INDOOR_SKY, this.indoorLamp);
+		hemi.color.copy(this.hemiSky).lerp(this.tmpIndoor, k);
 		hemi.groundColor.copy(this.hemiGround).lerp(INDOOR_GROUND, k);
 	}
 

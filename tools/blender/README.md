@@ -6,7 +6,7 @@
 | `generate_city_assets.py` | `frontend/static/models/city/*.glb`, `landmarks/*.glb` | Rain tree, ornamental tree, sugar palm, shrub (crowns of leaf clumps with bent normals and baked vertex-colour occlusion, clamped to ≤ 1), double-arm lamp, traffic signal, sign post; Phsar Thmei dome (real scale), Khmer stupa. Regenerate one family with `PPW_ASSET_FILTER=city/tree` |
 | `generate_shop_assets.py` | `frontend/static/models/shop/*.glb` | Shop shelf, island table, awning, generic product models (Phase 4) |
 | `generate_vehicle_assets.py` | `frontend/static/models/vehicles/*.glb` | Step-through city bicycle with basket, generic underbone motorbike (Phase 5) |
-| `generate_house.py` | `frontend/static/models/buildings/house-riverside.{glb,json}`, `house-riverside-light{,-night}.webp` | The enterable house: walls with real door and window openings, a hinged door, a furnished room, and a lightmap baked with Cycles on the CPU (about 6 min at the default 256 samples; `PPW_BAKE_SAMPLES=16` for a quick draft, `PPW_HOUSE_PREVIEW=/tmp/house` writes Cycles stills) |
+| `generate_house.py` | `frontend/static/models/buildings/house-riverside.{glb,json}`, `house-riverside-{day,lamps}.webp` | The enterable house: living and dining room, kitchen, bedroom, bathroom and hall, with real door, arch and window openings, three hinged doors, furniture, and lightmaps baked with Cycles on the CPU (daylight plus one bake per room's lamps, about 6 min at the default 200 samples; `PPW_BAKE_SAMPLES=16` for a draft, `PPW_HOUSE_PREVIEW=/tmp/house` writes Cycles stills of every room) |
 | `compress_glb.mjs` | (in place) | Meshopt compression of the Phnom Penh Digital World GLBs (`cd frontend && npm run assets:compress`) |
 | `generate_assets.py` | `frontend/static/models/**` (29 GLBs) | Original CampusEats characters, food, equipment and food court |
 
@@ -60,16 +60,33 @@ Built with Blender 4.3.2. The glTF exporter needs NumPy in Blender's Python. If 
 ## Enterable building contract (relied on by `frontend/src/lib/game/buildings/`)
 
 * Metres, Y up, origin at ground level in the centre of the footprint, front door facing **+Z**.
-* Nodes: `Exterior` (PBR, lit by the game's sun and shadows), `Interior` (made unlit by the client
-  and multiplied by the lightmap on `TEXCOORD_1`), `Glass`, `Door` (origin on the hinge axis; opens
-  by `+rotation.y`), `Fan` (origin on its axis; turns about Y).
-* Plain-coloured faces are merged into one vertex-coloured material per node (`Ext_Painted`,
-  `Int_Painted`), so the house costs about 16 draw calls instead of one per colour. `Int_Bulb` and
-  `Int_LampShade` glow at full brightness.
-* The JSON spec next to the GLB holds what the game cannot read from a mesh: wall rectangles
-  (the doorway is a gap between them), the lintel (blocks the camera above the door only), door
-  hinge/width/swing, porch and step heights, furniture footprints, seats (hip position, facing,
-  stand-up spot), the interior volume and ceiling, and the lightmap's scale.
+* **Nodes:**
+  * `Exterior`: PBR, lit by the game's sun and shadows.
+  * `Interior`: made unlit by the client and multiplied by the lightmaps on `TEXCOORD_1`.
+  * `Glass`.
+  * `Door_<id>`: origin on the hinge axis; opens by `+rotation.y`.
+  * `Fan_<room>`: origin on its axis; turns about Y.
+  * `TVScreen`: the client draws the picture when the TV is on.
+  * `StoveFlame`: hidden until the stove is on.
+* **Materials:** plain-coloured faces are merged into one vertex-coloured material per node
+  (`Ext_Painted`, `Int_Painted`, …). `Int_Bulb_N` and `Int_Shade_N` glow with light group N.
+* **Lightmaps:**
+  * `*-day.webp`: sun and sky, sRGB.
+  * `*-lamps.webp`: one light group per channel, R front room, G kitchen, B bedroom, A bathroom.
+    Each channel is the luminance^(1/2.2), stored with the RGB of transparent pixels kept intact.
+  * The spec gives both scales and the lamp colour.
+* **The JSON spec** (format 2) holds what the game cannot read from a mesh:
+  * walls and partitions: rectangles whose doorway gaps are real;
+  * lintels: block the camera above the openings only;
+  * doors: hinge, width, swing and prompt label;
+  * porch and step heights;
+  * furniture footprints;
+  * rooms with their light group;
+  * light groups with their switch positions;
+  * seats: hip position, facing, and stand-up spot (beside dining chairs, in front of the others);
+  * tables and their chairs;
+  * objects to inspect (title and text), appliances, fans;
+  * the interior volume and ceiling.
 
 All models are original, built from primitives and tailored surfaces; licence CC0. They are
 stylised low-poly, **not** photorealistic. City buildings are generated at runtime from OSM

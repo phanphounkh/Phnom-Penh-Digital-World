@@ -101,7 +101,7 @@ export interface CityController {
 	setGround(provider: ((x: number, z: number) => number | null) | null): void;
 	/** Indoor view: the camera stays under `ceiling` (world y) and within `maxDistance` of the
 	 * avatar, and the sun on the avatar softens. null = outdoors. */
-	setInterior(view: { ceiling: number; maxDistance: number } | null): void;
+	setInterior(view: { ceiling: number; maxDistance: number; lamp?: number } | null): void;
 	/** Sit on a seat: the avatar turns and lowers itself onto (x, z) facing `yaw`; any movement
 	 * key (or stand()) gets it up again at `standAt`. */
 	sit(seat: { x: number; z: number; yaw: number }, standAt: [number, number]): boolean;
@@ -306,8 +306,9 @@ export async function createCity(
 	let groundProvider: ((x: number, z: number) => number | null) | null = null;
 	const groundAt = (x: number, z: number) => groundProvider?.(x, z) ?? terrain.height(x, z);
 	let footY = NaN; // the avatar's floor height, eased over steps
-	let interior: { ceiling: number; maxDistance: number } | null = null;
+	let interior: { ceiling: number; maxDistance: number; lamp?: number } | null = null;
 	let indoor = 0; // 0 outdoors … 1 indoors (eased)
+	let indoorLamp = 1; // the current room's lamps (eased)
 	let viewDistance = NaN;
 	let viewPitch = NaN;
 	type SeatMove = { x: number; z: number; yaw: number; stand: [number, number]; phase: 'down' | 'sat' | 'up'; t: number; fromX: number; fromZ: number; fromYaw: number };
@@ -464,7 +465,8 @@ export async function createCity(
 			return stepRiding(dt);
 		}
 		indoor += ((interior ? 1 : 0) - indoor) * (1 - Math.exp(-dt * 3));
-		lighting.setIndoor(indoor, renderer.shadowMap.enabled);
+		indoorLamp += ((interior?.lamp ?? 1) - indoorLamp) * (1 - Math.exp(-dt * 6));
+		lighting.setIndoor(indoor, renderer.shadowMap.enabled, indoorLamp);
 		if (seat) return stepSeated(dt);
 		const forward = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
 		const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
@@ -596,18 +598,39 @@ export async function createCity(
 			head + Math.sin(viewPitch) * distance,
 			pz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
 		);
-		const f = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
+		// Camera collision: the centre ray, and indoors two more at the sides of the near plane,
+		// so a wall just beside the camera is never seen through.
+		let f = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
+		if (interior) {
+			const sx = Math.cos(camYaw) * 0.3,
+				sz = -Math.sin(camYaw) * 0.3;
+			f = Math.min(f, rayFraction(collision, px, head, pz, desired.x + sx, desired.y, desired.z + sz), rayFraction(collision, px, head, pz, desired.x - sx, desired.y, desired.z - sz));
+		}
 		if (f < 1) {
 			const k = Math.max(0.18, f - 0.4 / distance);
 			desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
 		}
 		desired.y = Math.max(desired.y, groundAt(desired.x, desired.z) + 0.8);
-		if (interior) desired.y = Math.min(desired.y, interior.ceiling - 0.3);
+		if (interior) {
+			// Cramped (a wall close behind): rise and look down over the avatar's head instead.
+			const room = Math.hypot(desired.x - px, desired.z - pz);
+			if (room < 1.4) desired.y = Math.max(desired.y, head + (1.4 - room) * 0.9);
+			desired.y = Math.min(desired.y, interior.ceiling - 0.3);
+		}
 		camera.position.lerp(desired, 1 - Math.exp(-dt * (f < 1 ? 20 : 8)));
 		camera.position.y = Math.max(camera.position.y, groundAt(camera.position.x, camera.position.z) + 0.6);
 		if (interior) camera.position.y = Math.min(camera.position.y, interior.ceiling - 0.25);
 		cameraTarget.set(px, head, pz);
 		camera.lookAt(cameraTarget);
+		// Small rooms: a short near plane (no wall clipping); outdoors the usual one (depth precision).
+		const near = interior ? 0.1 : 0.3;
+		if (camera.near !== near) {
+			camera.near = near;
+			camera.updateProjectionMatrix();
+		}
+		// Never look out through the avatar's own head.
+		const hide = camera.position.distanceTo(cameraTarget) < 0.55;
+		if (character.root.visible === hide) character.root.visible = !hide;
 	}
 
 	/** Streaming, the cached shadow window and the route line follow the player. */

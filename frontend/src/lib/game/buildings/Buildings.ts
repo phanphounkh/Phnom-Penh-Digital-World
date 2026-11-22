@@ -1,45 +1,52 @@
 /**
- * Enterable buildings in the city: loaded when the player comes near, with a real doorway,
- * a hinged door (E to open and close; its collision follows the leaf), an interior lit by a
- * baked lightmap, an indoor camera, and seats (E to sit down and stand up).
+ * Enterable buildings in the city: loaded when the player comes near, with real doorways and
+ * hinged doors (E to open and close; collision follows each leaf), rooms lit by baked lightmaps
+ * whose lamps switch on and off per room, an indoor camera, and things to do inside: sit down
+ * (or sit at a table), inspect objects, switch the lights, the TV and the stove.
  *
  * A building is a GLB plus a JSON spec (spec.ts) made by tools/blender/generate_house.py; where
- * it stands comes from `placements.ts`. Nothing here talks to the server: door state is local
- * (door.ts keeps it as a shareable value for when doors are synced between players).
+ * it stands comes from `placements.ts`. Nothing here talks to the server: door, light and
+ * appliance states are local, kept as shareable { on/open, changedAt } values (door.ts) for when
+ * they are synced between players.
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import type { CollisionWorld } from '$lib/game/city/collision';
 import type { Terrain } from '$lib/game/city/terrain';
-import { DOOR_REACH, Door, facing } from './door';
+import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
-import { Frame, floorAt, isInside, type BuildingPlacement, type BuildingSpec, type SeatSpec } from './spec';
+import { findPath } from './nav';
+import { Frame, bounds, floorAt, isInside, rectDistance, roomAt, type BuildingPlacement, type BuildingSpec, type ItemSpec, type LightSpec, type SeatSpec, type ToggleSpec } from './spec';
+import { TvPicture } from './tv';
 
 /** Load within this distance (m) of the building, unload beyond the second. */
 export const LOAD_RADIUS = 160;
 export const UNLOAD_RADIUS = 230;
-/** Seats: how close to the spot in front of the seat the player must be. */
-export const SEAT_REACH = 1.4;
+/** How close the player must be to use each kind of thing (m). */
+export const REACH = { seat: 0.95, switch: 1.2, toggle: 1.5, item: 1.8, table: 1.1 };
 /** Indoor camera: the furthest the camera may sit from the avatar. */
 const INDOOR_DISTANCE = 3.2;
 const PLAYER_RADIUS = 0.35;
 /** Brightness of the baked interior under the city's tone mapping (the bake is physically lit,
- * the street is lit by a stronger game sun). */
+ * the street by a stronger game sun). */
 export const INTERIOR_GAIN = 1.9;
-/** Bulbs and lamp shades glow at full brightness instead of taking the lightmap. */
-const GLOWING = new Set(['Int_Bulb', 'Int_LampShade']);
+/** Daylight indoors is physically a few percent of the street's; the eye adapts, so the game
+ * brightens it (a room lit only by its windows reads as a room, not a cave). */
+export const DAYLIGHT_GAIN = 4;
+/** Seconds for lamps to fade on or off. */
+const LIGHT_FADE = 0.25;
 
 /** What the building system needs from the city engine (CityController provides it). */
 export interface BuildingHost {
 	readonly scene: THREE.Scene;
 	readonly collision: CollisionWorld;
 	readonly terrain: Terrain;
-	/** The city's shared night factor uniform (0 day … 1 night): picks day or night lightmap. */
+	/** The city's shared night factor uniform (0 day … 1 night). */
 	readonly materials?: { readonly night: { value: number } };
 	readonly seated: boolean;
 	setGround(provider: ((x: number, z: number) => number | null) | null): void;
-	setInterior(view: { ceiling: number; maxDistance: number } | null): void;
+	setInterior(view: { ceiling: number; maxDistance: number; lamp: number } | null): void;
 	sit(seat: { x: number; z: number; yaw: number }, standAt: [number, number]): boolean;
 	stand(): void;
 	walkTo(points: [number, number][], onDone?: (arrived: boolean) => void): void;
@@ -47,38 +54,74 @@ export interface BuildingHost {
 }
 
 export type BuildingInteraction =
-	| { kind: 'door'; label: string; building: string }
+	| { kind: 'door'; label: string; building: string; door: string }
+	| { kind: 'light'; label: string; building: string; light: string }
+	| { kind: 'toggle'; label: string; building: string; toggle: string }
+	| { kind: 'inspect'; label: string; building: string; item: string }
+	| { kind: 'table'; label: string; building: string; table: string }
 	| { kind: 'sit'; label: string; building: string; seat: string }
 	| { kind: 'stand'; label: string; building: string };
+
+/** What the player is looking at closely (shown as a card by the page). */
+export interface Inspection {
+	building: string;
+	item: string;
+	title: string;
+	text: string;
+}
+
+interface LightGroup {
+	spec: LightSpec;
+	state: Switch;
+	/** Eased 0…1, fed to the shader and the glowing materials. */
+	level: number;
+	glow: { material: THREE.MeshBasicMaterial; lit: THREE.Color }[];
+}
+
+interface Appliance {
+	spec: ToggleSpec;
+	state: Switch;
+	node: THREE.Object3D | null;
+	tv: TvPicture | null;
+	screen: { mesh: THREE.Mesh; off: THREE.Material; on: THREE.MeshBasicMaterial } | null;
+}
 
 interface Loaded {
 	placement: BuildingPlacement;
 	spec: BuildingSpec;
 	frame: Frame;
 	root: THREE.Group;
-	door: Door;
-	doorNode: THREE.Object3D | null;
-	fanNode: THREE.Object3D | null;
+	doors: { door: Door; node: THREE.Object3D | null; owner: string }[];
+	lights: LightGroup[];
+	appliances: Appliance[];
+	fans: { node: THREE.Object3D; rpm: number }[];
+	/** Shader uniforms shared by every interior material of this building. */
+	uniforms: { uLampsOn: { value: THREE.Vector4 } } | null;
 	owner: string;
-	doorOwner: string;
 }
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const textures = new THREE.TextureLoader();
+const sameInteraction = (a: BuildingInteraction | null, b: BuildingInteraction | null) => JSON.stringify(a) === JSON.stringify(b);
 
 export class Buildings {
 	private loaded = new Map<string, Loaded>();
 	private loading = new Set<string>();
 	private current: BuildingInteraction | null = null;
 	private inside: string | null = null;
+	private insideLamp = -1;
 	private disposed = false;
+	private walkingToSeat = false;
+	private lastLocal: [number, number] | null = null;
 	/** The seat the player sits on (or is walking to). */
 	private seatedOn: { building: string; seat: SeatSpec } | null = null;
+	private inspecting: (Inspection & { x: number; z: number }) | null = null;
 
 	constructor(
 		private host: BuildingHost,
 		private onInteraction?: (interaction: BuildingInteraction | null) => void,
-		private placements: BuildingPlacement[] = PLACEMENTS
+		private placements: BuildingPlacement[] = PLACEMENTS,
+		private onInspect?: (inspection: Inspection | null) => void
 	) {
 		host.setGround((x, z) => this.floorAt(x, z));
 	}
@@ -93,9 +136,23 @@ export class Buildings {
 		return this.inside;
 	}
 
-	/** Loaded buildings (inspection and tests). */
-	get list(): { id: string; door: { open: boolean; t: number }; frame: Frame; spec: BuildingSpec }[] {
-		return [...this.loaded.values()].map((b) => ({ id: b.placement.id, door: { open: b.door.open, t: b.door.t }, frame: b.frame, spec: b.spec }));
+	get inspection(): Inspection | null {
+		if (!this.inspecting) return null;
+		const { building, item, title, text } = this.inspecting;
+		return { building, item, title, text };
+	}
+
+	/** Loaded buildings and their state (inspection and tests). */
+	get list() {
+		return [...this.loaded.values()].map((b) => ({
+			id: b.placement.id,
+			frame: b.frame,
+			spec: b.spec,
+			door: b.doors[0] ? { open: b.doors[0].door.open, t: b.doors[0].door.t } : null,
+			doors: Object.fromEntries(b.doors.map((d) => [d.door.spec.id, { open: d.door.open, t: d.door.t }])),
+			lights: Object.fromEntries(b.lights.map((l) => [l.spec.id, l.state.on])),
+			appliances: Object.fromEntries(b.appliances.map((a) => [a.spec.id, a.state.on]))
+		}));
 	}
 
 	floorAt(x: number, z: number): number | null {
@@ -114,17 +171,33 @@ export class Buildings {
 			if (d < LOAD_RADIUS && !this.loaded.has(p.id) && !this.loading.has(p.id)) void this.load(p);
 			else if (d > UNLOAD_RADIUS && this.loaded.has(p.id)) this.unload(p.id);
 		}
-		for (const b of this.loaded.values()) {
-			if (b.door.update(dt)) {
-				if (b.doorNode) b.doorNode.rotation.y = b.door.angle;
-				this.doorCollision(b);
-				if (!b.door.moving) this.host.invalidateShadows();
-			}
-			if (b.fanNode && b.spec.fan) b.fanNode.rotation.y = (b.fanNode.rotation.y + (b.spec.fan.rpm / 60) * Math.PI * 2 * dt) % (Math.PI * 2);
-		}
+		for (const b of this.loaded.values()) this.animate(b, dt);
 		this.updateInside(px, pz);
 		if (this.seatedOn && !this.host.seated && !this.walkingToSeat) this.seatedOn = null;
+		if (this.inspecting && Math.hypot(this.inspecting.x - px, this.inspecting.z - pz) > REACH.item + 0.9) this.closeInspection();
 		this.pick(px, pz, yaw);
+	}
+
+	private animate(b: Loaded, dt: number): void {
+		for (const d of b.doors) {
+			if (!d.door.update(dt)) continue;
+			if (d.node) d.node.rotation.y = d.door.angle;
+			this.doorCollision(b, d);
+			if (!d.door.moving) this.host.invalidateShadows();
+		}
+		for (const f of b.fans) f.node.rotation.y = (f.node.rotation.y + (f.rpm / 60) * Math.PI * 2 * dt) % (Math.PI * 2);
+		const k = Math.min(1, dt / LIGHT_FADE);
+		for (const l of b.lights) {
+			const target = l.state.on ? 1 : 0;
+			if (l.level === target) continue;
+			l.level = l.level < target ? Math.min(target, l.level + k) : Math.max(target, l.level - k);
+			if (b.uniforms) b.uniforms.uLampsOn.value.setComponent(l.spec.channel, l.level);
+			for (const g of l.glow) g.material.color.copy(g.lit).multiplyScalar(0.25 + 0.75 * l.level);
+		}
+		for (const a of b.appliances) {
+			if (a.tv && a.state.on) a.tv.update(dt);
+			if (a.spec.kind === 'flame' && a.node && a.state.on) a.node.scale.y = 0.8 + 0.4 * Math.random();
+		}
 	}
 
 	/** Do what the prompt says. */
@@ -134,28 +207,96 @@ export class Buildings {
 		const b = this.loaded.get(i.building);
 		if (!b) return;
 		if (i.kind === 'door') {
-			b.door.toggle();
+			b.doors.find((d) => d.door.spec.id === i.door)?.door.toggle();
+		} else if (i.kind === 'light') {
+			b.lights.find((l) => l.spec.id === i.light)?.state.toggle();
+			this.insideLamp = -1; // re-send the indoor light level
+		} else if (i.kind === 'toggle') {
+			const a = b.appliances.find((x) => x.spec.id === i.toggle);
+			if (a) this.setAppliance(a, !a.state.on);
+		} else if (i.kind === 'inspect') {
+			if (this.inspecting?.item === i.item) this.closeInspection();
+			else {
+				const item = b.spec.items.find((x) => x.id === i.item);
+				if (item) this.openInspection(b, item);
+			}
 		} else if (i.kind === 'stand') {
 			this.host.stand();
-		} else if (i.kind === 'sit') {
-			const seat = b.spec.seats.find((s) => s.id === i.seat);
-			if (!seat) return;
-			const [sx, sz] = b.frame.toWorld([seat.x, seat.z]);
-			const stand = b.frame.toWorld(seat.stand);
-			const target = { x: sx, z: sz, yaw: b.frame.yaw + seat.yaw };
-			this.seatedOn = { building: b.placement.id, seat };
-			this.walkingToSeat = true;
-			// Step to the spot in front of the seat like a player would, then sit down.
-			this.host.walkTo([stand], (arrived) => {
-				this.walkingToSeat = false;
-				if (arrived && !this.disposed) this.host.sit(target, stand);
-				else this.seatedOn = null;
-			});
+		} else if (i.kind === 'sit' || i.kind === 'table') {
+			const seat = i.kind === 'sit' ? b.spec.seats.find((s) => s.id === i.seat) : this.tableSeat(b, i.table);
+			if (seat) this.sitOn(b, seat);
 		}
 		this.current = null;
 		this.onInteraction?.(null);
 	}
-	private walkingToSeat = false;
+
+	/** Close the inspection card (E again, Escape, or walking away). */
+	closeInspection(): void {
+		if (!this.inspecting) return;
+		this.inspecting = null;
+		this.onInspect?.(null);
+	}
+
+	private openInspection(b: Loaded, item: ItemSpec): void {
+		const [x, z] = b.frame.toWorld([item.x, item.z]);
+		this.inspecting = { building: b.placement.id, item: item.id, title: item.title, text: item.text, x, z };
+		this.onInspect?.(this.inspection);
+	}
+
+	/** The chair of a table nearest the player (by its stand-up spot). */
+	private tableSeat(b: Loaded, tableId: string): SeatSpec | null {
+		const table = b.spec.tables.find((t) => t.id === tableId);
+		if (!table || !this.lastLocal) return null;
+		const [lx, lz] = this.lastLocal;
+		let best: SeatSpec | null = null;
+		let bestD = Infinity;
+		for (const id of table.seats) {
+			const s = b.spec.seats.find((x) => x.id === id);
+			if (!s) continue;
+			const d = Math.hypot(s.stand[0] - lx, s.stand[1] - lz);
+			if (d < bestD) {
+				best = s;
+				bestD = d;
+			}
+		}
+		return best;
+	}
+
+	private sitOn(b: Loaded, seat: SeatSpec): void {
+		const [sx, sz] = b.frame.toWorld([seat.x, seat.z]);
+		const stand = b.frame.toWorld(seat.stand);
+		const target = { x: sx, z: sz, yaw: b.frame.yaw + seat.yaw };
+		this.seatedOn = { building: b.placement.id, seat };
+		this.walkingToSeat = true;
+		this.closeInspection();
+		// Walk to the spot beside or in front of the seat like a player would, around furniture,
+		// walls and open doors (a straight line could run into a table corner), then sit down.
+		const fp = bounds(b.spec.footprint);
+		const path = this.lastLocal
+			? findPath(
+					{ bounds: [fp.minX, fp.maxX, fp.minZ, fp.maxZ], obstacles: [...b.spec.walls, ...b.spec.blockers, ...b.doors.map((d) => d.door.leafRing())], radius: PLAYER_RADIUS + 0.03 },
+					this.lastLocal,
+					seat.stand
+				)
+			: null;
+		const points = (path ?? [seat.stand]).map((p) => b.frame.toWorld(p));
+		this.host.walkTo(points, (arrived) => {
+			this.walkingToSeat = false;
+			if (arrived && !this.disposed) this.host.sit(target, stand);
+			else this.seatedOn = null;
+		});
+	}
+
+	private setAppliance(a: Appliance, on: boolean): void {
+		a.state.apply({ on, changedAt: Date.now() });
+		if (on && a.screen && !a.tv && typeof document !== 'undefined') {
+			a.tv = new TvPicture();
+			a.screen.on.map = a.tv.texture;
+			a.screen.on.needsUpdate = true;
+		}
+		if (a.spec.kind === 'flame' && a.node) a.node.visible = on;
+		if (a.screen) a.screen.mesh.material = on ? a.screen.on : a.screen.off;
+	}
 
 	private updateInside(px: number, pz: number): void {
 		let inside: Loaded | null = null;
@@ -165,13 +306,23 @@ export class Buildings {
 			if (isInside(b.spec, b.frame, px, pz, margin)) inside = b;
 		}
 		const id = inside?.placement.id ?? null;
-		if (id === this.inside) return;
+		// The room's lamps light the avatar too (a dark room at night stays dark).
+		let lamp = 0;
+		if (inside) {
+			const [lx, lz] = inside.frame.toLocal(px, pz);
+			const room = roomAt(inside.spec, lx, lz);
+			const group = inside.lights.find((l) => l.spec.channel === (room?.light ?? 0));
+			lamp = group?.state.on ? 1 : 0;
+		}
+		if (id === this.inside && lamp === this.insideLamp) return;
 		this.inside = id;
-		this.host.setInterior(inside ? { ceiling: inside.frame.ground + inside.spec.interior.ceiling, maxDistance: INDOOR_DISTANCE } : null);
+		this.insideLamp = lamp;
+		this.host.setInterior(inside ? { ceiling: inside.frame.ground + inside.spec.interior.ceiling, maxDistance: INDOOR_DISTANCE, lamp } : null);
 	}
 
-	private pick(px: number, pz: number, yaw: number): void {
+	private pick(px: number, pz: number, worldYaw: number): void {
 		let found: BuildingInteraction | null = null;
+		let best = Infinity;
 		for (const b of this.loaded.values()) {
 			const id = b.placement.id;
 			if (this.host.seated && this.seatedOn?.building === id) {
@@ -180,32 +331,52 @@ export class Buildings {
 			}
 			if (this.walkingToSeat) break;
 			const [lx, lz] = b.frame.toLocal(px, pz);
-			const [cx, cz] = b.frame.toWorld(b.spec.door.center);
-			if (b.door.distance(lx, lz) < DOOR_REACH && facing(px, pz, yaw, cx, cz, 0.9, 0.1)) {
-				if (!b.door.open || !b.door.blocksClosing(lx, lz, PLAYER_RADIUS)) {
-					found = { kind: 'door', label: b.door.label, building: id };
-					break;
+			this.lastLocal = [lx, lz];
+			const yaw = b.frame.yaw;
+			const fx = Math.sin(worldYaw - yaw),
+				fz = Math.cos(worldYaw - yaw);
+			/** Offer `i` (distance `d` within `reach`) aimed at (tx, tz): the player must roughly
+			 * face it (closer than `close` anything goes); what they face most directly wins,
+			 * then the nearest. */
+			const offer = (i: BuildingInteraction, d: number, reach: number, tx: number, tz: number, close = 0.7, minCos = 0.15) => {
+				if (d > reach) return;
+				const dx = tx - lx,
+					dz = tz - lz;
+				const dist = Math.hypot(dx, dz);
+				const cos = dist < 1e-3 ? 1 : (dx * fx + dz * fz) / dist;
+				if (dist > close && cos < minCos) return;
+				const score = d / reach + (1 - Math.max(cos, 0)) * 0.8;
+				if (score < best) {
+					best = score;
+					found = i;
 				}
+			};
+			for (const { door } of b.doors) {
+				const [cx, cz] = door.spec.center;
+				if (door.open && door.blocksClosing(lx, lz, PLAYER_RADIUS)) continue;
+				offer({ kind: 'door', label: door.label, building: id, door: door.spec.id }, door.distance(lx, lz), DOOR_REACH, cx, cz, 0.9, 0.1);
 			}
-			if (!isInside(b.spec, b.frame, px, pz, 0)) continue;
-			let best: SeatSpec | null = null;
-			let bestD = SEAT_REACH;
-			for (const seat of b.spec.seats) {
-				const [sx, sz] = b.frame.toWorld(seat.stand);
-				const [tx, tz] = b.frame.toWorld([seat.x, seat.z]);
-				const d = Math.hypot(sx - px, sz - pz);
-				if (d < bestD && facing(px, pz, yaw, tx, tz, 0.7, 0.0)) {
-					best = seat;
-					bestD = d;
-				}
+			if (!isInside(b.spec, b.frame, px, pz, 0.1)) continue;
+			for (const l of b.lights)
+				for (const [sx, sz] of l.spec.switches)
+					offer({ kind: 'light', label: l.state.on ? 'Turn Lights Off' : 'Turn Lights On', building: id, light: l.spec.id }, Math.hypot(sx - lx, sz - lz), REACH.switch, sx, sz, 0.4, 0.3);
+			for (const a of b.appliances)
+				offer({ kind: 'toggle', label: `Turn ${a.state.on ? 'Off' : 'On'} ${a.spec.label}`, building: id, toggle: a.spec.id }, Math.hypot(a.spec.x - lx, a.spec.z - lz), REACH.toggle, a.spec.x, a.spec.z, 0.5, 0.3);
+			for (const item of b.spec.items) {
+				const open = this.inspecting?.item === item.id;
+				// Looking at something counts a little extra (a picture above a sofa is offered once
+				// the player steps back from the seat).
+				const d = Math.hypot(item.x - lx, item.z - lz) * (open ? 0.3 : 0.75);
+				offer({ kind: 'inspect', label: open ? 'Close' : `Inspect ${item.label}`, building: id, item: item.id }, d, REACH.item, item.x, item.z, open ? Infinity : 0.5, 0.3);
 			}
-			if (best) {
-				found = { kind: 'sit', label: 'Sit Down', building: id, seat: best.id };
-				break;
+			for (const t of b.spec.tables) {
+				const [x0, x1, z0, z1] = t.rect;
+				offer({ kind: 'table', label: `Sit at the ${t.label}`, building: id, table: t.id }, rectDistance(t.rect, lx, lz), REACH.table, (x0 + x1) / 2, (z0 + z1) / 2, 0.9, 0.2);
 			}
+			for (const seat of b.spec.seats)
+				offer({ kind: 'sit', label: 'Sit Down', building: id, seat: seat.id }, Math.hypot(seat.stand[0] - lx, seat.stand[1] - lz), REACH.seat, seat.x, seat.z, 0.75, 0.0);
 		}
-		const same = found?.kind === this.current?.kind && found?.label === this.current?.label && found?.building === this.current?.building && (found as { seat?: string } | null)?.seat === (this.current as { seat?: string } | null)?.seat;
-		if (!same) {
+		if (!sameInteraction(found, this.current)) {
 			this.current = found;
 			this.onInteraction?.(found);
 		}
@@ -216,25 +387,22 @@ export class Buildings {
 		try {
 			const base = p.spec.slice(0, p.spec.lastIndexOf('/') + 1);
 			const spec = (await (await fetch(p.spec)).json()) as BuildingSpec;
-			const [gltf, lightmap, nightmap] = await Promise.all([
+			const [gltf, day, lamps] = await Promise.all([
 				loader.loadAsync(base + spec.model),
-				textures.loadAsync(base + spec.lightmap),
-				spec.lightmapNight ? textures.loadAsync(base + spec.lightmapNight) : Promise.resolve(null)
+				textures.loadAsync(base + spec.lightmaps.day),
+				textures.loadAsync(base + spec.lightmaps.lamps)
 			]);
 			if (this.disposed || !this.placements.includes(p)) {
-				lightmap.dispose();
-				nightmap?.dispose();
+				day.dispose();
+				lamps.dispose();
 				return;
 			}
-			for (const t of [lightmap, nightmap]) {
-				if (!t) continue;
-				t.colorSpace = THREE.SRGBColorSpace;
+			day.colorSpace = THREE.SRGBColorSpace; // the lamp map stays raw: per-channel luminance
+			for (const t of [day, lamps]) {
 				t.flipY = false; // glTF UV convention
 				t.channel = 1; // TEXCOORD_1
 			}
-			const night = nightmap && this.host.materials ? { map: nightmap, factor: this.host.materials.night } : null;
-			prepareMaterials(gltf.scene, lightmap, spec.lightmapScale, night);
-			this.attach(p, spec, gltf.scene);
+			this.attach(p, spec, gltf.scene, { day, lamps });
 		} catch (error) {
 			console.warn(`Building ${p.id} could not load:`, error);
 		} finally {
@@ -242,26 +410,43 @@ export class Buildings {
 		}
 	}
 
-	/** Put a loaded building into the world: scene, collision, door and fan (tests call it
-	 * directly with a stand-in model). */
-	attach(p: BuildingPlacement, spec: BuildingSpec, root: THREE.Object3D): void {
+	/** Put a loaded building into the world: scene, collision, doors, lights, appliances, fans.
+	 * Tests call it directly with a stand-in model (and no lightmaps). */
+	attach(p: BuildingPlacement, spec: BuildingSpec, root: THREE.Object3D, maps?: { day: THREE.Texture; lamps: THREE.Texture }): void {
 		const frame = new Frame(p.x, p.z, p.yaw, this.host.terrain.height(p.x, p.z));
 		const group = root as THREE.Group;
 		group.name = `building:${p.id}`;
 		group.position.set(frame.x, frame.ground, frame.z);
 		group.rotation.y = frame.yaw;
+		// Lights start on after dark, off by day (the switches change that).
+		const night = (this.host.materials?.night.value ?? 0) > 0.5;
+		const lights: LightGroup[] = spec.lights.map((l) => ({ spec: l, state: new Switch(night), level: night ? 1 : 0, glow: [] }));
+		const uniforms = maps ? prepareMaterials(group, spec, maps, lights, this.host.materials?.night ?? { value: 0 }) : null;
+		const appliances: Appliance[] = spec.toggles.map((t) => {
+			const node = group.getObjectByName(t.node) ?? null;
+			const a: Appliance = { spec: t, state: new Switch(false), node, tv: null, screen: null };
+			if (t.kind === 'flame' && node) node.visible = false;
+			if (t.kind === 'tv' && node) {
+				const mesh = findMesh(node);
+				// The picture (a canvas) is made the first time the set is switched on.
+				if (mesh) a.screen = { mesh, off: mesh.material as THREE.Material, on: new THREE.MeshBasicMaterial({ color: '#ffffff' }) };
+			}
+			return a;
+		});
 		this.host.scene.add(group);
 		group.updateMatrixWorld(true);
+		const owner = `building:${p.id}`;
 		const b: Loaded = {
 			placement: p,
 			spec,
 			frame,
 			root: group,
-			door: new Door(spec.door),
-			doorNode: group.getObjectByName(spec.door.node) ?? null,
-			fanNode: spec.fan ? (group.getObjectByName(spec.fan.node) ?? null) : null,
-			owner: `building:${p.id}`,
-			doorOwner: `building:${p.id}:door`
+			doors: spec.doors.map((d) => ({ door: new Door(d), node: group.getObjectByName(d.node) ?? null, owner: `${owner}:door:${d.id}` })),
+			lights,
+			appliances,
+			fans: spec.fans.map((f) => ({ node: group.getObjectByName(f.node), rpm: f.rpm })).filter((f): f is { node: THREE.Object3D; rpm: number } => !!f.node),
+			uniforms,
+			owner
 		};
 		this.collide(b);
 		this.loaded.set(p.id, b);
@@ -271,7 +456,8 @@ export class Buildings {
 
 	private collide(b: Loaded): void {
 		const { spec, frame, owner } = b;
-		const top = frame.ground + spec.wallTop;
+		// Walls stop the camera up to the ridge, so it never ends up inside the roof.
+		const top = frame.ground + (spec.roofTop ?? spec.wallTop);
 		const c = this.host.collision;
 		for (const wall of spec.walls) c.addRing(owner, frame.ring(wall), top);
 		for (const lintel of spec.lintels) c.addRing(owner, frame.ring(lintel.ring), top, frame.ground + lintel.base);
@@ -280,14 +466,14 @@ export class Buildings {
 			const [wx, wz] = frame.toWorld([x, z]);
 			c.addCircle(owner, wx, wz, r);
 		}
-		this.doorCollision(b);
+		for (const d of b.doors) this.doorCollision(b, d);
 	}
 
-	/** The door leaf blocks walking (and the camera, up to the door's height) where it is now. */
-	private doorCollision(b: Loaded): void {
+	/** A door leaf blocks walking (and the camera, up to the door's height) where it is now. */
+	private doorCollision(b: Loaded, d: Loaded['doors'][number]): void {
 		const c = this.host.collision;
-		c.removeOwner(b.doorOwner);
-		c.addRing(b.doorOwner, b.frame.ring(b.door.leafRing()), b.frame.ground + b.spec.floor + b.spec.door.height);
+		c.removeOwner(d.owner);
+		c.addRing(d.owner, b.frame.ring(d.door.leafRing()), b.frame.ground + b.spec.floor + d.door.spec.height);
 	}
 
 	private unload(id: string): void {
@@ -295,10 +481,15 @@ export class Buildings {
 		if (!b) return;
 		this.loaded.delete(id);
 		this.host.collision.removeOwner(b.owner);
-		this.host.collision.removeOwner(b.doorOwner);
+		for (const d of b.doors) this.host.collision.removeOwner(d.owner);
 		if (this.inside === id) {
 			this.inside = null;
 			this.host.setInterior(null);
+		}
+		if (this.inspecting?.building === id) this.closeInspection();
+		for (const a of b.appliances) {
+			a.tv?.dispose();
+			a.screen?.on.dispose();
 		}
 		b.root.removeFromParent();
 		disposeTree(b.root);
@@ -314,10 +505,37 @@ export class Buildings {
 	}
 }
 
-/** Interior: unlit colour/texture × baked lightmap (no runtime lights, the same by day and
- * night). Exterior, door and glass keep their PBR materials and take the city's sun, sky and
- * shadows. The fan takes a flat indoor tone. */
-function prepareMaterials(root: THREE.Object3D, lightmap: THREE.Texture, scale: number, night: { map: THREE.Texture; factor: { value: number } } | null): void {
+function findMesh(node: THREE.Object3D): THREE.Mesh | null {
+	let mesh: THREE.Mesh | null = null;
+	node.traverse((n) => {
+		if (!mesh && (n as THREE.Mesh).isMesh) mesh = n as THREE.Mesh;
+	});
+	return mesh;
+}
+
+/** Interior: unlit colour/texture × (daylight + the lamps that are on), from the baked maps; no
+ * runtime lights. Bulbs and shades glow by their group's state. Exterior, doors and glass keep
+ * their PBR materials and take the city's sun, sky and shadows; fans take a flat indoor tone. */
+function prepareMaterials(
+	root: THREE.Object3D,
+	spec: BuildingSpec,
+	maps: { day: THREE.Texture; lamps: THREE.Texture },
+	lights: LightGroup[],
+	night: { value: number }
+): { uLampsOn: { value: THREE.Vector4 } } {
+	const lm = spec.lightmaps;
+	const level = (channel: number) => lights.find((l) => l.spec.channel === channel)?.level ?? 0;
+	const uniforms = {
+		uLampMap: { value: maps.lamps },
+		uLampsOn: { value: new THREE.Vector4(level(0), level(1), level(2), level(3)) },
+		uNight: night,
+		uDayScale: { value: lm.dayScale * DAYLIGHT_GAIN },
+		uLampScale: { value: lm.lampScale },
+		uLampColor: { value: new THREE.Vector3(...lm.lampColor) },
+		uGain: { value: INTERIOR_GAIN }
+	};
+	const glowing = new Map<string, LightGroup>();
+	for (const l of lights) for (const name of l.spec.materials) glowing.set(name, l);
 	const converted = new Map<THREE.Material, THREE.Material>();
 	root.traverse((node) => {
 		const mesh = node as THREE.Mesh;
@@ -335,14 +553,25 @@ function prepareMaterials(root: THREE.Object3D, lightmap: THREE.Texture, scale: 
 		};
 		if (group === 'Interior') {
 			mesh.castShadow = mesh.receiveShadow = false;
-			swap((m) =>
-				GLOWING.has(m.name)
-					? new THREE.MeshBasicMaterial({ color: m.color.clone().multiplyScalar(1.6) })
-					: blendNight(new THREE.MeshBasicMaterial({ color: m.color, map: m.map, vertexColors: m.vertexColors, lightMap: lightmap, lightMapIntensity: scale * Math.PI * INTERIOR_GAIN }), night)
-			);
-		} else if (group === 'Fan') {
+			swap((m) => {
+				const light = glowing.get(m.name);
+				if (light) {
+					const lit = m.color.clone().multiplyScalar(1.6);
+					const material = new THREE.MeshBasicMaterial({ color: lit.clone().multiplyScalar(0.25 + 0.75 * light.level) });
+					light.glow.push({ material, lit });
+					return material;
+				}
+				return lightmapped(new THREE.MeshBasicMaterial({ color: m.color, map: m.map, vertexColors: m.vertexColors, lightMap: maps.day }), uniforms);
+			});
+		} else if (group.startsWith('Fan_')) {
 			mesh.castShadow = mesh.receiveShadow = false;
 			swap((m) => new THREE.MeshBasicMaterial({ color: m.color.clone().multiplyScalar(0.8), map: m.map, vertexColors: m.vertexColors }));
+		} else if (group === 'TVScreen') {
+			mesh.castShadow = mesh.receiveShadow = false;
+			swap((m) => new THREE.MeshBasicMaterial({ color: m.color }));
+		} else if (group === 'StoveFlame') {
+			mesh.castShadow = mesh.receiveShadow = false;
+			swap(() => new THREE.MeshBasicMaterial({ color: new THREE.Color('#5a9bff'), transparent: true, opacity: 0.85 }));
 		} else if (group === 'Glass') {
 			mesh.castShadow = false;
 			mesh.renderOrder = 2;
@@ -355,23 +584,30 @@ function prepareMaterials(root: THREE.Object3D, lightmap: THREE.Texture, scale: 
 			mesh.receiveShadow = true;
 		}
 	});
+	return uniforms;
 }
 
-/** Mix the day and night lightmaps by the city's night factor (one extra texture fetch). */
-function blendNight<T extends THREE.MeshBasicMaterial>(material: T, night: { map: THREE.Texture; factor: { value: number } } | null): T {
-	if (!night) return material;
+/** The interior light: day map × daylight (fading to moonlight at night) + each lamp group's
+ * channel × its switch level × lamp colour. One extra texture fetch over a plain lightmap. */
+function lightmapped(material: THREE.MeshBasicMaterial, uniforms: Record<string, { value: unknown }>): THREE.MeshBasicMaterial {
 	material.onBeforeCompile = (shader) => {
-		shader.uniforms.uNightMap = { value: night.map };
-		shader.uniforms.uNight = night.factor;
+		Object.assign(shader.uniforms, uniforms);
 		shader.fragmentShader = shader.fragmentShader
-			.replace('void main() {', 'uniform sampler2D uNightMap;\nuniform float uNight;\nvoid main() {')
+			.replace(
+				'void main() {',
+				'uniform sampler2D uLampMap;\nuniform vec4 uLampsOn;\nuniform float uNight;\nuniform float uDayScale;\nuniform float uLampScale;\nuniform vec3 uLampColor;\nuniform float uGain;\nvoid main() {'
+			)
 			.replace(
 				'vec4 lightMapTexel = texture2D( lightMap, vLightMapUv );',
-				'vec4 lightMapTexel = mix( texture2D( lightMap, vLightMapUv ), texture2D( uNightMap, vLightMapUv ), uNight );'
+				[
+					'vec3 ppwDay = texture2D( lightMap, vLightMapUv ).rgb * uDayScale * ( 1.0 - 0.96 * uNight );',
+					'vec4 ppwLamps = pow( texture2D( uLampMap, vLightMapUv ), vec4( 2.2 ) );',
+					'vec4 lightMapTexel = vec4( ( ppwDay + uLampColor * uLampScale * dot( ppwLamps, uLampsOn ) ) * uGain * PI, 1.0 );'
+				].join('\n\t\t')
 			);
 	};
-	material.customProgramCacheKey = () => 'ppw-lightmap-night';
-	material.userData.nightMap = night.map; // disposed with the material's textures
+	material.lightMapIntensity = 1;
+	material.customProgramCacheKey = () => 'ppw-interior-lightmaps';
 	return material;
 }
 
@@ -388,7 +624,7 @@ function disposeTree(root: THREE.Object3D): void {
 		if (!mesh.isMesh) return;
 		mesh.geometry.dispose();
 		for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-			for (const value of [...Object.values(m), ...Object.values(m.userData)]) if (value instanceof THREE.Texture) textures.add(value);
+			for (const value of Object.values(m)) if (value instanceof THREE.Texture) textures.add(value);
 			m.dispose();
 		}
 	});

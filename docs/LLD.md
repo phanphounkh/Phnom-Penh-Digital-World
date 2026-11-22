@@ -144,31 +144,49 @@ radius to 300 m. It switches on automatically after about 3 s of frames slower t
 ### Enterable buildings (`lib/game/buildings/`)
 
 Hand-built buildings that you can walk into, placed on open land (`placements.ts`). The first is
-the riverside house, 25 m north-west of the Riverside spawn. Each building is a GLB plus a JSON
-spec from `tools/blender/generate_house.py` (`spec.ts` types it).
+the riverside house, 25 m north-west of the Riverside spawn. It has a living room, dining room,
+kitchen, bedroom, bathroom and hall. Each building is a GLB plus a JSON spec (format 2) from
+`tools/blender/generate_house.py`; `spec.ts` types it.
 
-- **Loading:** `Buildings` (created by the world page) fetches the spec, GLB and lightmap when the
-  player comes within 160 m, and frees them beyond 230 m.
-- **Collision:** wall rectangles. The doorway is a real gap between two of them. The lintel above
-  it is a wall with a base height, which blocks the camera but not walking. Furniture footprints
-  block walking only. The door leaf is its own collision owner and is rebuilt every frame while it
-  swings, so a closed door is solid and an open one is not.
-- **Door:** E near the doorway and facing it shows "Press E to Open Door" or "Press E to Close
-  Door". The leaf swings in 0.9 s. It won't close on a player standing in its path. The state
-  (`{ open, changedAt }`, newest wins) is local today and ready to be synced between players.
+- **Loading:** `Buildings` (created by the world page) fetches the spec, the GLB and two
+  lightmaps when the player comes within 160 m, and frees them beyond 230 m.
+- **Collision:** outer walls and partitions are rectangles, and doorways and the kitchen arch are
+  real gaps. Lintels are walls with a base height: they block the camera, not walking. Furniture
+  footprints block walking only. Each door leaf is its own collision owner and is rebuilt while it
+  swings.
+- **Interactions** (E, one prompt at a time): the candidate the player faces most directly wins,
+  then the nearest relative to its reach.
+  - Doors: "Open Door", "Open Bedroom Door"…
+  - Light switches (per room group): "Turn Lights On/Off".
+  - Appliances: "Turn On TV" (an animated canvas picture), "Turn On Stove" (flames).
+  - Objects: "Inspect …", which shows a card with a title and text; E, Escape or walking away
+    closes it.
+  - Tables: "Sit at the Table" / "Sit at the Desk" sits on the nearest chair.
+  - Seats: "Sit Down" / "Stand Up". The avatar walks to the seat's stand-up spot, then `sit()`
+    turns it and lowers it onto the seat with the `Sit` pose.
+  - The walk to a seat follows a path (`nav.ts`): A* on a 0.2 m grid around walls, open doors and
+    furniture, string-pulled into a few straight legs. A dining chair behind the table's corner is
+    still reached.
+- **Shared state:** door, light and appliance states are `{ open/on, changedAt }` values (newest
+  wins), local today and ready to be synced between players.
 - **Floor:** `CityController.setGround` lifts the avatar onto the floor, porch and step, and step
-  heights are eased.
-- **Indoor camera:** inside the room, with hysteresis at the doorway, `setInterior` keeps the
-  camera within 3.2 m of the avatar and under the ceiling, and lowers its pitch.
-- **Seats:** E in front of a seat walks to its stand-up spot, then `sit()` turns the avatar,
-  lowers it onto the seat and holds the `Sit` clip (`RealisticAnimations.posture`). E or any
-  movement key stands it up again.
-- **Rendering:** the interior is unlit and multiplied by lightmaps baked in Blender Cycles. The
-  day map has the bulb, the floor lamp and sun and sky through the windows; the night map has the
-  lamps only. The shader blends the two by the city's night factor, so the interior costs no
-  runtime lights and 15 draw calls for the whole house (plain-coloured parts are vertex colours on
-  one material). The exterior, door and glass use PBR materials and take the city's sun, sky and
-  shadows. Indoors, the sky fill turns into a warm lamp tone so the avatar matches the room.
+  heights are eased. Other players stand on the floor too.
+- **Lighting:** the interior is unlit and multiplied by two lightmaps baked in Blender Cycles.
+  The `day` map holds sun and sky through the windows. The `lamps` map holds one room group per
+  channel: R front room, G kitchen, B bedroom, A bathroom. The shader computes
+  `day × (1 − 0.96 × night) + lampColour × Σ channel × switch level`, so every room's lights
+  switch and fade without runtime lights. Bulbs and lamp shades dim with their group. Lights
+  start on after dark and off by day.
+- **Indoor camera:** inside, with hysteresis at the doorway, `setInterior` keeps the camera within
+  3.2 m of the avatar and under the ceiling, and lowers its pitch.
+  - Two extra rays at the sides of the near plane stop walls beside the camera being seen through.
+  - When cramped, the camera rises over the avatar's head.
+  - The near plane drops to 0.1 m indoors.
+  - The avatar is hidden when the camera is closer than 0.55 m to its head.
+- **Indoor fill:** the sky fill becomes the room's light (warm when its lamps are on, daylight by
+  day, dim in a dark room at night), so the avatar matches the room.
+- **Cost:** the exterior, door and glass use PBR materials and take the city's sun, sky and
+  shadows. Plain-coloured parts are vertex colours on one material per node.
 
 ## Multiplayer protocol (`/api/v1/world/ws`)
 
