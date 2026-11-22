@@ -328,6 +328,28 @@ describe('the house in the world', () => {
 		expect(calls.stand).toBe(1);
 	});
 
+	it('with another building loaded, still picks the chair nearest the player in this one', () => {
+		// (The player's spot must be read in the frame of the building being used, not in the
+		// frame of whichever building was looked at last.)
+		const table = SPEC.tables.find((t) => t.id === 'dining')!;
+		const [x0, x1, z0, z1] = table.rect;
+		const chairs = SPEC.seats.filter((s) => table.seats.includes(s.id));
+		const sides: XZ[] = [
+			[(x0 + x1) / 2, z1 + 1.0],
+			[(x0 + x1) / 2, z0 - 1.0]
+		];
+		const picked = sides.map((from) => {
+			const { calls, b, at } = setup();
+			b.attach({ ...PLACE, id: 'next-door', x: PLACE.x + 60, z: PLACE.z - 40, yaw: PLACE.yaw + 1.2 }, SPEC, model());
+			expect(at(from, [(x0 + x1) / 2, (z0 + z1) / 2])).toMatchObject({ kind: 'table', building: PLACE.id });
+			b.interact();
+			const nearest = [...chairs].sort((a, c) => Math.hypot(a.stand[0] - from[0], a.stand[1] - from[1]) - Math.hypot(c.stand[0] - from[0], c.stand[1] - from[1]))[0];
+			expect(calls.sit[0]).toMatchObject({ yaw: PLACE.yaw + nearest.yaw });
+			return nearest.id;
+		});
+		expect(picked[0]).not.toBe(picked[1]);
+	});
+
 	it('sits on the armchair from in front of it', () => {
 		const { calls, b, at } = setup();
 		const seat = SPEC.seats.find((s) => s.id === 'armchair')!;

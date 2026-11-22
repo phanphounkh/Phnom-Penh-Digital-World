@@ -548,6 +548,100 @@ function nameSign(text: string, type: InteriorType, width: number): THREE.Mesh |
 	return sign;
 }
 
+/** The shader uniforms shared by every material of one building (its lights levels are set by
+ * Buildings): eight light channels, two storeys of up to four rooms. */
+function interiorUniforms(night: { value: number }, detail: { value: number }) {
+	return {
+		uLampsOn: { value: new THREE.Vector4(1, 0, 0, 0) },
+		uLampsOn2: { value: new THREE.Vector4(0, 0, 0, 0) },
+		uNight: night,
+		uDetail: detail,
+		uGain: { value: PROCEDURAL_GAIN },
+		uLampColor: { value: new THREE.Vector3(1.25, 1.0, 0.75) }
+	};
+}
+
+/** The name board over a café's or shop's door, on the facade (needs a canvas: on the main
+ * thread). */
+function addSign(root: THREE.Group, type: InteriorType, plan: Plan, name?: string | null): void {
+	const sw = Math.min(1.8, plan.width - 0.4);
+	const sign = nameSign(name ?? SIGN_NAMES[type], type, sw);
+	if (!sign) return;
+	const half = plan.width / 2 - sw / 2;
+	sign.position.set(Math.max(-half, Math.min(half, plan.doorX)), FLOOR_LIFT + DOOR_H + 0.2 + sw / 8, plan.depth / 2 + plan.wall + 0.08);
+	root.add(sign);
+}
+
+/** A built interior as plain data (posted from the worker): its spec, and its node tree with
+ * each mesh's vertex arrays (transferred, not copied). */
+export interface InteriorData {
+	spec: BuildingSpec;
+	nodes: NodeData[];
+}
+interface NodeData {
+	name: string;
+	position: [number, number, number];
+	mesh?: { attributes: Record<string, { array: Float32Array; itemSize: number }>; index: Uint16Array | Uint32Array | null; sphere: [number, number, number, number] };
+	children: NodeData[];
+}
+
+/** Build an interior as data (in the interior worker: the heavy part, off the main thread). */
+export function buildInteriorData(type: InteriorType, plan: Plan, seed: number, name?: string | null): InteriorData {
+	const { spec, root } = buildInterior(type, plan, seed, { value: 0 }, name);
+	const node = (o: THREE.Object3D): NodeData => {
+		const mesh = o as THREE.Mesh;
+		const out: NodeData = { name: o.name, position: [o.position.x, o.position.y, o.position.z], children: o.children.filter((c) => c.name !== 'Sign').map(node) };
+		if (mesh.isMesh) {
+			const g = mesh.geometry;
+			const attributes: NonNullable<NodeData['mesh']>['attributes'] = {};
+			for (const [key, a] of Object.entries(g.attributes)) attributes[key] = { array: a.array as Float32Array, itemSize: a.itemSize };
+			const sphere = g.boundingSphere ?? (g.computeBoundingSphere(), g.boundingSphere!);
+			out.mesh = { attributes, index: (g.index?.array as Uint16Array | Uint32Array) ?? null, sphere: [sphere.center.x, sphere.center.y, sphere.center.z, sphere.radius] };
+		}
+		return out;
+	};
+	return { spec, nodes: root.children.filter((c) => c.name !== 'Sign').map(node) };
+}
+
+/** The arrays to transfer with an InteriorData message. */
+export function interiorTransferables(data: InteriorData): ArrayBuffer[] {
+	const out: ArrayBuffer[] = [];
+	const walk = (n: NodeData) => {
+		if (n.mesh) {
+			for (const a of Object.values(n.mesh.attributes)) out.push(a.array.buffer as ArrayBuffer);
+			if (n.mesh.index) out.push(n.mesh.index.buffer as ArrayBuffer);
+		}
+		n.children.forEach(walk);
+	};
+	data.nodes.forEach(walk);
+	return [...new Set(out)];
+}
+
+/** Put a built interior together (main thread): meshes with this building's materials, and its
+ * sign. */
+export function assembleInterior(data: InteriorData, type: InteriorType, plan: Plan, night: { value: number }, name?: string | null, detail: { value: number } = { value: 1 }): ProceduralBuilding {
+	const uniforms = interiorUniforms(night, detail);
+	const make = (n: NodeData): THREE.Object3D => {
+		let o: THREE.Object3D;
+		if (n.mesh) {
+			const g = new THREE.BufferGeometry();
+			for (const [key, a] of Object.entries(n.mesh.attributes)) g.setAttribute(key, new THREE.BufferAttribute(a.array, a.itemSize));
+			if (n.mesh.index) g.setIndex(new THREE.BufferAttribute(n.mesh.index, 1));
+			const [x, y, z, r] = n.mesh.sphere;
+			g.boundingSphere = new THREE.Sphere(new THREE.Vector3(x, y, z), r);
+			o = new THREE.Mesh(g, interiorMaterial(uniforms));
+		} else o = new THREE.Group();
+		o.name = n.name;
+		o.position.set(...n.position);
+		for (const c of n.children) o.add(make(c));
+		return o;
+	};
+	const root = new THREE.Group();
+	for (const n of data.nodes) root.add(make(n));
+	addSign(root, type, plan, name);
+	return { spec: data.spec, root, uniforms };
+}
+
 /** A piece of furniture against a wall: the middle of its back edge (on the wall face), its
  * turn (local +z points into the room, local x along the wall) and its footprint. */
 interface Mount {
@@ -616,14 +710,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	const r = rng(seed);
 	// Uniforms shared by all materials of this building (the lights levels are set by Buildings):
 	// eight light channels (two storeys of up to four rooms).
-	const uniforms = {
-		uLampsOn: { value: new THREE.Vector4(1, 0, 0, 0) },
-		uLampsOn2: { value: new THREE.Vector4(0, 0, 0, 0) },
-		uNight: night,
-		uDetail: detail,
-		uGain: { value: PROCEDURAL_GAIN },
-		uLampColor: { value: new THREE.Vector3(1.25, 1.0, 0.75) }
-	};
+	const uniforms = interiorUniforms(night, detail);
 	const w = plan.width,
 		d = plan.depth,
 		H = plan.ceiling,
@@ -1695,14 +1782,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		doorSpecs.push({ id: wn.id, label: 'Window', node, hinge: [hx, hz], width: lw, thickness: 0.04, height: lh, openYaw: Math.PI / 2, center: [wn.x, hz], outward: [0, 1], level: 0, kind: 'window', sill });
 	}
 
-	// The sign: on the facade, centred over the door, kept within the room's width.
 	const pal = SIGN_NAMES[type];
-	const sw = Math.min(1.8, w - 0.4);
-	const sign = nameSign(name ?? pal, type, sw);
-	if (sign) {
-		sign.position.set(Math.max(-w / 2 + sw / 2, Math.min(w / 2 - sw / 2, dx)), FLOOR_LIFT + DOOR_H + 0.2 + sw / 8, d / 2 + plan.wall + 0.08);
-		root.add(sign);
-	}
+	addSign(root, type, plan, name);
 
 	// ── The spec: rooms and their lights, collision, doors, stairs, things to do ──────────────
 	const rect = (x0: number, x1: number, z0: number, z1: number): XZ[] => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];

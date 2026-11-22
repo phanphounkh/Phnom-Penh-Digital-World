@@ -300,11 +300,17 @@ name if it has one.
   vehicles still stay out of buildings (`MovementValidator.check`). Spawn and arrival spots
   still avoid footprints, except open walk-in shop floors.
 - **Lifetime:** at most 16 generated interiors at once (one facade doorway slot each: the facade
-  shader cuts 32, 16 for walk-in shops and 16 for buildings). They are built one at a time, 0.2 s
-  apart, nearest first (3–55 ms each on a desktop CPU), and freed beyond 100 m, never while the
-  player is inside. Model buildings load within 160 m. Interiors are drawn only when they can be
-  seen: from inside, through an open door within 35 m (OSM buildings), or within 60 m (the model
-  house's windows).
+  shader cuts 36, 16 for walk-in shops, 16 for buildings' front doors and 4 for the windows of the
+  building the player is at). They are started 0.2 s apart, nearest first, and freed beyond
+  100 m, never while the player is inside. Model buildings load within 160 m. Interiors are drawn
+  only when they can be seen: from inside, through an open door within 35 m (OSM buildings), or
+  within 60 m (the model house's windows).
+- **Off the main thread:** the plan, furniture and vertex lighting (25–48 ms per interior in a
+  Node benchmark on this machine) are made in `interior.worker.ts` (`buildInteriorData`) as
+  plain typed arrays, handed back without copying. The main thread only wraps them into meshes
+  and materials (`assembleInterior`, 0.3–0.6 ms) and adds the name sign (a canvas). A building
+  that left the scan range meanwhile is dropped. Where workers are unavailable, or the worker
+  fails, interiors are built on the main thread as before (`buildInterior`).
 
 ## Multiplayer protocol (`/api/v1/world/ws`)
 

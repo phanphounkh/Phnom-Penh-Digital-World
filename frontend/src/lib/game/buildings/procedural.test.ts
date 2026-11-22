@@ -8,7 +8,7 @@ import { Buildings, type BuildingHost, type BuildingInteraction } from './Buildi
 import { SWING_TIME } from './door';
 import { planInterior, type Plan, type XZ } from './footprint';
 import { findPath } from './nav';
-import { PARTITION, SURFACE, buildInterior, planRooms } from './procedural';
+import { PARTITION, SURFACE, assembleInterior, buildInterior, buildInteriorData, interiorTransferables, planRooms } from './procedural';
 import { Frame, roomAt, type BuildingSpec } from './spec';
 
 const R = 0.35;
@@ -717,4 +717,26 @@ describe('materials', () => {
 		const { spec } = buildInterior('house', planFor(13, 10), 9, { value: 0 });
 		return spec.rooms.flatMap((r) => r.rects[0]);
 	})();
+});
+
+describe('built in a worker, put together here', () => {
+	it('the data round trip gives the same interior (spec, nodes, vertices)', () => {
+		const plan = planFor(10, 12.5, 10);
+		const direct = buildInterior('house', plan, 21, { value: 0 }, 'Home');
+		const data = buildInteriorData('house', plan, 21, 'Home');
+		// What a worker would post: plain data and the arrays to transfer.
+		expect(interiorTransferables(data).length).toBeGreaterThan(0);
+		const made = assembleInterior(structuredClone(data), 'house', plan, { value: 0 }, 'Home');
+		expect(made.spec).toEqual(direct.spec);
+		const shape = (root: THREE.Object3D) => {
+			const out: string[] = [];
+			root.traverse((o) => {
+				const g = (o as THREE.Mesh).geometry;
+				out.push(`${o.name}:${g ? g.getAttribute('position').count : '-'}:${o.position.toArray().map((v) => v.toFixed(3))}`);
+			});
+			return out;
+		};
+		expect(shape(made.root)).toEqual(shape(direct.root));
+		expect(made.root.getObjectByName('Interior_1')).toBeTruthy();
+	});
 });

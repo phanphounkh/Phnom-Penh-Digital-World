@@ -22,7 +22,7 @@ import { BUILDING_DOORS, BUILDING_WINDOWS, type Doorway } from '$lib/game/city/m
 import type { Terrain } from '$lib/game/city/terrain';
 import type { XZ as FXZ } from './footprint';
 import { interiorName, interiorType, report, scan, type Candidate, type InteriorType } from './osm';
-import { buildInterior } from './procedural';
+import { assembleInterior, buildInterior, type InteriorData, type ProceduralBuilding } from './procedural';
 import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
 import { findPath } from './nav';
@@ -40,6 +40,7 @@ const OSM_SCAN_EVERY = 1.0;
 /** At most this many generated buildings at once (each needs a doorway slot in the facade
  * shader: materials.BUILDING_DOORS). */
 const MAX_GENERATED = BUILDING_DOORS;
+const WORKER_GONE = 'interior worker gone';
 /** Generating an interior takes a few to ~50 ms: one at a time, this far apart (s), nearest first. */
 const BUILD_GAP = 0.2;
 /** Planning newly seen buildings, per scan (ms). */
@@ -181,9 +182,16 @@ export class Buildings {
 	private windowAhead: { building: string; door: string; local: XZ } | null = null;
 	/** Surface detail in generated interiors (1 on, 0 off): follows the city's quality setting. */
 	readonly interiorDetail = { value: 1 };
+	/** The worker that builds interiors off the main thread (undefined: not started yet; null:
+	 * none, they are built here), and its jobs waiting for an answer. */
+	private worker: Worker | null | undefined = undefined;
+	private jobs = new Map<number, { resolve: (data: InteriorData) => void; reject: (error: Error) => void }>();
+	private nextJob = 1;
 	private disposed = false;
 	private walkingToSeat = false;
-	private lastLocal: [number, number] | null = null;
+	/** Where the player was at the last pick (world x, z): each building turns it into its own
+	 * coordinates (a shared local position would be in whichever building was looked at last). */
+	private lastWorld: [number, number] | null = null;
 	/** The seat the player sits on (or is walking to). */
 	private seatedOn: { building: string; seat: SeatSpec } | null = null;
 	private inspecting: (Inspection & { x: number; z: number }) | null = null;
@@ -511,8 +519,8 @@ export class Buildings {
 	/** The chair of a table nearest the player (by its stand-up spot). */
 	private tableSeat(b: Loaded, tableId: string): SeatSpec | null {
 		const table = b.spec.tables.find((t) => t.id === tableId);
-		if (!table || !this.lastLocal) return null;
-		const [lx, lz] = this.lastLocal;
+		if (!table || !this.lastWorld) return null;
+		const [lx, lz] = b.frame.toLocal(this.lastWorld[0], this.lastWorld[1]);
 		let best: SeatSpec | null = null;
 		let bestD = Infinity;
 		for (const id of table.seats) {
@@ -540,10 +548,11 @@ export class Buildings {
 		const storey = this.storeyOf(b);
 		const { walls, blockers } = this.solids(b, storey);
 		const leaves = b.doors.filter((d) => (d.door.spec.level ?? 0) === storey).map((d) => d.door.leafRing());
-		const path = this.lastLocal
+		const from = this.lastWorld ? b.frame.toLocal(this.lastWorld[0], this.lastWorld[1]) : null;
+		const path = from
 			? findPath(
 					{ bounds: [fp.minX, fp.maxX, fp.minZ, fp.maxZ], obstacles: [...walls, ...blockers, ...leaves], radius: PLAYER_RADIUS + 0.03 },
-					this.lastLocal,
+					from,
 					seat.stand
 				)
 			: null;
@@ -596,6 +605,7 @@ export class Buildings {
 		let found: BuildingInteraction | null = null;
 		let best = Infinity;
 		let ahead: Buildings['windowAhead'] = null;
+		this.lastWorld = [px, pz];
 		for (const b of this.loaded.values()) {
 			const id = b.placement.id;
 			if (this.host.seated && this.seatedOn?.building === id) {
@@ -604,7 +614,6 @@ export class Buildings {
 			}
 			if (this.walkingToSeat) break;
 			const [lx, lz] = b.frame.toLocal(px, pz);
-			this.lastLocal = [lx, lz];
 			const yaw = b.frame.yaw;
 			const fx = Math.sin(worldYaw - yaw),
 				fz = Math.cos(worldYaw - yaw);
@@ -680,15 +689,61 @@ export class Buildings {
 		}
 	}
 
+	/** The interior worker, started on first use (none where workers are not available). */
+	private interiorWorker(): Worker | null {
+		if (this.worker !== undefined) return this.worker;
+		this.worker = null;
+		if (typeof Worker === 'undefined') return null;
+		try {
+			const worker = new Worker(new URL('./interior.worker.ts', import.meta.url), { type: 'module' });
+			worker.onmessage = (event: MessageEvent) => {
+				const job = this.jobs.get(event.data.id);
+				if (!job) return;
+				this.jobs.delete(event.data.id);
+				if (event.data.ok) job.resolve(event.data.data);
+				else job.reject(new Error(event.data.message));
+			};
+			worker.onerror = (event) => {
+				console.warn('Interior worker failed; building interiors on the main thread', event);
+				worker.terminate();
+				this.worker = null;
+				for (const job of this.jobs.values()) job.reject(new Error(WORKER_GONE));
+				this.jobs.clear();
+			};
+			this.worker = worker;
+		} catch (error) {
+			console.warn('Interior worker unavailable; building interiors on the main thread', error);
+		}
+		return this.worker;
+	}
+
 	private async load(p: BuildingPlacement): Promise<void> {
 		if (p.procedural) {
 			const { type, plan, seed, name } = p.procedural;
+			const night = this.host.materials?.night ?? { value: 0 };
+			const worker = this.interiorWorker();
+			this.loading.add(p.id);
 			try {
-				const built = buildInterior(type, plan, seed, this.host.materials?.night ?? { value: 0 }, name, this.interiorDetail);
+				let built: ProceduralBuilding;
+				if (worker) {
+					// The heavy part in the worker; here only the meshes are put together.
+					const data = await new Promise<InteriorData>((resolve, reject) => {
+						const id = this.nextJob++;
+						this.jobs.set(id, { resolve, reject });
+						worker.postMessage({ id, type, plan, seed, name });
+					});
+					if (this.disposed || !this.osmPlacements.has(p.id)) return; // gone meanwhile
+					built = assembleInterior(data, type, plan, night, name, this.interiorDetail);
+				} else built = buildInterior(type, plan, seed, night, name, this.interiorDetail);
 				this.attach(p, built.spec, built.root, undefined, built.uniforms);
 			} catch (error) {
-				console.warn(`Building ${p.id} could not be generated:`, error);
-				this.failed.add(p.id);
+				// (A worker that died: built here next time instead.)
+				if ((error as Error).message !== WORKER_GONE) {
+					console.warn(`Building ${p.id} could not be generated:`, error);
+					this.failed.add(p.id);
+				}
+			} finally {
+				this.loading.delete(p.id);
 			}
 			return;
 		}
@@ -891,6 +946,8 @@ export class Buildings {
 		this.host.setGround(null);
 		this.host.setCeiling?.(null);
 		this.host.setJumpOverride?.(null);
+		this.worker?.terminate();
+		this.worker = null;
 		this.host.setInterior(null);
 	}
 }
