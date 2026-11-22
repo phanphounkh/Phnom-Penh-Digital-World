@@ -81,7 +81,9 @@
 				renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 				renderer.shadowMap.enabled = true;
 				renderer.toneMapping = THREE.ACESFilmicToneMapping;
-				renderer.domElement.style.display = 'block';
+				// Out of the layout: the stage's size comes from the page, never from the canvas (a
+				// canvas sized for a narrow window would otherwise hold the column wide).
+				Object.assign(renderer.domElement.style, { display: 'block', position: 'absolute', inset: '0' });
 				host.appendChild(renderer.domElement);
 				const scene = new THREE.Scene();
 				const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);

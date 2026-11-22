@@ -177,7 +177,7 @@
 
 <svelte:head><title>Avatar · Phnom Penh Digital World</title></svelte:head>
 
-<div class="grid gap-6 lg:grid-cols-[1fr_1.1fr] lg:items-start">
+<div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
 	<section class="h-[50svh] max-h-[500px] min-h-[320px] lg:sticky lg:top-6 lg:h-[calc(100dvh-7rem)] lg:max-h-[760px]" aria-label="Preview">
 		<AvatarPreview {avatar} bind:style={look} caption={summary} />
 	</section>
