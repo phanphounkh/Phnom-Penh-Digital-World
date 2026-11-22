@@ -17,7 +17,6 @@
 export type XZ = [number, number];
 
 export type Reason =
-	| 'holes'
 	| 'landmark'
 	| 'raised'
 	| 'low'
@@ -58,7 +57,7 @@ export interface Surroundings {
 	neighbours: XZ[][];
 }
 
-export const LIMITS = { minArea: 18, maxArea: 450, minFill: 0.8, minSide: 3.4, maxSide: 12, minHeight: 2.8, wall: 0.25, door: 1.0, roadReach: 25, clearance: 1.4 };
+export const LIMITS = { minArea: 14, maxArea: 2000, minFill: 0.8, minSide: 3.0, maxSide: 12, minHeight: 2.8, wall: 0.25, door: 1.0, roadReach: 25, clearance: 1.4 };
 
 export function area(ring: XZ[]): number {
 	let s = 0;
@@ -209,10 +208,77 @@ export function clearLine(x0: number, z0: number, x1: number, z1: number, rings:
 	return true;
 }
 
+type Box = ReturnType<typeof orientedBox>;
+/** A room rectangle in a box's frame: centre (u, v), half sizes. */
+interface RoomRect {
+	u: number;
+	v: number;
+	hu: number;
+	hv: number;
+}
+
+/**
+ * The biggest rectangle (in the box's frame) that fits inside the ring, clear of its walls and of
+ * any courtyard, with both sides at least `minSide`: the room of an L-shaped, notched or
+ * courtyard building. A grid of cells (0.25 m, coarser for big buildings) and the classic
+ * largest-rectangle-in-a-histogram sweep.
+ */
+export function largestRoom(ring: XZ[], holes: XZ[][], box: Box, minSide: number): RoomRect | null {
+	const cell = Math.max(0.25, Math.sqrt(4 * box.halfU * box.halfV) / 64);
+	const nu = Math.floor((2 * box.halfU) / cell),
+		nv = Math.floor((2 * box.halfV) / cell);
+	if (nu < 1 || nv < 1) return null;
+	const u0 = -nu * cell / 2,
+		v0 = -nv * cell / 2;
+	const vx = -box.uz,
+		vz = box.ux;
+	const walls = [ring, ...holes];
+	// A cell counts if its whole square keeps the wall's thickness from every wall.
+	const clearance = LIMITS.wall * 0.6 + cell * 0.71;
+	const open = new Uint8Array(nu * nv);
+	for (let j = 0; j < nv; j++)
+		for (let i = 0; i < nu; i++) {
+			const u = u0 + (i + 0.5) * cell,
+				v = v0 + (j + 0.5) * cell;
+			const x = box.cx + box.ux * u + vx * v,
+				z = box.cz + box.uz * u + vz * v;
+			if (!pointInRing(x, z, ring) || holes.some((h) => pointInRing(x, z, h))) continue;
+			if (walls.every((w) => ringDistance(x, z, w) >= clearance)) open[j * nu + i] = 1;
+		}
+	const heights = new Int32Array(nu);
+	const need = Math.ceil(minSide / cell - 1e-9);
+	let best: { i0: number; i1: number; j0: number; j1: number } | null = null;
+	let bestArea = 0;
+	const stack: number[] = [];
+	for (let j = 0; j < nv; j++) {
+		for (let i = 0; i < nu; i++) heights[i] = open[j * nu + i] ? heights[i] + 1 : 0;
+		stack.length = 0;
+		for (let i = 0; i <= nu; i++) {
+			const h = i < nu ? heights[i] : 0;
+			while (stack.length && heights[stack[stack.length - 1]] >= h) {
+				const top = stack.pop()!;
+				const H = heights[top];
+				const left = stack.length ? stack[stack.length - 1] + 1 : 0;
+				const W = i - left;
+				if (H >= need && W >= need && H * W > bestArea) {
+					bestArea = H * W;
+					best = { i0: left, i1: i - 1, j0: j - H + 1, j1: j };
+				}
+			}
+			stack.push(i);
+		}
+	}
+	if (!best) return null;
+	const ua = u0 + best.i0 * cell,
+		ub = u0 + (best.i1 + 1) * cell;
+	const va = v0 + best.j0 * cell,
+		vb = v0 + (best.j1 + 1) * cell;
+	return { u: (ua + ub) / 2, v: (va + vb) / 2, hu: (ub - ua) / 2, hv: (vb - va) / 2 };
+}
+
 export function planInterior(b: BuildingInput, around: Surroundings): { ok: true; plan: Plan } | { ok: false; reason: Reason } {
 	const L = LIMITS;
 	if (b.landmark) return { ok: false, reason: 'landmark' };
-	if (b.holes?.length) return { ok: false, reason: 'holes' };
 	if ((b.minH ?? 0) > 0.5) return { ok: false, reason: 'raised' };
 	if (b.hill) return { ok: false, reason: 'hill' };
 	if (b.h < L.minHeight) return { ok: false, reason: 'low' };
@@ -220,29 +286,37 @@ export function planInterior(b: BuildingInput, around: Surroundings): { ok: true
 	if (A < L.minArea) return { ok: false, reason: 'too-small' };
 	if (A > L.maxArea) return { ok: false, reason: 'too-large' };
 	const box = orientedBox(b.ring);
-	if (A / (4 * box.halfU * box.halfV) < L.minFill) return { ok: false, reason: 'irregular' };
-	// The interior rectangle: the box inset by the wall, shrunk until it sits inside the ring.
-	const { cx, cz, ux, uz } = box;
+	const { ux, uz } = box;
 	const vx = -uz,
 		vz = ux;
-	let hu = box.halfU - L.wall,
-		hv = box.halfV - L.wall;
-	const at = (u: number, v: number): XZ => [cx + ux * u + vx * v, cz + uz * u + vz * v];
-	const fits = () => {
-		for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
-			const [x, z] = at(su * hu, sv * hv);
-			if (!pointInRing(x, z, b.ring) || ringDistance(x, z, b.ring) < L.wall * 0.6) return false;
+	const at = (u: number, v: number): XZ => [box.cx + ux * u + vx * v, box.cz + uz * u + vz * v];
+	// The room: for a plain building, the box inset by the wall (shrunk a little for small
+	// notches); otherwise (L-shapes, wings, courtyards) the biggest rectangle that fits inside.
+	let room: RoomRect | null = null;
+	if (!b.holes?.length && A / (4 * box.halfU * box.halfV) >= L.minFill) {
+		let hu = box.halfU - L.wall,
+			hv = box.halfV - L.wall;
+		const fits = () => {
+			for (const [su, sv] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
+				const [x, z] = at(su * hu, sv * hv);
+				if (!pointInRing(x, z, b.ring) || ringDistance(x, z, b.ring) < L.wall * 0.6) return false;
+			}
+			return true;
+		};
+		for (let shrink = 0; !fits() && shrink < 4; shrink++) {
+			hu -= 0.25;
+			hv -= 0.25;
 		}
-		return true;
-	};
-	let shrink = 0;
-	while (!fits() && shrink < 4) {
-		hu -= 0.25;
-		hv -= 0.25;
-		shrink++;
+		if (fits()) room = { u: 0, v: 0, hu, hv };
 	}
-	if (!fits()) return { ok: false, reason: 'irregular' };
+	if (!room) {
+		const inner = largestRoom(b.ring, b.holes ?? [], box, L.minSide);
+		if (!inner) return { ok: false, reason: A / (4 * box.halfU * box.halfV) < L.minFill || b.holes?.length ? 'irregular' : 'narrow' };
+		room = inner;
+	}
+	const { hu, hv } = room;
 	if (Math.min(hu, hv) * 2 < L.minSide) return { ok: false, reason: 'narrow' };
+	const [cx, cz] = at(room.u, room.v);
 
 	// Entrance: one of the four sides, on a straight stretch of the real wall, facing a road
 	// with free space in front of the door.

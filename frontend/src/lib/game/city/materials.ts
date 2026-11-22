@@ -13,8 +13,13 @@
 import * as THREE from 'three';
 import { addSurfaceDetail, type SurfaceKind } from './surfaces';
 
-/** Walk-in shop doorways drawn at once (the nearest ones) and the opening height (m). */
-export const MAX_DOORS = 16;
+/** Doorways cut into the facades at once (walk-in shops and enterable buildings, the nearest
+ * ones) and the shops' opening height (m). */
+export const MAX_DOORS = 32;
+/** Of those, the walk-in shops get the nearest SHOP_DOORS and the enterable buildings up to
+ * BUILDING_DOORS (each system keeps its own count, so neither crowds out the other). */
+export const SHOP_DOORS = 16;
+export const BUILDING_DOORS = 16;
 export const DOOR_HEIGHT = 2.9;
 
 /** A doorway in an OSM facade: centre and along-wall unit (world), base y, half width, height

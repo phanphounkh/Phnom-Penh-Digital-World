@@ -190,25 +190,33 @@ kitchen, bedroom, bathroom and hall. Each building is a GLB plus a JSON spec (fo
 
 #### Real OpenStreetMap buildings (`footprint.ts`, `osm.ts`, `procedural.ts`)
 
-The same system opens real OSM buildings. Listed ones (`ENTERABLE` in `placements.ts`: a café, a
-mini-mart and a house on Sisowath Quay) get an interior generated to fit their footprint. An auto
-mode (`AUTO_ENTERABLE`, off) would open every eligible building near the player.
+The same system opens real OSM buildings: every eligible building near the player gets an
+interior generated to fit its footprint (auto mode, `AUTO_ENTERABLE` in `placements.ts`: the 8
+nearest within 45 m, plus a few just passed). Three are listed by id with a fixed type and name
+(`ENTERABLE`: a café, a mini-mart and a house on Sisowath Quay). Auto buildings become homes,
+shops or cafés by their OSM kind (`interiorType`); a tag of just "building" gives mostly homes.
+Shops and cafés get a made-up name on their sign (`interiorName`), or the building's own OSM
+name if it has one.
 
 - **Eligibility** (`planInterior`). A building is skipped, never given a broken door, when it has:
-  - a courtyard (holes), a raised part, or a landmark model or temple roof;
-  - fewer than 18 m² or more than 450 m², or a height under 2.8 m;
-  - an irregular shape: the room must be a rectangle well inside the walls; small notches are
-    absorbed by shrinking it;
-  - a room narrower than 3.4 m;
+  - a raised part, or a landmark model or temple roof;
+  - fewer than 14 m² or more than 2000 m², or a height under 2.8 m;
+  - no room at least 3 m wide. A plain building's room is its outline inset by the wall (small
+    notches are absorbed by shrinking it). For L-shapes, wings and courtyard buildings, the room
+    is the biggest rectangle that fits inside, clear of the yard (`largestRoom`, a grid and the
+    largest-rectangle-in-a-histogram sweep). A building in several parts uses its biggest part;
   - no entrance. The door needs a straight stretch of real wall, a road within 25 m in front,
     and no other building in front (shared walls of terraced shophouses). The straight way from
     the door to that road must not cross another building (no doors onto walled-in back yards).
 - **The room** is at most 12 × 12 m (a house: 8 × 7.5 m, `fitRoom`), against the entrance; deep
   shophouses and big villas keep their back rooms closed.
-- **Scan results** (`Buildings.scan`, 300 m around a spawn, E2E dataset): 324 of the 502
-  buildings around Central Market (65%), 79 of 149 around Canadia Garden (53%) and 63 of the 114
-  loaded around the Riverside (55%) qualify. Most rejections are irregular shapes, then big
-  halls, narrow rooms and tiny sheds; 2–5% have no usable entrance.
+- **Scan results** (`Buildings.scan`, 300 m around a spawn, E2E dataset): 428 of the 504
+  buildings around Central Market (85%) and 146 of 208 around Wat Phnom (70%) can be entered.
+  The rest mostly have no usable entrance (no straight street-facing wall with a clear way out),
+  are under 3 m wide or 14 m², are huge halls, or are landmarks.
+- **Planning cost:** each building is planned once (the result is cached by id) and nearest
+  first, with a 4 ms budget per scan; the rest wait for the next scan a second later. Roads count
+  by their extent, so a long straight street with distant vertices is not missed.
 - **Generation:** a café, shop or house layout fitted to the room, from shared furniture
   templates merged into one mesh. Lighting is per vertex and computed at build time: daylight from
   the shopfront, lamp light, occlusion. The shader scales it by day/night and the lights switch,
@@ -220,15 +228,16 @@ mode (`AUTO_ENTERABLE`, off) would open every eligible building near the player.
   clear of the ground and plaza layers.
 - **The camera** never ends up inside a building's mass: if it lands over a room (a player in
   the doorway, the camera behind them), it drops under that room's ceiling (`setCeiling`).
-- **The server** lets players on foot stand inside these footprints. Each building in
-  `ENTERABLE_BUILDING_IDS` (`backend/app/multiplayer/enterable.py`, kept equal to `ENTERABLE` by
-  a test) is an open zone of the movement validator, like a walk-in shop floor. Any other
-  building would get rubber-banding at its doorway: the auto mode needs the server to know its
-  buildings first.
-- **Lifetime:** interiors are built within 70 m and freed beyond 100 m (never while the player is
-  inside). Model buildings load within 160 m. Interiors are drawn only when they can be seen: from
-  inside, through an open door within 35 m (OSM buildings), or within 60 m (the model house's
-  windows).
+- **The server** lets players on foot stand inside any building footprint: every building may
+  have an interior, and its walls are the client's collision. Water still blocks everyone, and
+  vehicles still stay out of buildings (`MovementValidator.check`). Spawn and arrival spots
+  still avoid footprints, except open walk-in shop floors.
+- **Lifetime:** at most 16 generated interiors at once (one facade doorway slot each: the facade
+  shader cuts 32, 16 for walk-in shops and 16 for buildings). They are built one at a time, 0.2 s
+  apart, nearest first (3–55 ms each on a desktop CPU), and freed beyond 100 m, never while the
+  player is inside. Model buildings load within 160 m. Interiors are drawn only when they can be
+  seen: from inside, through an open door within 35 m (OSM buildings), or within 60 m (the model
+  house's windows).
 
 ## Multiplayer protocol (`/api/v1/world/ws`)
 

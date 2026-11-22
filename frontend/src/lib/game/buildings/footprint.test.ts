@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LIMITS, area, clearLine, fitRoom, orientedBox, planInterior, pointInRing, segmentDistance, type Surroundings, type XZ } from './footprint';
+import { LIMITS, area, clearLine, fitRoom, largestRoom, orientedBox, planInterior, pointInRing, segmentDistance, type Surroundings, type XZ } from './footprint';
 
 /** An axis-aligned rectangle ring, optionally rotated about its centre. */
 function rect(cx: number, cz: number, w: number, d: number, angle = 0): XZ[] {
@@ -11,6 +11,14 @@ function rect(cx: number, cz: number, w: number, d: number, angle = 0): XZ[] {
 		[w / 2, d / 2],
 		[-w / 2, d / 2]
 	].map(([x, z]) => [cx + x * c - z * s, cz + x * s + z * c] as XZ);
+}
+/** The room's corners (world) from a plan. */
+function corners(p: { x: number; z: number; yaw: number; width: number; depth: number }): XZ[] {
+	return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz]) => {
+		const lx = (sx * p.width) / 2,
+			lz = (sz * p.depth) / 2;
+		return [p.x + lx * Math.cos(p.yaw) + lz * Math.sin(p.yaw), p.z - lx * Math.sin(p.yaw) + lz * Math.cos(p.yaw)] as XZ;
+	});
 }
 /** A straight road along x at z = zRoad. */
 const road = (zRoad: number, x0 = -50, x1 = 50, w = 8): Surroundings['roads'][number] => ({ pts: [[x0, zRoad], [x1, zRoad]], w });
@@ -64,9 +72,8 @@ describe('planInterior: which buildings can be entered, and where', () => {
 	it('rejects what cannot hold a room', () => {
 		const roads = { roads: [road(10)], neighbours: [] };
 		expect(planInterior({ ring: rect(0, 0, 3, 4), h: 6 }, roads)).toEqual({ ok: false, reason: 'too-small' });
-		expect(planInterior({ ring: rect(0, 0, 30, 30), h: 6 }, roads)).toEqual({ ok: false, reason: 'too-large' });
+		expect(planInterior({ ring: rect(0, 0, 50, 50), h: 6 }, roads)).toEqual({ ok: false, reason: 'too-large' });
 		expect(planInterior({ ring: rect(0, 0, 2.8, 12), h: 6 }, roads)).toEqual({ ok: false, reason: 'narrow' });
-		expect(planInterior({ ring: rect(0, 0, 10, 8), holes: [rect(0, 0, 2, 2)], h: 6 }, roads)).toEqual({ ok: false, reason: 'holes' });
 		expect(planInterior({ ring: rect(0, 0, 10, 8), h: 2.4 }, roads)).toEqual({ ok: false, reason: 'low' });
 		expect(planInterior({ ring: rect(0, 0, 10, 8), h: 9, minH: 3 }, roads)).toEqual({ ok: false, reason: 'raised' });
 		expect(planInterior({ ring: rect(0, 0, 10, 8), h: 9, landmark: true }, roads)).toEqual({ ok: false, reason: 'landmark' });
@@ -105,9 +112,37 @@ describe('planInterior: which buildings can be entered, and where', () => {
 		expect(fitRoom(small, 8, 7.5)).toBe(small); // already small: unchanged
 	});
 
-	it('rejects irregular (L-shaped) footprints', () => {
-		const L: XZ[] = [[0, 0], [12, 0], [12, 4], [4, 4], [4, 12], [0, 12]];
-		expect(planInterior({ ring: L, h: 6 }, { roads: [road(-6)], neighbours: [] })).toEqual({ ok: false, reason: 'irregular' });
+	it('an L-shaped building: the biggest room that fits, door on an outside wall', () => {
+		const L: XZ[] = [[0, 0], [12, 0], [12, 5], [5, 5], [5, 12], [0, 12]];
+		const r = planInterior({ ring: L, h: 6 }, { roads: [road(-6)], neighbours: [] });
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		for (const [x, z] of corners(r.plan)) expect(pointInRing(x, z, L)).toBe(true);
+		expect(r.plan.width * r.plan.depth).toBeGreaterThan(40); // the 12 x 5 wing, less the walls
+		expect(r.plan.facade.z).toBeCloseTo(0, 1); // on the wall facing the road (z = -6)
+	});
+
+	it('a building around a courtyard: the room is beside the yard, never in it', () => {
+		const yard = rect(0, 0, 3, 3);
+		const r = planInterior({ ring: rect(0, 0, 14, 10), holes: [yard], h: 6 }, { roads: [road(10)], neighbours: [] });
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		const [x0, x1, z0, z1] = [-1.5, 1.5, -1.5, 1.5];
+		const cs = corners(r.plan);
+		const minX = Math.min(...cs.map((c) => c[0])),
+			maxX = Math.max(...cs.map((c) => c[0])),
+			minZ = Math.min(...cs.map((c) => c[1])),
+			maxZ = Math.max(...cs.map((c) => c[1]));
+		expect(maxX <= x0 || minX >= x1 || maxZ <= z0 || minZ >= z1).toBe(true);
+	});
+
+	it('finds the largest rectangle inside a shape', () => {
+		const L: XZ[] = [[0, 0], [12, 0], [12, 5], [5, 5], [5, 12], [0, 12]];
+		const room = largestRoom(L, [], orientedBox(L), 3)!;
+		expect(room).not.toBeNull();
+		expect(4 * room.hu * room.hv).toBeGreaterThan(45);
+		expect(4 * room.hu * room.hv).toBeLessThan(60);
+		expect(largestRoom(rect(0, 0, 2, 20), [], orientedBox(rect(0, 0, 2, 20)), 3)).toBeNull(); // too narrow
 	});
 
 	it('copes with a small notch by shrinking the room', () => {

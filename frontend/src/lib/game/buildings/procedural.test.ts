@@ -190,3 +190,64 @@ describe('an OpenStreetMap building opened as a café', () => {
 		expect(f).toBeTruthy();
 	});
 });
+
+describe('auto mode: the buildings nearest the player open as they walk along a street', () => {
+	// Twelve 8 x 8 m houses in a row along a street (z = 10), 12 m apart.
+	const rings = Array.from({ length: 12 }, (_, i) => rect(i * 12, 0, 8, 8));
+	const payload = {
+		key: '0_0',
+		ix: 0,
+		iz: 0,
+		size: 500,
+		roads: [{ id: 1, name: 'Street', name_en: null, name_km: null, cls: 'residential', w: 8, oneway: false, bridge: false, layer: 0, pts: [[-30, 10], [170, 10]] }],
+		buildings: rings.map((ring, i) => ({ id: 1000 + i, name: null, name_km: null, kind: 'house', h: 7, min_h: 0, hs: 'osm', colour: null, polys: [[ring]] })),
+		areas: [],
+		landmarks: [],
+		features: []
+	} as unknown as ChunkPayload;
+	function town() {
+		const host: BuildingHost = {
+			scene: new THREE.Scene(),
+			collision: new CollisionWorld(),
+			terrain: FLAT,
+			materials: { night: { value: 0 } },
+			seated: false,
+			setGround: () => {},
+			setInterior: () => {},
+			sit: () => true,
+			stand: () => {},
+			walkTo: (_p, done) => done?.(true),
+			invalidateShadows: () => {}
+		};
+		for (const ring of rings) host.collision.addRing('chunk', ring, 7);
+		const b = new Buildings(host, () => {}, [], undefined, { payloads: () => [payload], list: [], auto: { enabled: true, radius: 45, max: 3 } });
+		/** Stand at (x, 16) for `seconds`, in quarter-second frames. */
+		const stay = (x: number, seconds: number) => {
+			for (let t = 0; t < seconds; t += 0.25) b.update(0.25, x, 16, 0);
+		};
+		const open = () => b.list.map((l) => l.id).sort();
+		return { b, stay, open };
+	}
+
+	it('builds the nearest ones, one at a time', () => {
+		const { b, open } = town();
+		b.update(0.016, 0, 16, 0);
+		expect(open()).toEqual(['osm:1000']); // the nearest first; the others wait their turn
+		for (let i = 0; i < 4; i++) b.update(0.25, 0, 16, 0);
+		expect(open()).toEqual(['osm:1000', 'osm:1001', 'osm:1002']);
+		expect(b.list.every((l) => l.spec.doors.length === 1)).toBe(true);
+	});
+
+	it('follows the player down the street, keeping the ones just passed a little longer', () => {
+		const { stay, open } = town();
+		stay(0, 2);
+		stay(60, 3); // houses 1003-1007 are now the nearest
+		const now = open();
+		expect(now).toEqual(expect.arrayContaining(['osm:1004', 'osm:1005', 'osm:1006']));
+		expect(now).toContain('osm:1002'); // 36 m back: still open
+		expect(now.length).toBeLessThanOrEqual(6);
+		stay(130, 4);
+		expect(open()).not.toContain('osm:1000'); // far behind: freed
+		expect(open()).toEqual(expect.arrayContaining(['osm:1010', 'osm:1011']));
+	});
+});

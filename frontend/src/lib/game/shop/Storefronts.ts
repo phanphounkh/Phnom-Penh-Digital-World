@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { market, money, type Cart, type Product, type Shop, type ShopDetail } from '$lib/api/market';
 import type { CollisionWorld } from '$lib/game/city/collision';
 import type { CityMaterials } from '$lib/game/city/materials';
-import { MAX_DOORS } from '$lib/game/city/materials';
+import { SHOP_DOORS } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
 import { applyPhoto, disposeOwned, fitting, productModel, tint } from './ShopAssets';
 import {
@@ -256,7 +256,7 @@ export class Storefronts {
 		}
 		// Facade cut-outs for the nearest doorways.
 		nearby.sort((a, b) => a.d - b.d);
-		const doorShops = nearby.slice(0, MAX_DOORS).map((n) => n.shop);
+		const doorShops = nearby.slice(0, SHOP_DOORS).map((n) => n.shop);
 		const key = doorShops.map((s) => s.id).join();
 		if (key !== this.doorsKey) {
 			this.doorsKey = key;

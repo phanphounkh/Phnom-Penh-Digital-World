@@ -18,10 +18,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import type { ChunkPayload } from '$lib/api/types';
 import type { CollisionWorld } from '$lib/game/city/collision';
-import type { Doorway } from '$lib/game/city/materials';
+import { BUILDING_DOORS, type Doorway } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
 import { fitRoom, type XZ as FXZ } from './footprint';
-import { report, scan, type Candidate, type InteriorType } from './osm';
+import { interiorName, interiorType, report, scan, type Candidate, type InteriorType } from './osm';
 import { buildInterior } from './procedural';
 import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
@@ -39,6 +39,13 @@ export const OSM_UNLOAD_RADIUS = 100;
 const OSM_SCAN_EVERY = 1.0;
 /** A generated house keeps a living-room-sized room against its entrance (m). */
 const HOUSE_ROOM = { width: 8, depth: 7.5 };
+/** At most this many generated buildings at once (each needs a doorway slot in the facade
+ * shader: materials.BUILDING_DOORS). */
+const MAX_GENERATED = BUILDING_DOORS;
+/** Generating an interior takes a few to ~50 ms: one at a time, this far apart (s), nearest first. */
+const BUILD_GAP = 0.2;
+/** Planning newly seen buildings, per scan (ms). */
+const PLAN_BUDGET = 4;
 /** Interiors are drawn only when they can be seen: from inside, through an open door nearby
  * (OSM buildings), or within this distance (the model house, which has real windows). */
 const INTERIOR_VISIBLE = { doorway: 35, windows: 60 };
@@ -158,6 +165,7 @@ export class Buildings {
 	/** OSM buildings found near the player (placements made from their plans). */
 	private osmPlacements = new Map<string, BuildingPlacement>();
 	private sinceScan = Infinity;
+	private sinceBuild = Infinity;
 
 	constructor(
 		private host: BuildingHost,
@@ -189,31 +197,38 @@ export class Buildings {
 		if (!osm) return;
 		const listed = new Map(osm.list.map((b) => [b.id, b]));
 		const auto = osm.auto?.enabled ? osm.auto : null;
-		const radius = Math.max(OSM_UNLOAD_RADIUS, auto?.radius ?? 0);
-		const candidates = scan(osm.payloads(), px, pz, radius, osm.claimed?.() ?? [], (cx, cz, r) => this.host.terrain.affects(cx, cz, r), auto ? undefined : new Set(listed.keys()));
+		const claimed = osm.claimed?.() ?? [];
+		const hill = (cx: number, cz: number, r: number) => this.host.terrain.affects(cx, cz, r);
 		const wanted = new Map<string, BuildingPlacement>();
 		const take = (c: Candidate, type: InteriorType, name?: string | null) => {
-			if (!c.result.ok) return;
+			if (!c.result.ok || wanted.size >= MAX_GENERATED) return;
 			const plan = type === 'house' ? fitRoom(c.result.plan, HOUSE_ROOM.width, HOUSE_ROOM.depth) : c.result.plan;
 			const id = `osm:${c.id}`;
-			wanted.set(id, this.osmPlacements.get(id) ?? { id, spec: '', x: plan.x, z: plan.z, yaw: plan.yaw, procedural: { type, plan, seed: c.id, name: name ?? c.name } });
+			wanted.set(id, this.osmPlacements.get(id) ?? { id, spec: '', x: plan.x, z: plan.z, yaw: plan.yaw, procedural: { type, plan, seed: c.id, name: name ?? undefined } });
 		};
-		for (const c of candidates) {
-			const l = listed.get(c.id);
-			if (l) take(c, l.type, l.name);
+		// Kept first: a building the player is inside (it unloads once they are out and away).
+		if (this.inside?.startsWith('osm:')) {
+			const p = this.osmPlacements.get(this.inside);
+			if (p) wanted.set(this.inside, p);
+		}
+		for (const c of scan(osm.payloads(), px, pz, OSM_UNLOAD_RADIUS, claimed, hill, new Set(listed.keys()))) {
+			const l = listed.get(c.id)!;
+			take(c, l.type, l.name ?? c.name);
 		}
 		if (auto) {
-			const near = candidates
-				.filter((c) => c.result.ok && !listed.has(c.id))
-				.map((c) => ({ c, d: c.result.ok ? Math.hypot(c.result.plan.x - px, c.result.plan.z - pz) : Infinity }))
-				.filter((e) => e.d < auto.radius)
-				.sort((a, b) => a.d - b.d)
-				.slice(0, auto.max);
-			for (const { c } of near) take(c, auto.type?.(c) ?? (c.kind === 'house' || c.kind === 'residential' ? 'house' : c.id % 2 ? 'shop' : 'cafe'));
+			// The nearest eligible buildings; ones already open stay a little longer and a little
+			// further (walking past a row of shops does not build and free them over and over).
+			const near = scan(osm.payloads(), px, pz, auto.radius + 20, claimed, hill, undefined, PLAN_BUDGET).filter((c) => c.result.ok && !listed.has(c.id));
+			let fresh = 0;
+			for (const c of near) {
+				const open = this.osmPlacements.has(`osm:${c.id}`);
+				if (c.d < auto.radius && fresh < auto.max) fresh++;
+				else if (!open || wanted.size >= auto.max + 3 + listed.size) continue;
+				const type = auto.type?.(c) ?? interiorType(c.kind, c.id);
+				take(c, type, type === 'house' ? undefined : (c.name ?? interiorName(type, c.id)));
+			}
 		}
 		for (const [id] of this.osmPlacements) if (!wanted.has(id) && this.loaded.has(id) && this.inside !== id) this.unload(id);
-		// Keep a building the player is still inside (it unloads once they are out and away).
-		for (const [id, p] of this.osmPlacements) if (!wanted.has(id) && this.loaded.has(id)) wanted.set(id, p);
 		this.osmPlacements = wanted;
 	}
 
@@ -271,15 +286,28 @@ export class Buildings {
 	update(dt: number, px: number, pz: number, yaw: number): void {
 		if (this.disposed) return;
 		this.sinceScan += dt;
+		this.sinceBuild += dt;
 		if (this.osm && this.sinceScan >= OSM_SCAN_EVERY) {
 			this.sinceScan = 0;
 			this.discover(px, pz);
 		}
+		let next: BuildingPlacement | null = null;
+		let nextD = Infinity;
 		for (const p of [...this.placements, ...this.osmPlacements.values()]) {
 			const [load, unload] = p.procedural ? [OSM_LOAD_RADIUS, OSM_UNLOAD_RADIUS] : [LOAD_RADIUS, UNLOAD_RADIUS];
 			const d = Math.hypot(p.x - px, p.z - pz);
-			if (d < load && !this.loaded.has(p.id) && !this.loading.has(p.id) && !this.failed.has(p.id)) void this.load(p);
-			else if (d > unload && this.loaded.has(p.id) && this.inside !== p.id) this.unload(p.id);
+			if (d < load && !this.loaded.has(p.id) && !this.loading.has(p.id) && !this.failed.has(p.id)) {
+				if (!p.procedural) void this.load(p);
+				else if (d < nextD) {
+					next = p;
+					nextD = d;
+				}
+			} else if (d > unload && this.loaded.has(p.id) && this.inside !== p.id) this.unload(p.id);
+		}
+		// Generated interiors: the nearest waiting one, one at a time (no hitch from building many).
+		if (next && this.sinceBuild >= BUILD_GAP) {
+			this.sinceBuild = 0;
+			void this.load(next);
 		}
 		for (const b of this.loaded.values()) {
 			this.animate(b, dt);

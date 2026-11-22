@@ -13,8 +13,8 @@ export const PLACEMENTS: BuildingPlacement[] = [
 ];
 
 /**
- * Real OpenStreetMap buildings that get an interior generated to fit them (by OSM building id):
- * see footprint.ts for which buildings qualify. Filled in from a scan of the district
+ * Real OpenStreetMap buildings with a fixed interior type and name (by building id); every other
+ * eligible building opens in auto mode below. See footprint.ts for which buildings qualify
  * (`__ppwBuildings.scan(x, z)` in the browser lists the eligible ones near a point).
  */
 export const ENTERABLE: { id: number; type: 'house' | 'shop' | 'cafe'; name?: string }[] = [
@@ -25,6 +25,7 @@ export const ENTERABLE: { id: number; type: 'house' | 'shop' | 'cafe'; name?: st
 	{ id: 1635, type: 'house', name: 'House' }
 ];
 
-/** Auto mode (off for now): every eligible building near the player gets an interior, only the
- * `max` nearest at a time. */
-export const AUTO_ENTERABLE = { enabled: false, radius: 60, max: 3 };
+/** Auto mode: every eligible building near the player gets an interior (a home, shop or café by
+ * its OSM kind), only the `max` nearest within `radius` at a time, built as the player comes
+ * near and freed as they leave. */
+export const AUTO_ENTERABLE = { enabled: true, radius: 45, max: 8 };

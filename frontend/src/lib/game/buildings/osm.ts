@@ -1,10 +1,10 @@
 /**
  * OpenStreetMap buildings as enterable buildings: find the ones near the player that are listed
- * (or, with auto mode, every eligible one), plan their interiors (footprint.ts) once, and report
+ * (or, in auto mode, every eligible one), plan their interiors (footprint.ts) once, and report
  * why the others are not eligible.
  */
 import type { ChunkPayload } from '$lib/api/types';
-import { planInterior, pointInRing, type Plan, type Reason, type XZ } from './footprint';
+import { area, planInterior, pointInRing, type Plan, type Reason, type XZ } from './footprint';
 
 export type InteriorType = 'house' | 'shop' | 'cafe';
 
@@ -14,6 +14,8 @@ export interface Candidate {
 	name: string | null;
 	kind: string;
 	ring: XZ[];
+	/** Distance from the scan centre (m). */
+	d: number;
 	result: { ok: true; plan: Plan } | { ok: false; reason: Reason };
 }
 
@@ -27,9 +29,14 @@ const centroid = (ring: XZ[]): XZ => {
 	return [x / ring.length, z / ring.length];
 };
 
+/** Plans only depend on the (static) map: each building is planned once. */
+const plans = new Map<string, Candidate['result']>();
+
 /**
- * Plan every building in the loaded chunks whose centre is within `radius` of (x, z). `claimed`
- * points (walk-in shop doors) exclude their building; `hill` reports raised ground.
+ * Plan every building in the loaded chunks whose centre is within `radius` of (x, z), nearest
+ * first. `claimed` points (walk-in shop doors) exclude their building; `hill` reports raised
+ * ground. With a `budget` (ms), buildings not planned yet are left for a later call once it is
+ * spent (planning a big irregular building takes a few milliseconds).
  */
 export function scan(
 	payloads: ChunkPayload[],
@@ -38,31 +45,76 @@ export function scan(
 	radius: number,
 	claimed: XZ[] = [],
 	hill: (x: number, z: number, r: number) => boolean = () => false,
-	only?: Set<number>
+	only?: Set<number>,
+	budget = Infinity
 ): Candidate[] {
 	const buildings = payloads.flatMap((p) => p.buildings);
-	const roads = payloads.flatMap((p) => p.roads.map((r) => ({ pts: r.pts, w: r.w })));
-	const out: Candidate[] = [];
+	const roads = payloads.flatMap((p) =>
+		p.roads.map((r) => {
+			const xs = r.pts.map((q) => q[0]),
+				zs = r.pts.map((q) => q[1]);
+			return { pts: r.pts, w: r.w, box: [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)] };
+		})
+	);
+	const near: { b: (typeof buildings)[number]; poly: XZ[][]; c: XZ; d: number }[] = [];
 	for (const b of buildings) {
 		if (b.id === null || !b.polys.length || !b.polys[0][0]?.length) continue;
 		if (only && !only.has(b.id)) continue;
-		const ring = b.polys[0][0] as XZ[];
-		const [cx, cz] = centroid(ring);
-		if (Math.hypot(cx - x, cz - z) > radius) continue;
+		// A building in several parts: its biggest part.
+		const poly = (b.polys.length > 1 ? [...b.polys].sort((p, q) => area(q[0] as XZ[]) - area(p[0] as XZ[]))[0] : b.polys[0]) as XZ[][];
+		const c = centroid(poly[0]);
+		const d = Math.hypot(c[0] - x, c[1] - z);
+		if (d <= radius) near.push({ b, poly, c, d });
+	}
+	near.sort((p, q) => p.d - q.d);
+	const until = performance.now() + budget;
+	const out: Candidate[] = [];
+	for (const { b, poly, c, d } of near) {
+		const ring = poly[0];
 		let result: Candidate['result'];
 		if (claimed.some(([px, pz]) => pointInRing(px, pz, ring) || ringNear(px, pz, ring, 1.5))) result = { ok: false, reason: 'claimed' };
-		else if (b.polys.length > 1) result = { ok: false, reason: 'irregular' };
 		else {
-			const near = (r: XZ[]) => r.some(([px, pz]) => Math.abs(px - cx) < 50 && Math.abs(pz - cz) < 50);
-			const neighbours = buildings.filter((o) => o !== b && o.polys[0]?.[0] && near(o.polys[0][0] as XZ[])).map((o) => o.polys[0][0] as XZ[]);
-			result = planInterior(
-				{ ring, holes: b.polys[0].slice(1) as XZ[][], h: b.h, minH: b.min_h, landmark: !!b.model || !!b.roof, hill: hill(cx, cz, 15) },
-				{ roads: roads.filter((r) => r.pts.some(([px, pz]) => Math.hypot(px - cx, pz - cz) < 80)), neighbours }
-			);
+			const key = `${b.id}:${ring.length}:${ring[0][0]}:${ring[0][1]}`;
+			let cached = plans.get(key);
+			if (!cached) {
+				if (performance.now() > until) continue; // next time
+				const [cx, cz] = c;
+				const close = (r: XZ[]) => r.some(([px, pz]) => Math.abs(px - cx) < 50 && Math.abs(pz - cz) < 50);
+				const neighbours = buildings.filter((o) => o !== b && o.polys[0]?.[0] && close(o.polys[0][0] as XZ[])).flatMap((o) => o.polys.map((p) => p[0] as XZ[]));
+				cached = planInterior(
+					{ ring, holes: poly.slice(1), h: b.h, minH: b.min_h, landmark: !!b.model || !!b.roof, hill: hill(cx, cz, 15) },
+					// Roads passing within 80 m (by their extent: a long straight street has its
+					// vertices far apart).
+					{ roads: roads.filter(({ box: [x0, x1, z0, z1] }) => cx > x0 - 80 && cx < x1 + 80 && cz > z0 - 80 && cz < z1 + 80), neighbours: [...neighbours, ...b.polys.filter((p) => (p as unknown) !== poly).map((p) => p[0] as XZ[])] }
+				);
+				plans.set(key, cached);
+			}
+			result = cached;
 		}
-		out.push({ id: b.id, name: b.name, kind: b.kind, ring, result });
+		out.push({ id: b.id!, name: b.name, kind: b.kind, ring, d, result });
 	}
 	return out;
+}
+
+/** What a building becomes inside: homes for residential buildings, shops and cafés for
+ * commercial ones, and a mix (mostly homes) for the many tagged just "building". */
+export function interiorType(kind: string, id: number): InteriorType {
+	const k = kind.toLowerCase();
+	if (/^(house|residential|detached|semidetached_house|terrace|apartments|dormitory|bungalow|hut|cabin|villa)$/.test(k)) return 'house';
+	if (/^(retail|commercial|kiosk|supermarket|shop)$/.test(k)) return id % 3 === 0 ? 'cafe' : 'shop';
+	const r = (id * 2654435761) % 10;
+	return r < 6 ? 'house' : r < 8 ? 'shop' : 'cafe';
+}
+
+const CAFE_NAMES = ['Lotus Café', 'Mekong Coffee', 'Palm Tree Café', 'Morning Glory Café', 'Kampot Pepper Café', 'Tonle Coffee', 'Frangipani Café', 'Sugar Palm Coffee'];
+const SHOP_NAMES = ['Corner Mart', 'Daily Needs', 'Sokha Mini-mart', 'Neighbourhood Store', 'Bayon Mart', 'Family Mart Phsar', 'Rumdoul Store', 'Golden Lotus Mart'];
+
+/** A shop or café's name for its sign (made up, chosen by the building id: the same for
+ * everyone). Houses have none. */
+export function interiorName(type: InteriorType, id: number): string | undefined {
+	if (type === 'house') return undefined;
+	const names = type === 'cafe' ? CAFE_NAMES : SHOP_NAMES;
+	return names[(id * 7 + 3) % names.length];
 }
 
 function ringNear(x: number, z: number, ring: XZ[], d: number): boolean {

@@ -117,7 +117,7 @@ async def test_a_second_connection_replaces_the_first(client: httpx.AsyncClient)
 # ── movement validation & interest management ───────────────────────────────────────────
 
 
-async def test_server_rejects_teleports_walls_and_bounds(client: httpx.AsyncClient):
+async def test_server_rejects_teleports_and_leaving_the_region(client: httpx.AsyncClient):
     me = await onboard(client, "sokha")
     async with world_socket(client) as ws:
         start = await expect(ws, "welcome")
@@ -131,22 +131,6 @@ async def test_server_rejects_teleports_walls_and_bounds(client: httpx.AsyncClie
         hub.by_user[me_id(me)].t_move -= 3600  # even with time to get there...
         await send(ws, t="move", x=5000, z=z, yaw=0, s=6)  # ...this is outside the region
         assert (await expect(ws, "correct"))["why"] == "bounds"
-
-        # Into the middle of a building footprint (time pretends to allow the distance).
-        async with SessionLocal() as session:
-            bx, bz = (
-                await session.execute(
-                    text("""
-                SELECT ST_X(ST_Transform(ST_PointOnSurface(footprint), 32648)) - 491403.0801141087,
-                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(footprint), 32648))
-                FROM buildings WHERE ST_Area(footprint::geography) > 400
-                ORDER BY footprint <-> ST_SetSRID(ST_MakePoint(104.92116, 11.56890), 4326) LIMIT 1
-            """)
-                )
-            ).one()
-        hub.by_user[me_id(me)].t_move -= 120
-        await send(ws, t="move", x=bx, z=bz, yaw=0, s=6)
-        assert (await expect(ws, "correct"))["why"] == "blocked"
 
         await send(ws, t="move", x=x + 1.5, z=z, yaw=0, s=2)  # a normal step is accepted
         await never(ws, "correct")
@@ -295,40 +279,24 @@ async def test_players_arriving_at_the_same_spawn_do_not_overlap(client: httpx.A
             assert ((x1 - x2) ** 2 + (z1 - z2) ** 2) ** 0.5 >= 1.2
 
 
-def test_open_zones_from_shops_and_enterable_buildings_add_up():
+def test_on_foot_buildings_can_be_entered_but_not_water_or_by_vehicle():
     from shapely.geometry import Polygon as P
 
     from app.multiplayer.validation import MovementValidator
 
     square = lambda x, z, s: P([(x, z), (x + s, z), (x + s, z + s), (x, z + s)])  # noqa: E731
-    v = MovementValidator([square(0, 0, 10), square(20, 0, 10)], (-100, -100, 100, 100))
-    v.set_open_zones([square(20, 0, 10)], source="buildings")
-    v.set_open_zones([square(2, 2, 3)], source="shops")
-    assert not v.inside_obstacle(25, 5)  # inside the enterable building
-    assert not v.inside_obstacle(3, 3)  # on the shop floor
-    assert v.inside_obstacle(8, 8)  # the rest of the first building is solid
-    v.set_open_zones([], source="shops")  # the shop closes: the building stays open
-    assert v.inside_obstacle(3, 3) and not v.inside_obstacle(25, 5)
-    assert v.inside_obstacle(25, 5, open_zones=False)  # never by vehicle
+    building, river = square(0, 0, 10), square(20, 0, 10)
+    v = MovementValidator([building, river], (-100, -100, 100, 100), water=[river])
+    assert v.check(-3, 5, 5, 5, dt=10).ok  # into a building, on foot
+    assert v.check(-3, 5, 5, 5, dt=10, on_foot=False).reason == "blocked"  # not by vehicle
+    assert v.check(15, 5, 25, 5, dt=10).reason == "blocked"  # nobody walks on water
+    # Spawn and arrival spots still avoid footprints, except open shop floors.
+    assert v.inside_obstacle(5, 5)
+    v.set_open_zones([square(2, 2, 3)])
+    assert not v.inside_obstacle(3, 3) and v.inside_obstacle(8, 8)
 
 
-def test_enterable_buildings_match_the_client():
-    """The client opens the same buildings the server lets players stand in."""
-    import re
-    from pathlib import Path
-
-    from app.multiplayer.enterable import ENTERABLE_BUILDING_IDS
-
-    source = Path(__file__).resolve().parents[2] / "frontend/src/lib/game/buildings/placements.ts"
-    if not source.exists():
-        pytest.skip("frontend sources not available")
-    block = source.read_text().split("export const ENTERABLE", 1)[1].split("];", 1)[0]
-    assert {int(i) for i in re.findall(r"id:\s*(\d+)", block)} == ENTERABLE_BUILDING_IDS
-
-
-async def test_players_can_walk_into_an_enterable_building(client: httpx.AsyncClient):
-    from app.multiplayer.enterable import ENTERABLE_BUILDING_IDS
-
+async def test_players_walk_into_buildings_but_not_into_the_river(client: httpx.AsyncClient):
     me = await onboard(client, "dara")
     async with world_socket(client) as ws:
         await expect(ws, "welcome")
@@ -338,11 +306,23 @@ async def test_players_can_walk_into_an_enterable_building(client: httpx.AsyncCl
                     text("""
                 SELECT ST_X(ST_Transform(ST_PointOnSurface(footprint), 32648)) - 491403.0801141087,
                        1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(footprint), 32648))
-                FROM buildings WHERE id = :id
-            """),
-                    {"id": min(ENTERABLE_BUILDING_IDS)},
+                FROM buildings WHERE ST_Area(footprint::geography) > 400
+                ORDER BY footprint <-> ST_SetSRID(ST_MakePoint(104.92116, 11.56890), 4326) LIMIT 1
+            """)
+                )
+            ).one()
+            wx, wz = (
+                await session.execute(
+                    text("""
+                SELECT ST_X(ST_Transform(ST_PointOnSurface(geom), 32648)) - 491403.0801141087,
+                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(geom), 32648))
+                FROM land_areas WHERE kind = 'water' ORDER BY ST_Area(geom) DESC LIMIT 1
+            """)
                 )
             ).one()
         hub.by_user[me_id(me)].t_move -= 120
-        await send(ws, t="move", x=bx, z=bz, yaw=0, s=2)
+        await send(ws, t="move", x=bx, z=bz, yaw=0, s=2)  # into a building: fine on foot
         await never(ws, "correct")
+        hub.by_user[me_id(me)].t_move -= 600
+        await send(ws, t="move", x=wx, z=wz, yaw=0, s=2)  # into the river: no
+        assert (await expect(ws, "correct"))["why"] == "blocked"
