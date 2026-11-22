@@ -1,0 +1,15 @@
+# Avatar generator requirements (all free / open source; no GPU, CUDA or paid API needed)
+#
+# System tools
+#   Blender >= 4.2 (tested 4.3.2)        apt install blender   — run with --python-use-system-env
+#   Python  >= 3.11 (Blender's interpreter; Debian's Blender uses the system Python 3.13)
+#   Node.js >= 18 (tested 22)            viewer, browser test, gltf-transform (frontend/node_modules)
+#   Google Chrome or Chromium            browser test only (Playwright from frontend/node_modules)
+#
+# Downloaded by scripts/fetch_assets.py (sha256-pinned, git-ignored, ~330 MB on disk)
+#   MPFB 2.0.18 (GPL-3.0, build tool)    https://extensions.blender.org/add-ons/mpfb/
+#   MakeHuman system assets, CC0 pack    http://files.makehumancommunity.org/asset_packs/makehuman_system_assets/
+#
+# Python packages for Blender's (system) Python — Debian: apt install python3-numpy python3-pil
+numpy>=1.26
+Pillow>=10.0

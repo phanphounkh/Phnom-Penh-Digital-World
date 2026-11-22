@@ -31,10 +31,16 @@ export interface PlayerCard {
 	yaw: number;
 	/** Riding (Phase 5). */
 	v?: RideCard;
+	/** The storey of the building they are in (absent: the ground floor). */
+	l?: number;
 }
 
-/** [id, x, z, yaw, speed] */
-export type PlayerState = [number, number, number, number, number];
+/** [id, x, z, yaw, speed, storey?] (storey only when not the ground floor) */
+export type PlayerState = [number, number, number, number, number, number?];
+
+/** What can be switched in a building and shared with the players around: doors and windows,
+ * light groups, appliances (TV, stove). */
+export type SwitchKind = 'door' | 'light' | 'app';
 
 export type ServerMessage =
 	| { t: 'welcome'; room: string; tick: number; you: { id: number; u: string; n: string; visible: boolean }; x: number; z: number; yaw: number; online: number }
@@ -55,10 +61,13 @@ export type ServerMessage =
 	| { t: 'order'; number: string; status: string }
 	| { t: 'ride'; id: number; v: RideCard | null; x?: number; z?: number; yaw?: number }
 	| { t: 'vspawn'; v: ParkedCard }
-	| { t: 'vdespawn'; id: string };
+	| { t: 'vdespawn'; id: string }
+	/** Building state ("door:front": true …): a change near you (`mine`: your own, back in the
+	 * server's order), or with `all` everything players changed there (the answer to bget). */
+	| { t: 'bstate'; b: string; s: Record<string, boolean>; mine?: boolean; all?: boolean };
 
 export type ClientMessage =
-	| { t: 'move'; x: number; z: number; yaw: number; s: number }
+	| { t: 'move'; x: number; z: number; yaw: number; s: number; l?: number }
 	| { t: 'chat'; ch: ChatChannel; text: string }
 	| { t: 'emote'; e: EmoteName }
 	| { t: 'travel'; spawn: string }
@@ -67,6 +76,8 @@ export type ClientMessage =
 	| { t: 'join'; from: string }
 	| { t: 'mount'; v: string }
 	| { t: 'dismount' }
+	| { t: 'bset'; b: string; k: SwitchKind; id: string; on: boolean }
+	| { t: 'bget'; b: string }
 	| { t: 'ping'; c: number };
 
 /** Close codes that mean "do not reconnect automatically". */

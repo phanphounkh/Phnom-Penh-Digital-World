@@ -10,6 +10,10 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { addFoliageVariation } from './surfaces';
+
+/** Leaf materials: get a per-tree tint (surfaces.ts) and keep their baked vertex shading. */
+export const FOLIAGE = new Set(['Leaves', 'LeavesLight', 'PalmLeaves', 'PalmDead', 'Shrub']);
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const scenes = new Map<string, Promise<THREE.Group>>();
@@ -47,6 +51,7 @@ export const PROP_NAMES = [
 	'tree-rain',
 	'tree-palm',
 	'tree-slender',
+	'bush',
 	'lamp',
 	'traffic-signal',
 	'sign-post'
@@ -70,7 +75,8 @@ export class PropMaterials {
 	}
 }
 
-/** Flatten a prop's meshes into one geometry per material (positions/normals/uv only). */
+/** Flatten a prop's meshes into one geometry per material (positions/normals/uv, and vertex
+ * colours where the model has them). */
 export function flattenProp(root: THREE.Object3D, materials: PropMaterials): Prop {
 	root.updateMatrixWorld(true);
 	const groups = new Map<THREE.MeshStandardMaterial, THREE.BufferGeometry[]>();
@@ -88,6 +94,13 @@ export function flattenProp(root: THREE.Object3D, materials: PropMaterials): Pro
 	});
 	const parts: PropPart[] = [];
 	for (const [material, list] of groups) {
+		// Vertex colours (baked foliage shading): if any part has them, all parts need them.
+		if (list.some((g) => g.getAttribute('color'))) {
+			for (const g of list)
+				if (!g.getAttribute('color')) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 3).fill(1), 3));
+			material.vertexColors = true;
+		}
+		if (FOLIAGE.has(material.name)) addFoliageVariation(material);
 		const geometry = mergeGeometries(list, false);
 		list.forEach((g) => g.dispose());
 		if (geometry) parts.push({ geometry, material });
@@ -96,19 +109,21 @@ export function flattenProp(root: THREE.Object3D, materials: PropMaterials): Pro
 }
 
 /**
- * A non-indexed copy with float32 position/normal/uv only. Meshopt-quantised attributes are
+ * A non-indexed copy with float32 position/normal/uv (and colour if present). Meshopt-quantised attributes are
  * normalised integers, so they must be expanded before any transform is applied to them.
  */
 export function floatGeometry(source: THREE.BufferGeometry): THREE.BufferGeometry {
 	const indexed = source.index ? source.toNonIndexed() : source;
 	const out = new THREE.BufferGeometry();
-	for (const name of ['position', 'normal', 'uv'] as const) {
+	for (const name of ['position', 'normal', 'uv', 'color'] as const) {
 		const attr = indexed.getAttribute(name) as THREE.BufferAttribute | undefined;
 		if (!attr) continue;
-		const data = new Float32Array(attr.count * attr.itemSize);
+		// Colours become RGB (glTF COLOR_0 may be RGBA).
+		const size = name === 'color' ? 3 : attr.itemSize;
+		const data = new Float32Array(attr.count * size);
 		for (let i = 0; i < attr.count; i++)
-			for (let c = 0; c < attr.itemSize; c++) data[i * attr.itemSize + c] = attr.getComponent(i, c);
-		out.setAttribute(name, new THREE.BufferAttribute(data, attr.itemSize));
+			for (let c = 0; c < size; c++) data[i * size + c] = attr.getComponent(i, c);
+		out.setAttribute(name, new THREE.BufferAttribute(data, size));
 	}
 	if (!out.getAttribute('uv'))
 		out.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(out.getAttribute('position').count * 2), 2));

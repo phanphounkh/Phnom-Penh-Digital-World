@@ -81,17 +81,23 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/api/*` | Typed client (CSRF echo, error envelope → `ApiError` with `fieldErrors`), endpoint functions, types |
 | `lib/stores/session.svelte.ts` | Session store: request-scoped `page.data.user` during SSR (no cross-request leaks), client override after mutations; routing helpers |
 | `lib/geo/projection.ts` | proj4 mirror of the backend projection; chunk keys; compass/yaw helpers |
-| `lib/game/avatar/avatar.ts` | Loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
+| `lib/game/avatar/avatar.ts` | Classic avatar: loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
+| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider) for either style; `realistic` (default) or `classic`, a local display preference in `localStorage` (`ppw.avatarStyle`); falls back to classic if the realistic models cannot load |
+| `lib/game/avatar/realistic.ts` | Realistic avatars (`avatar-generator/`): loads `characters/realistic/{male,female}.glb` + `manifest.json`, clones with `SkeletonUtils`, recolours per player (skin tint, hair factor, repainted palette cells), adds a `RightWrist` socket for held products |
+| `lib/game/avatar/RealisticAnimations.ts` | Gait clips (Idle/Walk/Run with hysteresis, stride phase kept, speed-matched playback), emote clips (Wave, Greet = sampeah, Cheer, Dance), IK carry pose; `RealisticEmotes` facade |
+| `lib/game/avatar/ik.ts` | Rig-agnostic bone aiming and two-bone IK (any bone orientation) |
+| `lib/game/vehicles/RealisticRider.ts` | Seats a realistic avatar: hips on the seat, IK feet to pegs/pedals and hands to grips; on the first frame it slides forward and leans until the grips are in reach |
 | `lib/game/city/chunkGeometry.ts` | **Worker-safe** chunk → typed arrays: mitred road ribbons that follow the terrain, sidewalks, dashed centre lines, area polygons, buildings (walls with facade attributes, roofs, terrain-aware bases), tiered Khmer roofs, prop instance matrices, light pools, colliders, label/sign/model specs |
 | `lib/game/city/chunk.worker.ts` | Web Worker: fetch → parse → `buildChunkData` → zero-copy `postMessage` |
 | `lib/game/city/assemble.ts` | Main thread: typed arrays → meshes, instanced props, landmark GLBs, label sprites, per-chunk street-sign atlas, a "detail" group for LOD |
-| `lib/game/city/materials.ts` | Shared materials; facade shader (window/shopfront atlas, night glow); light-pool and terrain materials |
-| `lib/game/city/props.ts` | Meshopt-aware GLB loader; flattens Blender props to one geometry per material; instancing; shared materials by name |
-| `lib/game/city/lighting.ts`, `sun.ts` | Day/night: NOAA-style solar position for Phnom Penh, presets, sun/moon, sky, fog, exposure, night factor |
+| `lib/game/city/materials.ts` | Shared materials; facade shader (6-bay atlas: four window styles and two shopfronts per building and bay, grime and streaks, glossy glass, night glow); light-pool and terrain materials |
+| `lib/game/city/surfaces.ts` | World-space surface detail in one shader program (pavers and kerbs, asphalt grain and gutters, grass, unmapped ground patches, water ripples) switched by a per-material uniform and off in Performance mode; per-tree foliage tint |
+| `lib/game/city/props.ts` | Meshopt-aware GLB loader; flattens Blender props to one geometry per material (keeping baked vertex colours); instancing; shared materials by name; foliage tint on leaf materials |
+| `lib/game/city/lighting.ts`, `sun.ts` | Day/night: NOAA-style solar position for Phnom Penh, presets, sun/moon, sky, fog, exposure, night factor; sky environment map (PMREM, regenerated only when the sun moves noticeably; Quality only) |
 | `lib/game/city/terrain.ts` | Mound terrain (mirror of `app/geography/terrain.py`) |
 | `lib/game/city/collision.ts` | Grid of wall segments per chunk, plus small circular posts (trunks, poles); circle movement with sub-steps and sliding; escape-from-footprint; height-aware camera ray |
 | `lib/game/city/ChunkManager.ts` | Worker pool (2), nearest-first streaming, one assembly per frame, unload with hysteresis, detail LOD, a change flag for the shadow cache, street and landmark lookup |
-| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, avatar and `PlayerAnimations`, orbit camera with occlusion and terrain clamp, input, adaptive quality, minimap, perf counters (`window.__ppwPerf`) |
+| `lib/game/city/CityEngine.ts` | Renderer, sky, lighting controller, cached grid-snapped shadows, terrain patch, the player (a stable holder group around a swappable `GameCharacter`), orbit camera with occlusion and terrain clamp, input, adaptive quality, minimap, perf counters (`window.__ppwPerf`) |
 | `lib/game/player/PlayerAnimations.js` etc. | Reused unchanged from CampusEats World |
 
 ### Rendering pipeline (Phase 2)
@@ -120,12 +126,194 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 
 ### Movement and camera
 
-Camera-relative WASD; walk at 2.6 m/s, run at 6.5 m/s. The player circle has a radius of 0.35 m
+Camera-relative WASD at 2.6 m/s (a jog); Shift sprints at 6.5 m/s; Space jumps. The movement
+model is in `city/locomotion.ts`:
+- **Speed:** acceleration is capped at 6 m/s² and braking at 11 m/s².
+- **Turning:** the heading eases towards the input faster when slow, within a 14 m/s² sideways-grip limit. Sharp turns cut the speed, so a reversal pivots instead of orbiting.
+- **Jump:** 3.6 m/s take-off under 14 m/s² gravity, integrated exactly, so it gives the same 0.46 m hop at any frame rate. Height is local only: the protocol carries x/z, so other players see a jump as a short pause.
+
+The realistic avatar picks Idle / Walk / Run / Sprint / Jump / Fall / Land clips from the ground
+speed and jump state, at foot-sliding-free playback rates (`avatar/RealisticAnimations.ts`).
+The player circle has a radius of 0.35 m
 and moves in sub-steps of half the radius, so it cannot tunnel through walls. World bounds are
 the playable bbox minus 3 m. The camera orbits at 2.5–22 m. A 2D ray against wall segments,
 using each building's height, pulls the camera in front of buildings that would block the view.
 Performance mode turns off shadows, lowers the pixel ratio to 0.75 and shrinks the streaming
 radius to 300 m. It switches on automatically after about 3 s of frames slower than 24 fps.
+
+### Enterable buildings (`lib/game/buildings/`)
+
+Hand-built buildings that you can walk into, placed on open land (`placements.ts`). The first is
+the riverside house, 25 m north-west of the Riverside spawn. It has a living room, dining room,
+kitchen, bedroom, bathroom and hall. Each building is a GLB plus a JSON spec (format 2) from
+`tools/blender/generate_house.py`; `spec.ts` types it.
+
+- **Loading:** `Buildings` (created by the world page) fetches the spec, the GLB and two
+  lightmaps when the player comes within 160 m, and frees them beyond 230 m.
+- **Collision:** outer walls and partitions are rectangles, and doorways and the kitchen arch are
+  real gaps. Lintels are walls with a base height: they block the camera, not walking. Furniture
+  footprints block walking only. Each door leaf is its own collision owner and is rebuilt while it
+  swings.
+- **Interactions** (E, one prompt at a time): the candidate the player faces most directly wins,
+  then the nearest relative to its reach.
+  - Doors: "Open Door", "Open Bedroom Door"…
+  - Light switches (per room group): "Turn Lights On/Off".
+  - Appliances: "Turn On TV" (an animated canvas picture), "Turn On Stove" (flames).
+  - Objects: "Inspect …", which shows a card with a title and text; E, Escape or walking away
+    closes it.
+  - Tables: "Sit at the Table" / "Sit at the Desk" sits on the nearest chair.
+  - Seats: "Sit Down" / "Stand Up". The avatar walks to the seat's stand-up spot, then `sit()`
+    turns it and lowers it onto the seat with the `Sit` pose.
+  - The walk to a seat follows a path (`nav.ts`): A* on a 0.2 m grid around walls, open doors and
+    furniture, string-pulled into a few straight legs. A dining chair behind the table's corner is
+    still reached.
+- **Shared state:** doors, windows, light groups and appliances are shared with the players
+  around (see *Shared buildings* under the multiplayer protocol). A change shows at once where
+  it is made; others' changes arrive through `Buildings.applyShared`. A door another player
+  moves while this player stands in its swing waits until they step aside.
+- **Floor:** `CityController.setGround` lifts the avatar onto the floor, porch and step, and step
+  heights are eased. Other players stand on the floor too, on their own storey (the `l` of their
+  moves): `Buildings.floorAt(x, z, storey)`.
+- **Lighting:** the interior is unlit and multiplied by two lightmaps baked in Blender Cycles.
+  The `day` map holds sun and sky through the windows. The `lamps` map holds one room group per
+  channel: R front room, G kitchen, B bedroom, A bathroom. The shader computes
+  `day × (1 − 0.96 × night) + lampColour × Σ channel × switch level`, so every room's lights
+  switch and fade without runtime lights. Bulbs and lamp shades dim with their group. Lights
+  start on after dark and off by day.
+- **Indoor camera:** inside, with hysteresis at the doorway, `setInterior` keeps the camera within
+  3.2 m of the avatar and under the ceiling, and lowers its pitch.
+  - Two extra rays at the sides of the near plane stop walls beside the camera being seen through.
+  - When cramped, the camera rises over the avatar's head.
+  - The near plane drops to 0.1 m indoors.
+  - The avatar is hidden when the camera is closer than 0.55 m to its head.
+- **Indoor fill:** the sky fill becomes the room's light (warm when its lamps are on, daylight by
+  day, dim in a dark room at night), so the avatar matches the room.
+- **Cost:** the exterior, door and glass use PBR materials and take the city's sun, sky and
+  shadows. Plain-coloured parts are vertex colours on one material per node.
+
+#### Real OpenStreetMap buildings (`footprint.ts`, `osm.ts`, `procedural.ts`)
+
+The same system opens real OSM buildings: every eligible building near the player gets an
+interior generated to fit its footprint (auto mode, `AUTO_ENTERABLE` in `placements.ts`: the 8
+nearest within 45 m, plus a few just passed). Three are listed by id with a fixed type and name
+(`ENTERABLE`: a café, a mini-mart and a house on Sisowath Quay). Auto buildings become homes,
+shops or cafés by their OSM kind (`interiorType`); a tag of just "building" gives mostly homes.
+Shops and cafés get a made-up name on their sign (`interiorName`), or the building's own OSM
+name if it has one.
+
+- **Eligibility** (`planInterior`). A building is skipped, never given a broken door, when it has:
+  - a raised part, or a landmark model or temple roof;
+  - fewer than 14 m² or more than 2000 m², or a height under 2.8 m;
+  - no room at least 3 m wide. A plain building's room is its outline inset by the wall (small
+    notches are absorbed by shrinking it). For L-shapes, wings and courtyard buildings, the room
+    is the biggest rectangle that fits inside, clear of the yard (`largestRoom`, a grid and the
+    largest-rectangle-in-a-histogram sweep). A building in several parts uses its biggest part;
+  - no entrance. The door needs a straight stretch of real wall, a road within 25 m in front,
+    and no other building in front (shared walls of terraced shophouses). The straight way from
+    the door to that road must not cross another building (no doors onto walled-in back yards).
+- **The interior** is at most 12 × 12 m, against the entrance; deeper shophouses and big villas
+  keep the rest closed.
+- **Scan results** (`Buildings.scan`, 300 m around a spawn, E2E dataset): 428 of the 504
+  buildings around Central Market (85%) and 146 of 208 around Wat Phnom (70%) can be entered.
+  The rest mostly have no usable entrance (no straight street-facing wall with a clear way out),
+  are under 3 m wide or 14 m², are huge halls, or are landmarks.
+- **Planning cost:** each building is planned once (the result is cached by id) and nearest
+  first, with a 4 ms budget per scan; the rest wait for the next scan a second later. Roads count
+  by their extent, so a long straight street with distant vertices is not missed.
+- **Rooms** (`planRooms`):
+  - The room by the entrance (living room, sales floor, café), with more rooms behind it once
+    the building is big enough. Partitions are 12 cm thick, with 1 m inner doors that swing into
+    the room behind and open with E ("Open Kitchen Door").
+  - Homes from about 32 m² get a living room at the front with a bedroom, kitchen and (if room)
+    a bathroom behind. A wide house puts them side by side, each opening onto the living room;
+    a narrow shophouse puts them one behind the other, each through the one before.
+  - Shops get a storeroom from 8 m deep, cafés a kitchen from 9 m.
+  - Every room is reachable from the entrance (tested for many sizes).
+- **Upper floors:** a building tall enough for two storeys (about 7 m) gets stairs and an upper
+  floor, if a straight flight fits in the entrance room. The flight has 14 steep steps, 2.8 m
+  long, against the back wall or a side wall.
+  - The flight is kept clear of doorways, of a café's counter and a shop's fridge, and of the
+    way to every inner door. A 1 m landing at each end must be reachable from the room.
+  - The upper floor stands on the same walls. Its front room is a family room with the
+    stairwell (a railing round it) and front windows; the back rooms are bedrooms and a
+    bathroom. Shops and cafés get their family home upstairs.
+  - Only the first upper floor is built, even in taller buildings.
+- **Windows:** on the ground floor's street front, wherever the real facade is straight
+  (`Plan.front`, measured by the planner), a casement opens in each window: a home's own windows,
+  or the middle of a shopfront.
+  - The casement is a door of kind `window`, hinged from its sill and swinging in: E opens and
+    closes it ("Open Window").
+  - The wall has a real opening there, with a reveal through to the facade and a sill board.
+    The facade gets a cut-out, but only on the building the player is at (4 window slots of the
+    shader's 36; doors keep theirs), so the street shows them up close and painted windows from
+    afar.
+  - Space at an open window the player faces climbs through it, in or out (the engine's `climb`
+    move): over the sill in a 1.1 s arc, without collision, to a spot kept clear of furniture
+    inside or to the pavement. The prompt shows "Space to climb through". Standing where the
+    casement swings, it cannot be closed, so "Climb Through Window" (E) is offered instead.
+    Anywhere else, Space is a jump.
+- **Storeys in play** (`Buildings`):
+  - The player is on one storey of the building they are in, and only that storey's walls,
+    furniture and doors are solid: the collision is swapped when they change storey. The swap
+    happens half way up the stairs, where walls across the stairwell's ends keep anyone from
+    walking under the stairs or falling down them.
+  - The floor height is the storey's, or the slope of the stairs. The ceiling (indoor camera)
+    is the storey's, or the upper one's over the stairs.
+  - Prompts, room lights and the light on the avatar follow the storey. The upper storey is
+    drawn only while the player is inside.
+  - Lights have eight channels (two vec4 uniforms).
+- **Furniture:** each kind of room has its own templates set against its walls and kept clear of
+  doorways and door swings:
+  - living room: sofa, TV, altar;
+  - bedroom: bed, wardrobe, bedside lamp, a photo;
+  - kitchen: counter with stove and sink, fridge, table for four, water jar;
+  - bathroom: toilet, basin and mirror, a jar and a shower that turns on;
+  - storeroom: racks, a stock book;
+  - café kitchen: wok burners, a recipe board.
+  Prompts are offered only for what is in the player's room, so nothing is reached through a
+  wall.
+- **Materials:** every face says what it is made of (`SURFACE`: paint, wood, fabric, metal,
+  ceramic, concrete, cardboard, glass; or tiles of a given size), and the interior shader draws
+  its detail from the surface's position, with no textures or UVs.
+  - Wood gets grain, fabric a weave, metal brushing, tiles grout lines (laid on a fixed grid so
+    the grout falls between the coloured tiles). Ceramic gets a glaze on top, concrete a speckle,
+    cardboard fibres.
+  - Painted plaster's mottling is baked into the vertex colours at build time, so it costs
+    nothing to draw.
+  - The fragment cost is a few sines and a fract (one noise for concrete), fading out below a
+    couple of pixels. It is switched by `Buildings.interiorDetail`, which follows the city's
+    quality (off in Performance mode).
+  - Measured inside the café at 1920×1080 in GPU Chrome: 49.5 fps with interior detail on,
+    50.2 off.
+- **Lighting:** per vertex and computed at build time: daylight from the street front (back
+  rooms get a little), lamp light from the same room, occlusion. Each vertex carries its room's
+  light channel, so each room switches its own lamps (house rooms have a switch by their door,
+  and windowless back rooms start lit). The shader scales it by day/night and the switches, so
+  there are no textures and no runtime lights. That is two to four draw calls per interior, plus
+  one per inner door leaf while the interior is visible.
+- **Entering:** the doorway is cut into the OSM facade (`materials.setDoorSet`, shader discard)
+  and into the building's collision ring (`collision.setDoors`). Both are per-owner sets shared
+  with the walk-in shops. A glass or wooden door is hinged in the opening, and cafés and shops
+  get a painted name board over it (a canvas texture). The floor sits 5 cm above the street,
+  clear of the ground and plaza layers.
+- **The camera** never ends up inside a building's mass: if it lands over a room (a player in
+  the doorway, the camera behind them), it drops under that room's ceiling (`setCeiling`).
+- **The server** lets players on foot stand inside any building footprint: every building may
+  have an interior, and its walls are the client's collision. Water still blocks everyone, and
+  vehicles still stay out of buildings (`MovementValidator.check`). Spawn and arrival spots
+  still avoid footprints, except open walk-in shop floors.
+- **Lifetime:** at most 16 generated interiors at once (one facade doorway slot each: the facade
+  shader cuts 36, 16 for walk-in shops, 16 for buildings' front doors and 4 for the windows of the
+  building the player is at). They are started 0.2 s apart, nearest first, and freed beyond
+  100 m, never while the player is inside. Model buildings load within 160 m. Interiors are drawn
+  only when they can be seen: from inside, through an open door within 35 m (OSM buildings), or
+  within 60 m (the model house's windows).
+- **Off the main thread:** the plan, furniture and vertex lighting (25–48 ms per interior in a
+  Node benchmark on this machine) are made in `interior.worker.ts` (`buildInteriorData`) as
+  plain typed arrays, handed back without copying. The main thread only wraps them into meshes
+  and materials (`assembleInterior`, 0.3–0.6 ms) and adds the name sign (a canvas). A building
+  that left the scan range meanwhile is dropped. Where workers are unavailable, or the worker
+  fails, interiors are built on the main thread as before (`buildInterior`).
 
 ## Multiplayer protocol (`/api/v1/world/ws`)
 
@@ -133,10 +321,11 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 
 | Client → server | Server → client |
 |---|---|
-| `move {x,z,yaw,s}` (10 Hz while it changes) | `welcome {you, room, tick, x, z, yaw, online}` |
-| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?}}`, `despawn {id, why}` |
+| `move {x,z,yaw,s,l?}` (10 Hz while it changes; `l`: storey, absent on the ground floor) | `welcome {you, room, tick, x, z, yaw, online}` |
+| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}`, `despawn {id, why}` |
 | `mount {v}`, `dismount` (Phase 5) | `ride {id, v: {id,k,c} \| null, x?, z?, yaw?}` (position only in your own), `vspawn {v: {id,k,c,x,z,yaw,mine?,name?}}`, `vdespawn {id}` |
-| `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s],…]}`, changed players only |
+| `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s,l?],…]}`, changed players only |
+| `bset {b, k: door\|light\|app, id, on}`, `bget {b}` | `bstate {b, s: {"door:front": true, …}, mine?, all?}` |
 | `travel {spawn}`, `invite {to}`, `join {from}` | `chat`, `emote`, `teleport`, `correct`, `invite`, `notify`, `online`, `error`, `kicked` |
 | | `shops` (storefronts or a catalogue changed: reload `/market/shops`), `order {number, status}` (to the buyer and the merchant) |
 | `ping {c}` | `pong {c, s}` |
@@ -144,6 +333,24 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 Close codes: 4401 not signed in, 4403 bad Origin, 4409 onboarding incomplete, 4009 replaced by
 a newer connection, 4003 suspended. The client reconnects with exponential backoff (1 → 15 s)
 except after these final codes.
+
+**Shared buildings** (`backend/app/multiplayer/buildings.py`, `frontend/src/lib/game/net/
+BuildingSync.ts`): every client builds the same interiors, so a door is named by its building
+(`osm:<buildings.id>` or a model building's id) and its own id. The room keeps what players
+changed, in memory, until its last player leaves; then everything is back to the default every
+client knows (doors shut, appliances off, switched lights on after dark). Rules on the server:
+the player must be within 15 m of the building's footprint (the model house: of its centre and
+radius, listed in `MODEL_BUILDINGS`); at most 8 changes and 40 requests a second; 64 parts per
+building and 4000 buildings per room. No database tables.
+
+- `bset` is kept and sent as `bstate` to every player in the 3 × 3 chunk cells around the sender,
+  the sender too (`mine`), in one order. The sender showed it already; while one of its changes
+  to a part is on its way, what the server sends about that part is older and is skipped, so
+  nothing flicks back to a stale state, and its own change coming back settles it. Every client
+  ends where the server did.
+- `bget` (sent when a building loads, and for every loaded building after a reconnect) is
+  answered with `all`: everything changed there; whatever is not listed goes back to its
+  default, except the client's own changes still on their way.
 
 **Client side** (`frontend/src/lib/game/net/`): `WorldSocket` (reconnect, ping),
 `Interpolator` (renders remote players 120 ms in the past; shortest-arc turns; ≤ 200 ms
@@ -228,6 +435,21 @@ centreline; one-way: w/2 − 1.7 m; alleys: centre; walking: w/2 + 0.8 m on the 
 joins them; `RouteLine` draws it, `RouteGuide` projects the player onto the route (forward-only
 window) for the next step and remaining distance; `PathFollower` + pure pursuit drive the
 autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at the end).
+
+## Realistic avatar contract (`avatar-generator/`, installed by `scripts/install_to_game.py`)
+
+* `static/models/characters/realistic/{male,female}.glb` (Build A → male, Build B → female),
+  meshopt-compressed, metres, facing +Z, feet at y = 0; 52-bone Mixamo skeleton
+  (`mixamorig:*`, anatomical left at +X); clips `Idle Walk Run Wave Sit Talk Dance Greet Cheer`;
+  morphs `Smile Excited Surprised Thinking Wink Blink MouthOpen`.
+* `manifest.json`: per build the palette cell of every original material (16 px cells of the
+  `<kind>.Outfit` texture), the baked skin tone, the default hair colour (hair texture is neutral
+  grey with mean 0.5), measured foot-sliding-free walk/run speeds, height.
+* Colour choices map to cells in `RECOLOR` (`realistic.ts`): top → jacket (male) or hoodie
+  (female); bottom → pants; shoes → shoe upper; accent → panels, backpack and shoe accents.
+  Hair style, garment styles and accessories apply to the classic style only.
+* `realistic.test.ts` fails if a GLB lacks a bone, clip, recolourable material or palette cell
+  the game uses.
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

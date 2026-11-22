@@ -143,7 +143,7 @@ worker bundling, the affected onboarding and commerce suites were rerun: **5 pas
 5. **Role**: visitor always; buyer immediate; seller and driver await approval.
 6. **Location**: search the city, tap the map to pin a **private** delivery address (buyers
    only; must be inside Phnom Penh), pick a **public** spawn area, and choose visible or hidden.
-7. **World**: WASD or arrow keys, Shift to run, drag to orbit, wheel to zoom, **M** for places
+7. **World**: WASD or arrow keys to jog, Shift to sprint, Space to jump, drag to orbit, wheel to zoom, **M** for places
    (fast travel), **Esc** for help. The HUD shows the street (English and Khmer), nearby
    landmark, lat/lon and world x/z; the minimap is drawn from the same data.
 8. **Multiplayer**: other visible players appear with their own avatars and name tags. **Enter**

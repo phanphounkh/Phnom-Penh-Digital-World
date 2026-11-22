@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import { market, money, type Cart, type Product, type Shop, type ShopDetail } from '$lib/api/market';
 import type { CollisionWorld } from '$lib/game/city/collision';
 import type { CityMaterials } from '$lib/game/city/materials';
-import { MAX_DOORS } from '$lib/game/city/materials';
+import { SHOP_DOORS } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
 import { applyPhoto, disposeOwned, fitting, productModel, tint } from './ShopAssets';
 import {
@@ -256,7 +256,7 @@ export class Storefronts {
 		}
 		// Facade cut-outs for the nearest doorways.
 		nearby.sort((a, b) => a.d - b.d);
-		const doorShops = nearby.slice(0, MAX_DOORS).map((n) => n.shop);
+		const doorShops = nearby.slice(0, SHOP_DOORS).map((n) => n.shop);
 		const key = doorShops.map((s) => s.id).join();
 		if (key !== this.doorsKey) {
 			this.doorsKey = key;
@@ -340,6 +340,12 @@ export class Storefronts {
 		const mesh = await productModel(product.model, 0.22);
 		if (product.image_url) applyPhoto(mesh, product.image_url);
 		this.held = { product, shop, mesh };
+		this.attachHeld(mesh);
+		this.o.setHolding(true);
+		this.current = null; // re-evaluate the prompt next frame
+	}
+
+	private attachHeld(mesh: THREE.Object3D): void {
 		if (this.wrist) {
 			mesh.position.set(0, -0.12, 0.06);
 			this.wrist.add(mesh);
@@ -347,8 +353,12 @@ export class Storefronts {
 			mesh.position.set(0.25, 1.0, 0.35);
 			this.o.avatar.add(mesh);
 		}
-		this.o.setHolding(true);
-		this.current = null; // re-evaluate the prompt next frame
+	}
+
+	/** The avatar model was swapped (avatar style): find the wrist again and move a held product. */
+	rebindAvatar(): void {
+		this.wrist = this.o.avatar.getObjectByName('RightWrist') ?? null;
+		if (this.held) this.attachHeld(this.held.mesh);
 	}
 
 	/** Put the held product back (or drop it after it went into the cart). */

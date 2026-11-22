@@ -1,8 +1,10 @@
 """Server-side movement validation for the authoritative room.
 
 Clients predict their own movement for responsiveness; the server accepts a new position only
-if it is reachable (speed), inside the playable region, and not inside a building footprint or
-water. Rejected moves are answered with a correction to the last accepted position.
+if it is reachable (speed), inside the playable region and not in water; vehicles also stay out
+of building footprints. (On foot, every building can be entered: the client generates its
+interior and handles its walls.) Rejected moves are answered with a correction to the last
+accepted position.
 """
 
 from __future__ import annotations
@@ -28,17 +30,30 @@ class Verdict:
 
 
 class MovementValidator:
-    def __init__(self, obstacles: list[Polygon], bounds: tuple[float, float, float, float]):
+    def __init__(
+        self,
+        obstacles: list[Polygon],
+        bounds: tuple[float, float, float, float],
+        water: list[Polygon] | None = None,
+    ):
         shrunk = [p.buffer(-FOOTPRINT_TOLERANCE_M) for p in obstacles]
         self.obstacles = [p for p in shrunk if not p.is_empty]
         self.tree = STRtree(self.obstacles) if self.obstacles else None
         self.bounds = bounds  # min_x, min_z, max_x, max_z
-        # Walk-in shop interiors (Phase 4): open floor cut into building footprints.
+        # Water (also among the obstacles): nobody walks or rides on it.
+        wet = [p.buffer(-FOOTPRINT_TOLERANCE_M) for p in water or []]
+        self.water = [p for p in wet if not p.is_empty]
+        self.water_tree = STRtree(self.water) if self.water else None
+        # Open floor cut into building footprints by source (walk-in shop units, Phase 4): spawn
+        # and arrival spots may be there.
+        self.zones: dict[str, list[Polygon]] = {}
         self.open_zones: list[Polygon] = []
         self.zone_tree: STRtree | None = None
 
-    def set_open_zones(self, zones: list[Polygon]) -> None:
-        self.open_zones = [z for z in zones if z.is_valid and not z.is_empty]
+    def set_open_zones(self, zones: list[Polygon], source: str = "shops") -> None:
+        """Replace the open zones from `source` (the others stay)."""
+        self.zones[source] = [z for z in zones if z.is_valid and not z.is_empty]
+        self.open_zones = [z for group in self.zones.values() for z in group]
         self.zone_tree = STRtree(self.open_zones) if self.open_zones else None
 
     def inside_obstacle(self, x: float, z: float, open_zones: bool = True) -> bool:
@@ -47,10 +62,15 @@ class MovementValidator:
         point = Point(x, z)
         if not len(self.tree.query(point, predicate="within")):
             return False
-        # Inside a footprint: allowed only on foot, on the floor of an open shop unit.
+        # Inside a footprint: a spot is open only on the floor of an open shop unit.
         if not open_zones or self.zone_tree is None:
             return True
         return not len(self.zone_tree.query(point, predicate="within"))
+
+    def in_water(self, x: float, z: float) -> bool:
+        return self.water_tree is not None and bool(
+            len(self.water_tree.query(Point(x, z), predicate="within"))
+        )
 
     def in_bounds(self, x: float, z: float) -> bool:
         min_x, min_z, max_x, max_z = self.bounds
@@ -73,7 +93,10 @@ class MovementValidator:
         distance = math.hypot(x - prev_x, z - prev_z)
         if distance > max_speed * max(dt, 0.0) + SLACK_M:
             return Verdict(False, "speed")
-        if self.inside_obstacle(x, z, open_zones=on_foot):
+        if on_foot:
+            if self.in_water(x, z):
+                return Verdict(False, "blocked")
+        elif self.inside_obstacle(x, z, open_zones=False):
             return Verdict(False, "blocked")
         return Verdict(True)
 

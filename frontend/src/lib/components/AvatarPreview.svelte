@@ -1,20 +1,71 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { Material } from 'three';
+	import type { Material, Object3D } from 'three';
 	import type { Avatar } from '$lib/api/types';
-	import type { AvatarInstance } from '$lib/game/avatar/avatar';
+	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
 
-	/** Turntable preview of the Blender avatar; restyles live as `avatar` changes. */
+	/**
+	 * Turntable preview of the player's avatar in the chosen style (realistic or classic);
+	 * restyles live as `avatar` changes. Realistic models idle-animate; a different build
+	 * reloads the model.
+	 */
 	let { avatar }: { avatar: Avatar } = $props();
 	let host: HTMLDivElement;
-	let instance: AvatarInstance | null = null;
 	let failed = $state(false);
 	let ready = $state(false);
+	let style = $state<AvatarStyle>(loadAvatarStyle());
+	let shown = $state<AvatarStyle | null>(null);
+
+	interface Model {
+		root: Object3D;
+		/** Restyle in place; false when it needs rebuilding (different realistic build). */
+		update(a: Avatar): boolean;
+		tick(dt: number): void;
+		dispose(): void;
+	}
+	let model: Model | null = null;
+	let rebuild: ((a: Avatar) => Promise<void>) | null = null;
 
 	$effect(() => {
 		const snapshot = $state.snapshot(avatar) as Avatar;
-		instance?.update(snapshot);
+		void style;
+		if (model && model.update(snapshot) && shown === style) return;
+		rebuild?.(snapshot);
 	});
+
+	function choose(next: AvatarStyle) {
+		style = next;
+		saveAvatarStyle(next);
+	}
+
+	async function realisticModel(a: Avatar): Promise<Model> {
+		const THREE = await import('three');
+		const { createRealisticAvatar } = await import('$lib/game/avatar/realistic');
+		const instance = await createRealisticAvatar(a);
+		const mixer = new THREE.AnimationMixer(instance.root);
+		const idle = instance.clips.find((c) => c.name === 'Idle');
+		if (idle) mixer.clipAction(idle).play();
+		return {
+			root: instance.root,
+			update: (n) => instance.update(n),
+			tick: (dt) => mixer.update(dt),
+			dispose() {
+				mixer.stopAllAction();
+				instance.dispose();
+			}
+		};
+	}
+
+	async function classicModel(a: Avatar): Promise<Model> {
+		const { createAvatar } = await import('$lib/game/avatar/avatar');
+		const instance = await createAvatar(a);
+		return {
+			root: instance.root,
+			update: (n) => (instance.update(n), true),
+			tick: () => {},
+			dispose: () => instance.dispose()
+		};
+	}
 
 	onMount(() => {
 		let disposed = false;
@@ -22,7 +73,6 @@
 		(async () => {
 			try {
 				const THREE = await import('three');
-				const { createAvatar } = await import('$lib/game/avatar/avatar');
 				const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 				renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 				renderer.shadowMap.enabled = true;
@@ -45,15 +95,34 @@
 				disc.rotation.x = -Math.PI / 2;
 				disc.receiveShadow = true;
 				scene.add(disc);
-				instance = await createAvatar($state.snapshot(avatar) as Avatar);
-				if (disposed) return instance.dispose();
-				scene.add(instance.root);
-				ready = true;
+
+				let token = 0;
+				rebuild = async (a: Avatar) => {
+					const mine = ++token;
+					const want = style;
+					let next: Model;
+					try {
+						next = want === 'realistic' ? await realisticModel(a) : await classicModel(a);
+					} catch (error) {
+						console.warn('Realistic preview unavailable, showing the classic avatar:', error);
+						next = await classicModel(a);
+					}
+					if (disposed || mine !== token) return next.dispose();
+					next.root.traverse((n) => ((n as import('three').Mesh).castShadow = true));
+					model?.dispose();
+					model = next;
+					scene.add(next.root);
+					shown = want;
+					ready = true;
+				};
+				await rebuild($state.snapshot(avatar) as Avatar);
+				if (disposed) return;
 
 				let angle = 0.5;
 				let dragging = false;
 				let lastX = 0;
 				let raf = 0;
+				let last = performance.now();
 				const resize = () => {
 					const w = host.clientWidth;
 					const h = host.clientHeight;
@@ -77,19 +146,24 @@
 				renderer.domElement.addEventListener('pointerdown', down);
 				window.addEventListener('pointermove', move);
 				window.addEventListener('pointerup', up);
-				const loop = () => {
+				const loop = (now: number) => {
+					const dt = Math.min(0.1, (now - last) / 1000);
+					last = now;
 					if (!dragging) angle += 0.004;
-					if (instance) instance.root.rotation.y = angle;
+					if (model) {
+						model.root.rotation.y = angle;
+						model.tick(dt);
+					}
 					renderer.render(scene, camera);
 					raf = requestAnimationFrame(loop);
 				};
-				loop();
+				raf = requestAnimationFrame(loop);
 				cleanup = () => {
 					cancelAnimationFrame(raf);
 					observer.disconnect();
 					window.removeEventListener('pointermove', move);
 					window.removeEventListener('pointerup', up);
-					instance?.dispose();
+					model?.dispose();
 					disc.geometry.dispose();
 					(disc.material as Material).dispose();
 					renderer.dispose();
@@ -102,6 +176,7 @@
 		})();
 		return () => {
 			disposed = true;
+			rebuild = null;
 			cleanup();
 		};
 	});
@@ -112,6 +187,7 @@
 	class="relative h-full min-h-[340px] w-full cursor-grab touch-pan-y overflow-hidden rounded-3xl bg-gradient-to-b from-saffron-100 to-paper-2 active:cursor-grabbing"
 	data-testid="avatar-preview"
 	data-ready={ready}
+	data-style={shown ?? ''}
 >
 	{#if failed}
 		<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-ink-soft">
@@ -119,5 +195,15 @@
 		</p>
 	{:else if !ready}
 		<p class="absolute inset-0 grid place-items-center text-sm text-ink-soft">Loading avatar…</p>
+	{/if}
+	<div class="absolute right-3 top-3 grid grid-cols-2 gap-1 rounded-xl bg-white/80 p-1 text-xs font-semibold" role="radiogroup" aria-label="Avatar style">
+		{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [s, text] (s)}
+			<button type="button" role="radio" aria-checked={style === s} class="rounded-lg px-2 py-1 {style === s ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => choose(s)}>{text}</button>
+		{/each}
+	</div>
+	{#if shown === 'realistic'}
+		<p class="absolute inset-x-3 bottom-3 rounded-xl bg-white/80 px-3 py-2 text-xs text-ink-soft">
+			Realistic: your build, skin, hair and clothing colours on a fixed outfit. Hairstyle, garment styles and accessories show in Classic.
+		</p>
 	{/if}
 </div>

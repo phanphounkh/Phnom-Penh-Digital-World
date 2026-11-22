@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
-		ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
+		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
 		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
 		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2
 	} from 'lucide-svelte';
@@ -20,12 +20,14 @@
 	import { MODES, type TravelMode } from '$lib/game/vehicles/specs';
 	import { market, money, shopping, type Cart, type Product, type Shop } from '$lib/api/market';
 	import type { Interaction, Storefronts } from '$lib/game/shop/Storefronts';
+	import type { BuildingInteraction, Buildings, Inspection } from '$lib/game/buildings/Buildings';
 	import type { WorldSession } from '$lib/game/net/WorldSession.svelte';
 	import type { EmoteName } from '$lib/game/net/protocol';
 	import { geo } from '$lib/api/endpoints';
 	import type { SpawnPoint } from '$lib/api/types';
 	import { compassLabel } from '$lib/geo/projection';
 	import type { CityController, CityState, Quality, TimeMode } from '$lib/game/city/CityEngine';
+	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
 	import { session } from '$lib/stores/session.svelte';
 
 	let { data } = $props();
@@ -57,6 +59,9 @@
 	let lastReroute = 0;
 	// Shopping (Phase 4)
 	let shops: Storefronts | null = null;
+	let houses: Buildings | null = null;
+	let housePrompt = $state<BuildingInteraction | null>(null);
+	let inspection = $state<Inspection | null>(null);
 	let shopList = $state<Shop[]>([]);
 	let prompt = $state<Interaction | null>(null);
 	let held = $state<Product | null>(null);
@@ -71,6 +76,8 @@
 	const EMOTE_BUTTONS: [EmoteName, string][] = [['wave', 'Wave'], ['sampeah', 'Sampeah'], ['cheer', 'Cheer'], ['dance', 'Dance']];
 	let places = $state<SpawnPoint[]>([]);
 	let quality = $state<Quality>('high');
+	let avatarStyle = $state<AvatarStyle>(loadAvatarStyle());
+	let avatarSwitching = $state(false);
 	let timeMode = $state<TimeMode>('live');
 	const TIME_MODES: [TimeMode, string][] = [
 		['live', 'Live'],
@@ -108,12 +115,14 @@
 				const created = await createCity(host, boot, {
 					preferKhmer,
 					quality: touch ? 'low' : 'high',
+					avatarStyle,
 					onState: (s) => (hud = s),
 					onProgress: (loaded, total) => (progress = { loaded, total })
 				});
 				if (disposed) return created.dispose();
 				city = created;
-				quality = touch ? 'low' : 'high';
+				quality = created.quality; // 'low' on touch devices and without a GPU
+				avatarStyle = created.avatarStyle; // realistic falls back to classic if it cannot load
 				ready = true;
 				const { WorldSession } = await import('$lib/game/net/WorldSession.svelte');
 				net = new WorldSession(created);
@@ -130,6 +139,27 @@
 					onInteraction: (i) => (prompt = i)
 				});
 				(globalThis as { __ppwShops?: unknown }).__ppwShops = shops;
+				const [{ Buildings }, { ENTERABLE, AUTO_ENTERABLE }] = await Promise.all([import('$lib/game/buildings/Buildings'), import('$lib/game/buildings/placements')]);
+				if (disposed) return;
+				houses = new Buildings(created, (i) => (housePrompt = i), undefined, (x) => (inspection = x), {
+					payloads: () => created.chunkData(),
+					list: ENTERABLE,
+					auto: AUTO_ENTERABLE,
+					// Buildings with a walk-in shop already have an interior.
+					claimed: () => shops?.list.map((s) => [s.unit.door_x, s.unit.door_z] as [number, number]) ?? []
+				});
+				net.remotes.groundAt = (x, z, storey) => houses?.floorAt(x, z, storey) ?? null; // others stand on their floor too
+				// Doors, windows, lights and appliances are shared with the players around, and
+				// they see which storey this player is on.
+				const session = net;
+				houses.onChange = (b, kind, id, on) => session.buildings.set(b, kind, id, on);
+				houses.onLoaded = (b) => session.buildings.ask(b);
+				session.onBuildingState = (b, state, keep) => houses?.applyShared(b, state, keep);
+				session.onOpen = () => {
+					for (const id of houses?.loadedIds ?? []) session.buildings.ask(id);
+				};
+				session.storey = () => houses?.storeyOn ?? 0;
+				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
 				let parkCheck = 0;
 				created.onFrame((dt) => {
 					const me = created.localState();
@@ -141,8 +171,10 @@
 					}
 					if (created.riding) {
 						if (prompt) prompt = null;
+						if (housePrompt) housePrompt = null;
 						return; // no shopping from the saddle
 					}
+					houses?.update(dt, me.x, me.z, me.yaw);
 					shops?.update(me.x, me.z, me.yaw);
 					const here = shops?.shopAt(me.x, me.z) ?? null;
 					if (here?.id !== insideShop?.id) insideShop = here;
@@ -162,12 +194,16 @@
 		geo.spawnPoints().then((p) => (places = p)).catch(() => {});
 		const onKey = (e: KeyboardEvent) => {
 			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
 			if (typing) return;
 			if (e.key.toLowerCase() === 'm') panel = panel === 'places' ? '' : 'places';
 			if (e.key.toLowerCase() === 'v') panel = panel === 'garage' ? '' : 'garage';
 			if (e.key.toLowerCase() === 'f' && !panel) rideOrPark();
-			if (e.key.toLowerCase() === 'e' && !panel) void interact();
+			if (e.key.toLowerCase() === 'e' && !panel) {
+				if (housePrompt || inspection) houses?.interact();
+				else void interact();
+			}
 			if (e.key.toLowerCase() === 'c') panel = panel === 'cart' ? '' : 'cart';
 			if (e.key.toLowerCase() === 'p') panel = panel === 'people' ? '' : 'people';
 			if (e.key === 'Enter') {
@@ -190,6 +226,8 @@
 			net = null;
 			shops?.dispose();
 			shops = null;
+			houses?.dispose();
+			houses = null;
 			city?.dispose();
 			city = null;
 		};
@@ -358,6 +396,20 @@
 	function setQuality(q: Quality) {
 		quality = q;
 		city?.setQuality(q);
+	}
+
+	async function setAvatarStyle(style: AvatarStyle) {
+		if (!city || avatarSwitching || style === avatarStyle) return;
+		avatarSwitching = true;
+		try {
+			saveAvatarStyle(style);
+			await city.setAvatarStyle(style);
+			avatarStyle = city.avatarStyle;
+			net?.remotes.setStyle(avatarStyle);
+			shops?.rebindAvatar();
+		} finally {
+			avatarSwitching = false;
+		}
 	}
 
 	function setTime(mode: TimeMode) {
@@ -559,7 +611,24 @@
 			</div>
 		{/if}
 
-		{#if prompt || held}
+		{#if inspection}
+			<div class="world-action pointer-events-none absolute bottom-64 left-1/2 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl bg-paper px-4 py-3 text-ink shadow-xl" data-testid="inspect-card">
+				<p class="display text-base font-bold">{inspection.title}</p>
+				<p class="mt-1 text-sm text-ink-soft">{inspection.text}</p>
+			</div>
+		{/if}
+		{#if housePrompt}
+			<div class="world-action absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5" data-testid="house-prompt" data-kind={housePrompt.kind}>
+				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur" onclick={() => houses?.interact()}>
+					Press <kbd class="mx-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">E</kbd> to {housePrompt.label}
+				</button>
+				{#if housePrompt.kind === 'door' && housePrompt.hint}
+					<button class="rounded-full bg-river-950/70 px-3 py-1 text-xs font-semibold shadow backdrop-blur" data-testid="house-hint" onclick={() => houses?.climbThrough()}>
+						<kbd class="mr-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">Space</kbd>{housePrompt.hint.replace(/^Space /, '')}
+					</button>
+				{/if}
+			</div>
+		{:else if prompt || held}
 			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
 				{#if held}
 					<div class="flex items-center gap-3 rounded-2xl bg-paper px-3 py-2 text-ink shadow-xl" data-testid="held-product">
@@ -593,9 +662,9 @@
 			<div class="world-touch absolute right-4 bottom-44 grid grid-cols-3 gap-1.5" data-testid="touch-controls">
 				<span></span><button class="pad" aria-label="Forward" {...pad('w')}><ChevronUp /></button><span></span>
 				<button class="pad" aria-label="Left" {...pad('a')}><ChevronLeft /></button>
-				<button class="pad" aria-label="Run" {...pad('shift')}><Footprints size={18} /></button>
+				<button class="pad" aria-label="Sprint" {...pad('shift')}><Footprints size={18} /></button>
 				<button class="pad" aria-label="Right" {...pad('d')}><ChevronRight /></button>
-				<span></span><button class="pad" aria-label="Back" {...pad('s')}><ChevronDown /></button><span></span>
+				<span></span><button class="pad" aria-label="Back" {...pad('s')}><ChevronDown /></button><button class="pad" aria-label="Jump" {...pad(' ')}><ArrowBigUp size={18} /></button>
 			</div>
 		{/if}
 	{/if}
@@ -695,6 +764,13 @@
 					{/each}
 				</div>
 				<p class="hint">Performance mode turns off shadows and streams fewer chunks. It switches on automatically if the frame rate stays low.</p>
+				<p class="label mt-4">Avatars</p>
+				<div class="grid grid-cols-2 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold" role="radiogroup" aria-label="Avatar style" data-testid="avatar-style">
+					{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [style, text] (style)}
+						<button role="radio" aria-checked={avatarStyle === style} disabled={avatarSwitching} class="rounded-lg py-2 {avatarStyle === style ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => setAvatarStyle(style)}>{text}</button>
+					{/each}
+				</div>
+				<p class="hint">Realistic avatars use your build, skin, hair and clothing colours on fixed outfits. Classic shows every hairstyle, garment and accessory. This only changes how avatars look on this device.</p>
 				<p class="label mt-4">Time of day</p>
 				<div class="grid grid-cols-5 gap-1 rounded-xl bg-paper-2 p-1 text-xs font-semibold" role="radiogroup" aria-label="Time of day">
 					{#each TIME_MODES as [mode, text] (mode)}
@@ -714,15 +790,16 @@
 			{:else}
 				<h2 class="display text-xl font-bold">Controls</h2>
 				<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-					<dt class="font-mono font-semibold">W A S D</dt><dd>Walk (arrow keys work too)</dd>
-					<dt class="font-mono font-semibold">Shift</dt><dd>Run</dd>
+					<dt class="font-mono font-semibold">W A S D</dt><dd>Move: jog, easing from a walk (arrow keys work too)</dd>
+					<dt class="font-mono font-semibold">Shift</dt><dd>Sprint</dd>
+					<dt class="font-mono font-semibold">Space</dt><dd>Jump</dd>
 					<dt class="font-mono font-semibold">Drag</dt><dd>Orbit the camera</dd>
 					<dt class="font-mono font-semibold">Wheel</dt><dd>Zoom</dd>
 					<dt class="font-mono font-semibold">M</dt><dd>Places / fast travel</dd>
 					<dt class="font-mono font-semibold">P</dt><dd>People: friends, messages, blocking</dd>
 					<dt class="font-mono font-semibold">Enter</dt><dd>Chat (Tab: nearby ↔ world)</dd>
 					<dt class="font-mono font-semibold">1 – 4</dt><dd>Wave · Sampeah · Cheer · Dance</dd>
-					<dt class="font-mono font-semibold">E</dt><dd>In a shop: pick up, put in the cart, pay at the counter</dd>
+					<dt class="font-mono font-semibold">E</dt><dd>In a shop: pick up, put in the cart, pay at the counter · in the house: doors, light switches, the TV and stove, sit down, look at things</dd>
 					<dt class="font-mono font-semibold">C</dt><dd>Cart and demo checkout</dd>
 					<dt class="font-mono font-semibold">V</dt><dd>My vehicles: get a bicycle or motorbike, find it, bring it</dd>
 					<dt class="font-mono font-semibold">F</dt><dd>Ride your vehicle when next to it · park it (at the kerb, a car park or an alley)</dd>

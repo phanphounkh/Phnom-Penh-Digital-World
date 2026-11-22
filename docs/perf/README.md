@@ -58,6 +58,26 @@ evidence of hitches. When the page submits frames faster than the GPU process pr
 the driver periodically blocks for 200–400 ms. With vsync on, those stalls disappear entirely
 (0 frames over 50 ms in the same scenes). Use the capped mode to judge smoothness.
 
+## Environment pass 1: surfaces, trees, facades, sky lighting
+
+Same machine, 1280×720, vsync-capped, the same camera path at each district (street, orbit,
+overview, sunset, running). "Before" ran on an untouched checkout of the previous commit and
+"after" on this branch, both against the same API.
+
+| District · view | fps (before → after) | CPU render ms | Draw calls | Triangles |
+|---|---|---|---|---|
+| Central Market · street | 60.2 → 60.1 | 4.73 → 1.83 | 161 → 161 | 61.8 k → 62.1 k |
+| Central Market · orbit | 60.1 → 60.2 | 4.21 → 2.06 | 146 → 149 | 60.3 k → 64.1 k |
+| Central Market · overview | 59.9 → 60.1 | 3.76 → 1.49 | 82 → 82 | 53.3 k → 53.5 k |
+| Central Market · running | 60.2 → 60.1 | 4.80 → 2.09 | 139 → 142 | 59.7 k → 63.4 k |
+| Riverside · street | 60.1 → 60.2 | 2.78 → 2.06 | 42 → 38 | 32.0 k → 41.3 k |
+| Riverside · orbit | 58.4 → 60.1 | 3.76 → 2.55 | 83 → 62 | 41.0 k → 52.7 k |
+
+The CPU render times swing with machine load (the "before" Riverside overview and sunset ran
+during a load spike at 42 fps), so read them as "no measurable cost". Shader programs went from
+19–21 to 26–28. All surface kinds share one program, and Performance mode switches surface detail
+and the sky environment map off.
+
 ## Not yet measured
 
 * Real devices other than this machine: discrete GPUs, older laptops, phones (mobile defaults

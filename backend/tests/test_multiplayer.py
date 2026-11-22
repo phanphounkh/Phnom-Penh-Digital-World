@@ -1,6 +1,7 @@
 """Phase 3: the world WebSocket, presence, interest management, movement validation, chat."""
 
 import asyncio
+import contextlib
 
 import httpx
 import pytest
@@ -9,7 +10,7 @@ from sqlalchemy import select, text
 from app.core.database import SessionLocal
 from app.models import ChatMessage, PlayerSession
 from app.multiplayer.chatfilter import prepare
-from app.multiplayer.hub import hub
+from app.multiplayer.hub import BUILDING_SETS_PER_SECOND, hub
 from tests.conftest import (
     expect,
     make_client,
@@ -117,7 +118,7 @@ async def test_a_second_connection_replaces_the_first(client: httpx.AsyncClient)
 # ── movement validation & interest management ───────────────────────────────────────────
 
 
-async def test_server_rejects_teleports_walls_and_bounds(client: httpx.AsyncClient):
+async def test_server_rejects_teleports_and_leaving_the_region(client: httpx.AsyncClient):
     me = await onboard(client, "sokha")
     async with world_socket(client) as ws:
         start = await expect(ws, "welcome")
@@ -131,22 +132,6 @@ async def test_server_rejects_teleports_walls_and_bounds(client: httpx.AsyncClie
         hub.by_user[me_id(me)].t_move -= 3600  # even with time to get there...
         await send(ws, t="move", x=5000, z=z, yaw=0, s=6)  # ...this is outside the region
         assert (await expect(ws, "correct"))["why"] == "bounds"
-
-        # Into the middle of a building footprint (time pretends to allow the distance).
-        async with SessionLocal() as session:
-            bx, bz = (
-                await session.execute(
-                    text("""
-                SELECT ST_X(ST_Transform(ST_PointOnSurface(footprint), 32648)) - 491403.0801141087,
-                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(footprint), 32648))
-                FROM buildings WHERE ST_Area(footprint::geography) > 400
-                ORDER BY footprint <-> ST_SetSRID(ST_MakePoint(104.92116, 11.56890), 4326) LIMIT 1
-            """)
-                )
-            ).one()
-        hub.by_user[me_id(me)].t_move -= 120
-        await send(ws, t="move", x=bx, z=bz, yaw=0, s=6)
-        assert (await expect(ws, "correct"))["why"] == "blocked"
 
         await send(ws, t="move", x=x + 1.5, z=z, yaw=0, s=2)  # a normal step is accepted
         await never(ws, "correct")
@@ -293,3 +278,211 @@ async def test_players_arriving_at_the_same_spawn_do_not_overlap(client: httpx.A
     for i, (x1, z1) in enumerate(spots):
         for x2, z2 in spots[i + 1 :]:
             assert ((x1 - x2) ** 2 + (z1 - z2) ** 2) ** 0.5 >= 1.2
+
+
+def test_on_foot_buildings_can_be_entered_but_not_water_or_by_vehicle():
+    from shapely.geometry import Polygon as P
+
+    from app.multiplayer.validation import MovementValidator
+
+    square = lambda x, z, s: P([(x, z), (x + s, z), (x + s, z + s), (x, z + s)])  # noqa: E731
+    building, river = square(0, 0, 10), square(20, 0, 10)
+    v = MovementValidator([building, river], (-100, -100, 100, 100), water=[river])
+    assert v.check(-3, 5, 5, 5, dt=10).ok  # into a building, on foot
+    assert v.check(-3, 5, 5, 5, dt=10, on_foot=False).reason == "blocked"  # not by vehicle
+    assert v.check(15, 5, 25, 5, dt=10).reason == "blocked"  # nobody walks on water
+    # Spawn and arrival spots still avoid footprints, except open shop floors.
+    assert v.inside_obstacle(5, 5)
+    v.set_open_zones([square(2, 2, 3)])
+    assert not v.inside_obstacle(3, 3) and v.inside_obstacle(8, 8)
+
+
+async def test_players_walk_into_buildings_but_not_into_the_river(client: httpx.AsyncClient):
+    me = await onboard(client, "dara")
+    async with world_socket(client) as ws:
+        await expect(ws, "welcome")
+        async with SessionLocal() as session:
+            bx, bz = (
+                await session.execute(
+                    text("""
+                SELECT ST_X(ST_Transform(ST_PointOnSurface(footprint), 32648)) - 491403.0801141087,
+                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(footprint), 32648))
+                FROM buildings WHERE ST_Area(footprint::geography) > 400
+                ORDER BY footprint <-> ST_SetSRID(ST_MakePoint(104.92116, 11.56890), 4326) LIMIT 1
+            """)
+                )
+            ).one()
+            wx, wz = (
+                await session.execute(
+                    text("""
+                SELECT ST_X(ST_Transform(ST_PointOnSurface(geom), 32648)) - 491403.0801141087,
+                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(geom), 32648))
+                FROM land_areas WHERE kind = 'water' ORDER BY ST_Area(geom) DESC LIMIT 1
+            """)
+                )
+            ).one()
+        hub.by_user[me_id(me)].t_move -= 120
+        await send(ws, t="move", x=bx, z=bz, yaw=0, s=2)  # into a building: fine on foot
+        await never(ws, "correct")
+        hub.by_user[me_id(me)].t_move -= 600
+        await send(ws, t="move", x=wx, z=wz, yaw=0, s=2)  # into the river: no
+        assert (await expect(ws, "correct"))["why"] == "blocked"
+
+
+# ── shared building state (doors, windows, lights, appliances) and storeys ────────────
+
+
+def nearest_building(player) -> tuple[str, float]:
+    """The id ("osm:<id>") of the building nearest a server-side player, and its distance."""
+    from shapely.geometry import Point
+
+    here = Point(player.x, player.z)
+    bid, footprint = min(player.room.footprints.items(), key=lambda kv: kv[1].distance(here))
+    return f"osm:{bid}", footprint.distance(here)
+
+
+async def test_doors_and_lights_are_shared_with_players_around(client: httpx.AsyncClient):
+    me = await onboard(client, "sokha")
+    async with make_client() as other, make_client() as late:
+        await onboard(other, "dara")
+        await onboard(late, "vanna")
+        async with world_socket(client) as a, world_socket(other) as b:
+            await expect(a, "welcome")
+            await expect(b, "welcome")
+            await expect(b, "spawn")
+            player = hub.by_user[me_id(me)]
+            building, distance = nearest_building(player)
+            assert distance < 15, "the spawn should be at a building"
+            # Nothing changed yet: every client keeps its defaults.
+            await send(b, t="bget", b=building)
+            assert (await expect(b, "bstate")) == {
+                "t": "bstate",
+                "b": building,
+                "s": {},
+                "all": True,
+            }
+
+            await send(a, t="bset", b=building, k="door", id="front", on=True)
+            mine = await expect(a, "bstate")
+            assert mine == {"t": "bstate", "b": building, "s": {"door:front": True}, "mine": True}
+            seen = await expect(b, "bstate")
+            assert seen == {"t": "bstate", "b": building, "s": {"door:front": True}}
+            await send(a, t="bset", b=building, k="light", id="living", on=False)
+            await send(a, t="bset", b=building, k="app", id="tv", on=True)
+            await send(a, t="bset", b=building, k="door", id="window-0", on=True)
+            for _ in range(3):
+                await expect(b, "bstate")
+
+            # Someone arriving later loads the building and gets what was changed.
+            async with world_socket(late) as c:
+                await expect(c, "welcome")
+                await send(c, t="bget", b=building)
+                got = await expect(c, "bstate")
+            assert got["all"] is True
+            assert got["s"] == {
+                "door:front": True,
+                "light:living": False,
+                "app:tv": True,
+                "door:window-0": True,
+            }
+
+
+async def test_building_changes_need_the_player_at_the_building(client: httpx.AsyncClient):
+    me = await onboard(client, "sokha")
+    async with world_socket(client) as ws:
+        await expect(ws, "welcome")
+        player = hub.by_user[me_id(me)]
+        building, _ = nearest_building(player)
+        # Far from it: ignored (the change is not kept either).
+        x, z = player.x, player.z
+        player.x += 400
+        await send(ws, t="bset", b=building, k="door", id="front", on=True)
+        await never(ws, "bstate")
+        player.x = x
+        await send(ws, t="bget", b=building)
+        assert (await expect(ws, "bstate"))["s"] == {}
+        # A building this region does not have, and the model house from across the city.
+        await send(ws, t="bset", b="osm:999999999999", k="door", id="front", on=True)
+        await send(ws, t="bset", b="riverside-house", k="door", id="front", on=True)
+        await never(ws, "bstate")
+        # At the model house: fine.
+        player.x, player.z = 1005.0, -62.0
+        await send(ws, t="bset", b="riverside-house", k="door", id="front", on=True)
+        assert (await expect(ws, "bstate"))["s"] == {"door:front": True}
+        player.x, player.z = x, z
+        # Malformed: not a building id, not a kind of thing, not a part id.
+        for bad in (
+            {"b": "../etc", "k": "door", "id": "front", "on": True},
+            {"b": building, "k": "fire", "id": "front", "on": True},
+            {"b": building, "k": "door", "id": "front door!", "on": True},
+            {"b": building, "k": "door", "id": "front", "on": "yes please"},
+        ):
+            await send(ws, t="bset", **bad)
+            assert (await expect(ws, "error"))["code"] == "BAD_MESSAGE"
+        # A few switches a second at most.
+        player.building_sets.clear()
+        for i in range(12):
+            await send(ws, t="bset", b=building, k="light", id="living", on=i % 2 == 0)
+        got = 0
+        with contextlib.suppress(AssertionError):
+            while True:
+                await expect(ws, "bstate", timeout=0.5)
+                got += 1
+        assert got == BUILDING_SETS_PER_SECOND
+
+
+def test_building_state_is_bounded():
+    from app.multiplayer import buildings as B
+
+    states = B.BuildingStates()
+    for i in range(B.MAX_KEYS_PER_BUILDING):
+        assert states.set("osm:1", f"door:d{i}", True)
+    assert not states.set("osm:1", "door:one-too-many", True)
+    assert states.set("osm:1", "door:d0", False)  # changing a known one is fine
+    for i in range(B.MAX_BUILDINGS_PER_ROOM + 5):
+        states.set(f"osm:{i + 2}", "door:front", True)
+    assert len(states) == B.MAX_BUILDINGS_PER_ROOM
+    assert states.get("osm:1") == {}  # the least recently changed went first
+    assert states.get(f"osm:{B.MAX_BUILDINGS_PER_ROOM + 6}") == {"door:front": True}
+
+
+async def test_others_see_which_storey_you_are_on(client: httpx.AsyncClient):
+    me = await onboard(client, "sokha")
+    async with make_client() as other, make_client() as late:
+        await onboard(other, "dara")
+        await onboard(late, "vanna")
+        async with world_socket(client) as a, world_socket(other) as b:
+            ya = (await expect(a, "welcome"))["you"]["id"]
+            await expect(b, "welcome")
+            seen = await expect(b, "spawn")
+            assert "l" not in seen["p"]
+            player = hub.by_user[me_id(me)]
+            x, z = player.x, player.z
+            hub.by_user[me_id(me)].t_move -= 2
+            await send(a, t="move", x=x + 0.5, z=z, yaw=0.0, s=1.0, l=1)
+            up = await expect(b, "state", where=lambda m: any(p[0] == ya for p in m["p"]))
+            assert next(p for p in up["p"] if p[0] == ya)[5] == 1
+            async with world_socket(late) as c:
+                await expect(c, "welcome")
+                card = await expect(c, "spawn", where=lambda m: m["p"]["id"] == ya)
+                assert card["p"]["l"] == 1
+            hub.by_user[me_id(me)].t_move -= 2
+            await send(a, t="move", x=x + 1.0, z=z, yaw=0.0, s=1.0)  # no l: the ground floor
+            down = await expect(b, "state", where=lambda m: any(p[0] == ya for p in m["p"]))
+            assert len(next(p for p in down["p"] if p[0] == ya)) == 5
+            await send(a, t="move", x=x + 1.0, z=z, yaw=0.0, s=1.0, l=10)
+            assert (await expect(a, "error"))["code"] == "BAD_MESSAGE"
+
+
+async def test_buildings_go_back_to_default_when_everyone_has_left(client: httpx.AsyncClient):
+    me = await onboard(client, "sokha")
+    async with world_socket(client) as ws:
+        await expect(ws, "welcome")
+        building, _ = nearest_building(hub.by_user[me_id(me)])
+        await send(ws, t="bset", b=building, k="door", id="front", on=True)
+        await expect(ws, "bstate")
+    await asyncio.sleep(0.1)
+    async with world_socket(client) as ws:
+        await expect(ws, "welcome")
+        await send(ws, t="bget", b=building)
+        assert (await expect(ws, "bstate"))["s"] == {}

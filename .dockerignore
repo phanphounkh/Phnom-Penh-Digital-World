@@ -9,3 +9,5 @@ frontend/test-results
 frontend/artifacts
 .env
 backend/var
+# Offline avatar pipeline (~800 MB of downloads and Blender files); no image needs it.
+avatar-generator
