@@ -358,6 +358,95 @@ describe('the house in the world', () => {
 		expect(calls.sit[0]).toMatchObject({ yaw: PLACE.yaw + seat.yaw });
 	});
 
+	it('tells the other players what this player changes: doors, lights, appliances', () => {
+		const { b, at } = setup();
+		const changes: unknown[][] = [];
+		b.onChange = (...change) => changes.push(change);
+		const [cx, cz] = door('front').center;
+		open(b, at, [cx, cz + 1.2], 'front');
+		const light = SPEC.lights.find((l) => l.id === 'front')!;
+		const [sx, sz] = light.switches[0];
+		at([sx, sz - 0.8], [sx, sz]);
+		b.interact();
+		const tv = SPEC.toggles.find((x) => x.id === 'tv')!;
+		at([tv.x, tv.z - 1.0], [tv.x, tv.z]);
+		b.interact();
+		expect(changes).toEqual([
+			[PLACE.id, 'door', 'front', true],
+			[PLACE.id, 'light', 'front', true],
+			[PLACE.id, 'app', 'tv', true]
+		]);
+	});
+
+	it("shows other players' changes (without sending them back) and asks for them on loading", () => {
+		const { h } = host();
+		const loaded: string[] = [];
+		const b = new Buildings(h, undefined, [PLACE]);
+		b.onLoaded = (id) => loaded.push(id);
+		b.attach(PLACE, SPEC, model());
+		expect(loaded).toEqual([PLACE.id]);
+		expect(b.loadedIds).toEqual([PLACE.id]);
+		const changes: unknown[] = [];
+		b.onChange = (...change) => changes.push(change);
+		const far = new Frame(PLACE.x, PLACE.z, PLACE.yaw, 0).toWorld([0, 30]);
+		b.update(0, ...far, 0);
+		b.applyShared(PLACE.id, { 'door:front': true, 'door:bedroom': true, 'light:kitchen': true, 'app:stove': true, 'door:nope': true });
+		b.applyShared('not-loaded', { 'door:front': true });
+		for (let t = 0; t < SWING_TIME + 0.1; t += 1 / 30) b.update(1 / 30, ...far, 0);
+		const [state] = b.list;
+		expect(state.doors.front).toEqual({ open: true, t: 1 }); // swung open
+		expect(state.doors.bedroom).toEqual({ open: true, t: 1 });
+		expect(state.doors.bathroom).toEqual({ open: false, t: 0 });
+		expect(state.lights.kitchen).toBe(true);
+		expect(state.appliances.stove).toBe(true);
+		b.applyShared(PLACE.id, { 'door:front': false, 'light:kitchen': false });
+		for (let t = 0; t < SWING_TIME + 0.1; t += 1 / 30) b.update(1 / 30, ...far, 0);
+		expect(b.list[0].doors.front).toEqual({ open: false, t: 0 });
+		expect(b.list[0].lights.kitchen).toBe(false);
+		expect(changes).toEqual([]);
+	});
+
+	it('a complete state puts back what it does not list, except my own changes on their way', () => {
+		const { b } = setup();
+		const far = new Frame(PLACE.x, PLACE.z, PLACE.yaw, 0).toWorld([0, 30]);
+		const settle = () => {
+			for (let t = 0; t < SWING_TIME + 0.1; t += 1 / 30) b.update(1 / 30, ...far, 0);
+		};
+		// (As if this player was alone and the room forgot everything while they reconnected.)
+		b.applyShared(PLACE.id, { 'door:front': true, 'door:bedroom': true, 'light:kitchen': true, 'app:tv': true, 'app:stove': true });
+		settle();
+		b.applyShared(PLACE.id, { 'door:bedroom': true }, (part) => part === 'app:stove');
+		settle();
+		const [state] = b.list;
+		expect(state.doors.front).toEqual({ open: false, t: 0 }); // back to shut
+		expect(state.doors.bedroom).toEqual({ open: true, t: 1 }); // listed
+		expect(state.lights.kitchen).toBe(false); // by day, switched lights start off
+		expect(state.appliances.tv).toBe(false);
+		expect(state.appliances.stove).toBe(true); // mine, on its way: kept
+	});
+
+	it("a door another player closes waits while this player stands in its way, then follows", () => {
+		const { b, f, at } = setup();
+		const [bx, bz] = door('bedroom').center;
+		open(b, at, [bx, bz + 1.0], 'bedroom');
+		// In the doorway: closing now would shut the leaf on the player.
+		const doorway = f.toWorld([bx, bz]);
+		b.update(1 / 30, ...doorway, 0);
+		b.applyShared(PLACE.id, { 'door:bedroom': false });
+		for (let t = 0; t < 2; t += 1 / 30) b.update(1 / 30, ...doorway, 0);
+		expect(b.list[0].doors.bedroom).toEqual({ open: true, t: 1 });
+		// A step back into the living room: it closes.
+		const living = f.toWorld([bx, bz + 1.6]);
+		for (let t = 0; t < SWING_TIME + 0.2; t += 1 / 30) b.update(1 / 30, ...living, 0);
+		expect(b.list[0].doors.bedroom).toEqual({ open: false, t: 0 });
+		// Held, then opened again by them (or by this player): nothing is left waiting.
+		b.update(1 / 30, ...doorway, 0);
+		b.applyShared(PLACE.id, { 'door:bedroom': true });
+		b.applyShared(PLACE.id, { 'door:bedroom': false });
+		for (let t = 0; t < SWING_TIME + 0.2; t += 1 / 30) b.update(1 / 30, ...living, 0);
+		expect(b.list[0].doors.bedroom).toEqual({ open: false, t: 0 });
+	});
+
 	it('the camera passes the open front doorway but not the lintel above it', () => {
 		const { h, b, f, at } = setup();
 		const [cx, cz] = door('front').center;

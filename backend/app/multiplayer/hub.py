@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import WebSocket
 from pydantic import ValidationError
 from shapely.geometry import Polygon
+from shapely.geometry.base import BaseGeometry
 from sqlalchemy import select, text, update
 
 from app.core.config import settings
@@ -30,9 +31,12 @@ from app.core.database import SessionLocal
 from app.geography.projection import default_projection
 from app.models import ChatMessage, GeographicRegion, PlayerSession, Vehicle, WorldRoom
 from app.multiplayer import chatfilter
+from app.multiplayer.buildings import BuildingStates, building_near
 from app.multiplayer.protocol import (
     MAX_MESSAGE_BYTES,
     NEARBY_CHAT_RADIUS_M,
+    BuildingGet,
+    BuildingSet,
     Chat,
     Dismount,
     Emote,
@@ -59,6 +63,10 @@ WORLD_CHAT_GAP_S = 4.0
 EMOTE_GAP_S = 1.0
 TRAVEL_GAP_S = 2.0
 MOVES_PER_SECOND = 25
+# Doors, lights and appliances: a few switches a second; asking for a building's state on
+# loading it (up to ~17 buildings at once after a reconnect).
+BUILDING_SETS_PER_SECOND = 8
+BUILDING_GETS_PER_SECOND = 40
 MAX_INVALID = 30
 # A rider who disconnects or fast-travels leaves the vehicle at the nearest legal spot within
 # this distance (else exactly where they were).
@@ -96,6 +104,11 @@ class Player:
     invites: dict[uuid.UUID, float] = field(default_factory=dict)
     chat_times: deque[float] = field(default_factory=deque)
     move_times: deque[float] = field(default_factory=deque)
+    building_sets: deque[float] = field(default_factory=deque)
+    building_gets: deque[float] = field(default_factory=deque)
+    # The storey of the building the player is in (0: the ground floor or outside); clients
+    # draw them on that floor.
+    level: int = 0
     last_world_chat: float = 0.0
     last_emote: float = 0.0
     last_travel: float = 0.0
@@ -124,10 +137,15 @@ class Player:
         }
         if self.riding is not None:
             out["v"] = self.riding.ride_card()
+        if self.level:
+            out["l"] = self.level
         return out
 
     def state(self) -> list[float]:
-        return [self.sid, round(self.x, 2), round(self.z, 2), round(self.yaw, 3), round(self.s, 2)]
+        out = [self.sid, round(self.x, 2), round(self.z, 2), round(self.yaw, 3), round(self.s, 2)]
+        if self.level:
+            out.append(self.level)
+        return out
 
 
 @dataclass(eq=False)
@@ -146,6 +164,10 @@ class Room:
     # vehicles parked in the region (visible from every room).
     area: TravelArea | None = None
     parked: ParkedIndex = field(default_factory=ParkedIndex)
+    # Building footprints by id (shared with the region template), and what players changed in
+    # the buildings of this room (doors, windows, lights, appliances) while anyone is in it.
+    footprints: dict[int, BaseGeometry] = field(default_factory=dict)
+    building_states: BuildingStates = field(default_factory=BuildingStates)
     players: dict[int, Player] = field(default_factory=dict)
     cells: dict[tuple[int, int], set[int]] = field(default_factory=dict)
 
@@ -159,6 +181,8 @@ class Room:
     def remove(self, player: Player) -> None:
         self.players.pop(player.sid, None)
         self.cells.get(player.cell, set()).discard(player.sid)
+        if not self.players:
+            self.building_states.clear()  # the last one out: doors and lights back to default
 
     def around(self, cell: tuple[int, int]) -> list[Player]:
         ix, iz = cell
@@ -259,6 +283,7 @@ class Hub:
             shops=template.shops,
             area=template.area,
             parked=template.parked,
+            footprints=template.footprints,
         )
         self.rooms[room.id] = room
         logger.info("Opened world room %s", room.slug)
@@ -289,9 +314,11 @@ class Hub:
         projection = default_projection()
         rows = await session.execute(
             text("""
-            SELECT false AS water, ST_AsBinary(footprint) AS g FROM buildings WHERE region_id = :r
+            SELECT id, false AS water, ST_AsBinary(footprint) AS g FROM buildings
+            WHERE region_id = :r
             UNION ALL
-            SELECT true, ST_AsBinary(geom) FROM land_areas WHERE region_id = :r AND kind = 'water'
+            SELECT NULL::bigint, true, ST_AsBinary(geom) FROM land_areas
+            WHERE region_id = :r AND kind = 'water'
         """),
             {"r": region.id},
         )
@@ -299,12 +326,15 @@ class Hub:
 
         polygons: list[Polygon] = []
         water: list[Polygon] = []
+        footprints: dict[int, BaseGeometry] = {}
         for row in rows:
             geom = projection.geometry_to_world(wkb.loads(bytes(row.g)))
             parts = [g for g in getattr(geom, "geoms", [geom]) if isinstance(g, Polygon)]
             polygons.extend(parts)
             if row.water:
                 water.extend(parts)
+            elif row.id is not None:
+                footprints[row.id] = geom
         bbox = (
             await session.execute(
                 text("""
@@ -338,6 +368,7 @@ class Hub:
             validator=validator,
             spawns=spawns,
             area=await load_travel_area(session, region.id),
+            footprints=footprints,
         )
         await self._load_shops(session, template)
         await self._load_vehicles(session, template)
@@ -689,6 +720,10 @@ class Hub:
                 await self._mount(player, msg)
             case Dismount():
                 await self._dismount(player)
+            case BuildingSet():
+                self._building_set(player, msg)
+            case BuildingGet():
+                self._building_get(player, msg)
             case Ping():
                 self.send(player, {"t": "pong", "c": msg.c, "s": int(time.time() * 1000)})
 
@@ -732,12 +767,14 @@ class Hub:
         if player.riding is not None:
             player.riding.odometer_m += math.hypot(msg.x - player.x, msg.z - player.z)
         player.x, player.z, player.yaw, player.s = msg.x, msg.z, msg.yaw, min(msg.s, limit)
+        player.level = msg.l if mode == "foot" else 0
         player.t_move = now
         player.dirty = True
         player.room.place(player)
 
     def _set_position(self, player: Player, x: float, z: float, yaw: float, why: str) -> None:
         player.x, player.z, player.yaw, player.s = x, z, yaw, 0.0
+        player.level = 0
         player.t_move = time.monotonic()
         player.dirty = True
         player.room.place(player)
@@ -812,6 +849,40 @@ class Hub:
         for other in player.room.players.values():
             if player.sid in other.known:
                 self.send(other, out)
+
+    @staticmethod
+    def _allow(times: deque[float], per_second: int) -> bool:
+        now = time.monotonic()
+        while times and times[0] < now - 1:
+            times.popleft()
+        if len(times) >= per_second:
+            return False
+        times.append(now)
+        return True
+
+    def _building_set(self, player: Player, msg: BuildingSet) -> None:
+        """A door, window, light or appliance changed: keep it for the room and tell everyone
+        around (the player too, so every client ends in the server's order)."""
+        if not self._allow(player.building_sets, BUILDING_SETS_PER_SECOND):
+            return
+        room = player.room
+        if not building_near(msg.b, player.x, player.z, room.footprints):
+            logger.debug("bset from %s ignored: not at %s", player.username, msg.b)
+            return
+        key = f"{msg.k}:{msg.id}"
+        if not room.building_states.set(msg.b, key, msg.on):
+            return
+        out = {"t": "bstate", "b": msg.b, "s": {key: msg.on}}
+        self.send(player, {**out, "mine": True})
+        for other in room.around(player.cell):
+            if other is not player:
+                self.send(other, out)
+
+    def _building_get(self, player: Player, msg: BuildingGet) -> None:
+        if not self._allow(player.building_gets, BUILDING_GETS_PER_SECOND):
+            return
+        state = player.room.building_states.get(msg.b)
+        self.send(player, {"t": "bstate", "b": msg.b, "s": state, "all": True})
 
     async def _travel(self, player: Player, msg: Travel) -> None:
         now = time.monotonic()

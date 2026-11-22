@@ -25,6 +25,8 @@ interface Remote {
 	bubble?: { sprite: THREE.Sprite; until: number };
 	x: number;
 	z: number;
+	/** The storey of the building they are in (0: the ground floor or outside). */
+	level: number;
 	removed: boolean;
 	/** Riding (Phase 5): the vehicle, the rider rig and the visual state derived from motion. */
 	vehicle?: VehicleInstance;
@@ -128,11 +130,11 @@ export class RemotePlayers {
 		tag.position.y = 2.15;
 		group.add(tag);
 		const remote: Remote = {
-			card, interp: new Interpolator(), group, tag, x: card.x, z: card.z, removed: false,
+			card, interp: new Interpolator(), group, tag, x: card.x, z: card.z, level: card.l ?? 0, removed: false,
 			rideToken: 0, avatarToken: 0, yaw: card.yaw, wheel: 0, lean: 0, steer: 0
 		};
 		remote.interp.push({ t: performance.now(), x: card.x, z: card.z, yaw: card.yaw, s: 0 });
-		group.position.set(card.x, this.ground(card.x, card.z), card.z);
+		group.position.set(card.x, this.ground(card.x, card.z, remote.level), card.z);
 		this.scene.add(group);
 		this.players.set(card.id, remote);
 		this.dress(remote);
@@ -208,7 +210,12 @@ export class RemotePlayers {
 
 	state(entries: PlayerState[]): void {
 		const now = performance.now();
-		for (const [id, x, z, yaw, s] of entries) this.players.get(id)?.interp.push({ t: now, x, z, yaw, s });
+		for (const [id, x, z, yaw, s, l] of entries) {
+			const remote = this.players.get(id);
+			if (!remote) continue;
+			remote.interp.push({ t: now, x, z, yaw, s });
+			remote.level = l ?? 0;
+		}
 	}
 
 	emote(id: number, e: EmoteName): void {
@@ -228,11 +235,16 @@ export class RemotePlayers {
 		remote.bubble = { sprite, until: performance.now() + BUBBLE_MS };
 	}
 
-	/** Floors that differ from the terrain (enterable buildings): a height, or null. */
-	groundAt: ((x: number, z: number) => number | null) | null = null;
+	/** Floors that differ from the terrain (enterable buildings, on a storey): a height, or null. */
+	groundAt: ((x: number, z: number, storey: number) => number | null) | null = null;
 
-	private ground(x: number, z: number): number {
-		return this.groundAt?.(x, z) ?? this.terrain.height(x, z);
+	private ground(x: number, z: number, storey: number): number {
+		return this.groundAt?.(x, z, storey) ?? this.terrain.height(x, z);
+	}
+
+	/** A remote player's storey (inspection and tests). */
+	storeyOf(id: number): number | null {
+		return this.players.get(id)?.level ?? null;
 	}
 
 	update(dt: number, viewer: THREE.Vector3): void {
@@ -243,7 +255,7 @@ export class RemotePlayers {
 			const travel = Math.hypot(snap.x - remote.x, snap.z - remote.z);
 			remote.x = snap.x;
 			remote.z = snap.z;
-			remote.group.position.set(snap.x, this.ground(snap.x, snap.z), snap.z);
+			remote.group.position.set(snap.x, this.ground(snap.x, snap.z, remote.level), snap.z);
 			if (remote.vehicle && remote.rider) {
 				// Riding: wheels from the distance covered, steering and lean from the turn rate.
 				const kind = remote.vehicle.kind;

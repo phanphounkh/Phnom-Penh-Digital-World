@@ -4,6 +4,7 @@
  */
 import type { CityController } from '$lib/game/city/CityEngine';
 import { MODES } from '$lib/game/vehicles/specs';
+import { BuildingSync } from './BuildingSync';
 import { ParkedVehicles } from './ParkedVehicles';
 import { RemotePlayers, type RemoteSummary } from './RemotePlayers';
 import { WorldSocket, type SocketStatus } from './WorldSocket';
@@ -57,15 +58,26 @@ export class WorldSession {
 
 	readonly remotes: RemotePlayers;
 	readonly parked: ParkedVehicles;
+	/** Doors, windows, lights and appliances shared with the players around. */
+	readonly buildings: BuildingSync;
+	/** A building's state from the server: changes near me, or (with `keep`) everything changed
+	 * there, all else being in its default state except the parts `keep` names (my own changes
+	 * on their way). */
+	onBuildingState: ((building: string, state: Record<string, boolean>, keep?: (part: string) => boolean) => void) | null = null;
+	/** Connected (again): buildings already loaded ask for their state. */
+	onOpen: (() => void) | null = null;
+	/** The storey of the building the player is in (0: the ground floor or outside). */
+	storey: () => number = () => 0;
 	private socket: WorldSocket;
 	private unsubscribe: () => void = () => {};
 	private seq = 0;
-	private lastSent = { x: NaN, z: NaN, yaw: NaN, s: NaN, at: 0 };
+	private lastSent = { x: NaN, z: NaN, yaw: NaN, s: NaN, l: 0, at: 0 };
 	private listTimer = 0;
 
 	constructor(private city: CityController, url?: string) {
 		this.remotes = new RemotePlayers(city.scene, city.terrain);
 		this.parked = new ParkedVehicles(city.scene, city.terrain, city.collision);
+		this.buildings = new BuildingSync((m) => this.socket.send(m));
 		this.socket = new WorldSocket({
 			url,
 			onMessage: (m) => this.receive(m),
@@ -75,6 +87,9 @@ export class WorldSession {
 				if (status !== 'open') {
 					this.remotes.clear();
 					this.parked.clearAll();
+				} else {
+					this.buildings.reset();
+					this.onOpen?.();
 				}
 			}
 		});
@@ -99,14 +114,17 @@ export class WorldSession {
 		const st = this.city.localState();
 		const last = this.lastSent;
 		if (now - last.at >= SEND_INTERVAL_MS) {
+			const l = this.storey();
 			const changed =
 				Math.hypot(st.x - last.x, st.z - last.z) > 0.02 ||
 				Math.abs(st.yaw - last.yaw) > 0.02 ||
-				Math.abs(st.speed - last.s) > 0.2;
+				Math.abs(st.speed - last.s) > 0.2 ||
+				l !== last.l;
 			if (changed || Number.isNaN(last.x)) {
 				const speed = st.speed < 0.05 ? 0 : st.speed;
-				if (this.socket.send({ t: 'move', x: round(st.x), z: round(st.z), yaw: round(st.yaw, 3), s: round(speed) }))
-					this.lastSent = { x: st.x, z: st.z, yaw: st.yaw, s: speed, at: now };
+				// (No storey: the ground floor.)
+				if (this.socket.send({ t: 'move', x: round(st.x), z: round(st.z), yaw: round(st.yaw, 3), s: round(speed), ...(l ? { l } : {}) }))
+					this.lastSent = { x: st.x, z: st.z, yaw: st.yaw, s: speed, l, at: now };
 			}
 		}
 		if (now - this.listTimer > 500) {
@@ -186,7 +204,7 @@ export class WorldSession {
 				this.room = m.room;
 				this.online = m.online;
 				this.city.setPosition(m.x, m.z, m.yaw);
-				this.lastSent = { x: m.x, z: m.z, yaw: m.yaw, s: 0, at: 0 };
+				this.lastSent = { x: m.x, z: m.z, yaw: m.yaw, s: 0, l: 0, at: 0 };
 				break;
 			case 'spawn':
 				this.remotes.spawn(m.p);
@@ -273,6 +291,12 @@ export class WorldSession {
 			case 'vdespawn':
 				this.parked.despawn(m.id);
 				break;
+			case 'bstate': {
+				const state = this.buildings.receive(m);
+				if (m.all) this.onBuildingState?.(m.b, state, (part) => this.buildings.waiting(m.b, part));
+				else if (Object.keys(state).length) this.onBuildingState?.(m.b, state);
+				break;
+			}
 			case 'kicked':
 				this.detail = {
 					replaced: 'You joined the world from another tab or device.',

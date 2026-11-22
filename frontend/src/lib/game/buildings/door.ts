@@ -1,8 +1,8 @@
 /**
  * A hinged door: state, swing animation and the collision shape of its leaf.
  *
- * The state is a plain value ({ open, changedAt }) so it can later be shared between players:
- * a server message only has to call apply(). Today it is local to each player.
+ * The state is a plain value ({ open, changedAt }), shared with the players around through the
+ * server (Buildings.applyShared calls apply()).
  */
 import type { DoorSpec, XZ } from './spec';
 

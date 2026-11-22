@@ -26,6 +26,7 @@ import { assembleInterior, buildInterior, type InteriorData, type ProceduralBuil
 import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
 import { findPath } from './nav';
+import type { SwitchKind } from '$lib/game/net/protocol';
 import { Frame, bounds, floorAt, isInside, levelCeiling, levelFloor, rectDistance, roomAt, stairAt, type BuildingPlacement, type BuildingSpec, type ItemSpec, type LightSpec, type SeatSpec, type ToggleSpec, type XZ } from './spec';
 import { TvPicture } from './tv';
 
@@ -187,6 +188,13 @@ export class Buildings {
 	private worker: Worker | null | undefined = undefined;
 	private jobs = new Map<number, { resolve: (data: InteriorData) => void; reject: (error: Error) => void }>();
 	private nextJob = 1;
+	/** Shared with the players around (WorldSession): the player changed something here … */
+	onChange: ((building: string, kind: SwitchKind, id: string, on: boolean) => void) | null = null;
+	/** … and a building was loaded (what did others change in it?). */
+	onLoaded: ((building: string) => void) | null = null;
+	/** Doors and windows another player moved while this player stands in their swing: they
+	 * follow once the player has stepped out of the way ("building|door" -> open). */
+	private heldDoors = new Map<string, boolean>();
 	private disposed = false;
 	private walkingToSeat = false;
 	/** Where the player was at the last pick (world x, z): each building turns it into its own
@@ -339,19 +347,23 @@ export class Buildings {
 		return levelCeiling(b.spec, on ? on.stair.to : this.storeyOf(b));
 	}
 
-	floorAt(x: number, z: number): number | null {
+	/** The floor under (x, z) in a loaded building, or null (the terrain there). In a building
+	 * with storeys: on the player's storey (`storey` omitted), or on another player's (given). */
+	floorAt(x: number, z: number, storey?: number): number | null {
 		for (const b of this.loaded.values()) {
-			if (b.spec.levels && this.storeyIn === b.placement.id) {
-				// In a building with storeys: the player's storey, or the stairs' slope.
+			const level = storey ?? (this.storeyIn === b.placement.id ? this.storey : null);
+			if (b.spec.levels && level !== null) {
+				// The storey's floor, or the stairs' slope.
 				const [lx, lz] = b.frame.toLocal(x, z);
 				const fp = bounds(b.spec.footprint);
-				if (lx < fp.minX || lx > fp.maxX || lz < fp.minZ || lz > fp.maxZ) continue;
-				const on = stairAt(b.spec, lx, lz);
-				if (on) {
-					const [f0, f1] = [levelFloor(b.spec, on.stair.from), levelFloor(b.spec, on.stair.to)];
-					return b.frame.ground + f0 + (f1 - f0) * Math.max(0, Math.min(1, on.t));
+				if (lx >= fp.minX && lx <= fp.maxX && lz >= fp.minZ && lz <= fp.maxZ) {
+					const on = stairAt(b.spec, lx, lz);
+					if (on) {
+						const [f0, f1] = [levelFloor(b.spec, on.stair.from), levelFloor(b.spec, on.stair.to)];
+						return b.frame.ground + f0 + (f1 - f0) * Math.max(0, Math.min(1, on.t));
+					}
+					return b.frame.ground + levelFloor(b.spec, level);
 				}
-				return b.frame.ground + levelFloor(b.spec, this.storey);
 			}
 			const h = floorAt(b.spec, b.frame, x, z);
 			if (h !== null) return h;
@@ -434,6 +446,7 @@ export class Buildings {
 		if (this.seatedOn && !this.host.seated && !this.walkingToSeat) this.seatedOn = null;
 		if (this.inspecting && Math.hypot(this.inspecting.x - px, this.inspecting.z - pz) > REACH.item + 0.9) this.closeInspection();
 		this.pick(px, pz, yaw);
+		if (this.heldDoors.size) this.releaseDoors();
 	}
 
 	/** Draw an interior only when it can be seen. */
@@ -480,13 +493,25 @@ export class Buildings {
 		if (i.kind === 'climb') {
 			this.climbThrough();
 		} else if (i.kind === 'door') {
-			b.doors.find((d) => d.door.spec.id === i.door)?.door.toggle();
+			const door = b.doors.find((d) => d.door.spec.id === i.door)?.door;
+			if (door) {
+				door.toggle();
+				this.heldDoors.delete(`${b.placement.id}|${i.door}`);
+				this.onChange?.(b.placement.id, 'door', i.door, door.open);
+			}
 		} else if (i.kind === 'light') {
-			b.lights.find((l) => l.spec.id === i.light)?.state.toggle();
-			this.insideLamp = -1; // re-send the indoor light level
+			const light = b.lights.find((l) => l.spec.id === i.light);
+			if (light) {
+				light.state.toggle();
+				this.insideLamp = -1; // re-send the indoor light level
+				this.onChange?.(b.placement.id, 'light', i.light, light.state.on);
+			}
 		} else if (i.kind === 'toggle') {
 			const a = b.appliances.find((x) => x.spec.id === i.toggle);
-			if (a) this.setAppliance(a, !a.state.on);
+			if (a) {
+				this.setAppliance(a, !a.state.on);
+				this.onChange?.(b.placement.id, 'app', i.toggle, a.state.on);
+			}
 		} else if (i.kind === 'inspect') {
 			if (this.inspecting?.item === i.item) this.closeInspection();
 			else {
@@ -851,6 +876,75 @@ export class Buildings {
 		this.loading.delete(p.id);
 		this.refreshDoorways();
 		this.host.invalidateShadows();
+		this.onLoaded?.(p.id);
+	}
+
+	/** Ids of the loaded buildings (to ask for their shared state after a reconnect). */
+	get loadedIds(): string[] {
+		return [...this.loaded.keys()];
+	}
+
+	/** What other players changed in a building ("door:front": true, "light:living": false,
+	 * "app:tv": true …), in the server's order. With `keep`, the state is complete: the parts not
+	 * in it are as the building starts (doors and windows shut, appliances off, switched lights
+	 * on after dark), except those `keep` names. Doors and windows swing as when opened here;
+	 * one swinging through the spot where this player stands waits until they step aside. */
+	applyShared(building: string, state: Record<string, boolean>, keep?: (part: string) => boolean): void {
+		const b = this.loaded.get(building);
+		if (!b) return; // it asks for its state when it loads
+		const want: Record<string, boolean> = {};
+		if (keep) {
+			const night = (this.host.materials?.night.value ?? 0) > 0.5;
+			for (const d of b.doors) want[`door:${d.door.spec.id}`] = false;
+			for (const l of b.lights) if (l.spec.switches.length) want[`light:${l.spec.id}`] = night || !!l.spec.startOn;
+			for (const a of b.appliances) want[`app:${a.spec.id}`] = false;
+			for (const part of Object.keys(want)) if (keep(part)) delete want[part];
+		}
+		Object.assign(want, state);
+		for (const [key, on] of Object.entries(want)) {
+			const cut = key.indexOf(':');
+			const kind = key.slice(0, cut),
+				id = key.slice(cut + 1);
+			if (kind === 'door') {
+				const d = b.doors.find((x) => x.door.spec.id === id);
+				if (!d) continue;
+				this.heldDoors.delete(`${building}|${id}`);
+				if (d.door.open === on) continue;
+				if (this.inSwing(b, d.door)) this.heldDoors.set(`${building}|${id}`, on);
+				else d.door.apply({ open: on, changedAt: Math.max(Date.now(), d.door.state.changedAt) });
+			} else if (kind === 'light') {
+				const l = b.lights.find((x) => x.spec.id === id);
+				if (!l || l.state.on === on) continue;
+				l.state.apply({ on, changedAt: Math.max(Date.now(), l.state.state.changedAt) });
+				this.insideLamp = -1; // re-send the indoor light level
+			} else if (kind === 'app') {
+				const a = b.appliances.find((x) => x.spec.id === id);
+				if (a && a.state.on !== on) this.setAppliance(a, on);
+			}
+		}
+	}
+
+	/** Is the player (on the door's storey) where the leaf swings? */
+	private inSwing(b: Loaded, door: Door): boolean {
+		if (!this.lastWorld || (door.spec.level ?? 0) !== this.storeyOf(b)) return false;
+		const [lx, lz] = b.frame.toLocal(this.lastWorld[0], this.lastWorld[1]);
+		return door.blocksClosing(lx, lz, PLAYER_RADIUS);
+	}
+
+	/** Held doors whose swing is clear now. */
+	private releaseDoors(): void {
+		for (const [key, open] of this.heldDoors) {
+			const cut = key.indexOf('|');
+			const b = this.loaded.get(key.slice(0, cut));
+			const door = b?.doors.find((x) => x.door.spec.id === key.slice(cut + 1))?.door;
+			if (!b || !door) {
+				this.heldDoors.delete(key);
+				continue;
+			}
+			if (this.inSwing(b, door)) continue;
+			this.heldDoors.delete(key);
+			if (door.open !== open) door.apply({ open, changedAt: Math.max(Date.now(), door.state.changedAt) });
+		}
 	}
 
 	/** Cut the doorways of generated interiors into the OSM facades and the collision walls. */
@@ -929,6 +1023,7 @@ export class Buildings {
 			this.storey = 0;
 		}
 		if (this.inspecting?.building === id) this.closeInspection();
+		for (const key of [...this.heldDoors.keys()]) if (key.startsWith(`${id}|`)) this.heldDoors.delete(key);
 		if (b.facade) this.refreshDoorways();
 		for (const a of b.appliances) {
 			a.tv?.dispose();

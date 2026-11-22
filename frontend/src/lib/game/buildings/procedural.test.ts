@@ -559,8 +559,14 @@ describe('a home with an upper floor, in the game', () => {
 		// Up: the floor rises with the steps; past half way the player is upstairs.
 		const top = walk(foot, head);
 		expect(b.storeyOn).toBe(1);
-		expect(b.floorAt(...top)!).toBeCloseTo(ground + spec.levels![0].floor - spec.floor, 3);
+		const upper = ground + spec.levels![0].floor - spec.floor;
+		expect(b.floorAt(...top)!).toBeCloseTo(upper, 3);
 		expect(ceiling).toBeCloseTo(spec.levels![0].ceiling, 3);
+		// Other players stand on their own storey (the server tells which), not on this one's.
+		expect(b.floorAt(...frame.toWorld(foot), 0)!).toBeCloseTo(ground, 3);
+		expect(b.floorAt(...top, 1)!).toBeCloseTo(upper, 3);
+		const midway = frame.toWorld(along((lo + hi) / 2));
+		expect(b.floorAt(...midway, 0)!).toBeCloseTo((ground + upper) / 2, 1); // on the stairs: their slope
 		// Upstairs, the family room's switch is offered by the head of the stairs, not a ground
 		// floor one.
 		const sw = spec.lights.find((l) => l.id === 'up-family')!.switches[0];
@@ -572,6 +578,9 @@ describe('a home with an upper floor, in the game', () => {
 		walk(head, foot);
 		expect(b.storeyOn).toBe(0);
 		expect(b.floorAt(...frame.toWorld(foot))!).toBeCloseTo(ground, 3);
+		// From downstairs, someone upstairs is still drawn upstairs; outside, on the street.
+		expect(b.floorAt(...top, 1)!).toBeCloseTo(upper, 3);
+		expect(b.floorAt(...frame.toWorld([ex, ez + 30]), 0)).toBeNull();
 	});
 });
 

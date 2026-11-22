@@ -148,7 +148,17 @@
 					// Buildings with a walk-in shop already have an interior.
 					claimed: () => shops?.list.map((s) => [s.unit.door_x, s.unit.door_z] as [number, number]) ?? []
 				});
-				net.remotes.groundAt = (x, z) => houses?.floorAt(x, z) ?? null; // others stand on the floor too
+				net.remotes.groundAt = (x, z, storey) => houses?.floorAt(x, z, storey) ?? null; // others stand on their floor too
+				// Doors, windows, lights and appliances are shared with the players around, and
+				// they see which storey this player is on.
+				const session = net;
+				houses.onChange = (b, kind, id, on) => session.buildings.set(b, kind, id, on);
+				houses.onLoaded = (b) => session.buildings.ask(b);
+				session.onBuildingState = (b, state, keep) => houses?.applyShared(b, state, keep);
+				session.onOpen = () => {
+					for (const id of houses?.loadedIds ?? []) session.buildings.ask(id);
+				};
+				session.storey = () => houses?.storeyOn ?? 0;
 				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
 				let parkCheck = 0;
 				created.onFrame((dt) => {

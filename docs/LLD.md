@@ -167,10 +167,13 @@ kitchen, bedroom, bathroom and hall. Each building is a GLB plus a JSON spec (fo
   - The walk to a seat follows a path (`nav.ts`): A* on a 0.2 m grid around walls, open doors and
     furniture, string-pulled into a few straight legs. A dining chair behind the table's corner is
     still reached.
-- **Shared state:** door, light and appliance states are `{ open/on, changedAt }` values (newest
-  wins), local today and ready to be synced between players.
+- **Shared state:** doors, windows, light groups and appliances are shared with the players
+  around (see *Shared buildings* under the multiplayer protocol). A change shows at once where
+  it is made; others' changes arrive through `Buildings.applyShared`. A door another player
+  moves while this player stands in its swing waits until they step aside.
 - **Floor:** `CityController.setGround` lifts the avatar onto the floor, porch and step, and step
-  heights are eased. Other players stand on the floor too.
+  heights are eased. Other players stand on the floor too, on their own storey (the `l` of their
+  moves): `Buildings.floorAt(x, z, storey)`.
 - **Lighting:** the interior is unlit and multiplied by two lightmaps baked in Blender Cycles.
   The `day` map holds sun and sky through the windows. The `lamps` map holds one room group per
   channel: R front room, G kitchen, B bedroom, A bathroom. The shader computes
@@ -318,10 +321,11 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 
 | Client → server | Server → client |
 |---|---|
-| `move {x,z,yaw,s}` (10 Hz while it changes) | `welcome {you, room, tick, x, z, yaw, online}` |
-| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?}}`, `despawn {id, why}` |
+| `move {x,z,yaw,s,l?}` (10 Hz while it changes; `l`: storey, absent on the ground floor) | `welcome {you, room, tick, x, z, yaw, online}` |
+| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}`, `despawn {id, why}` |
 | `mount {v}`, `dismount` (Phase 5) | `ride {id, v: {id,k,c} \| null, x?, z?, yaw?}` (position only in your own), `vspawn {v: {id,k,c,x,z,yaw,mine?,name?}}`, `vdespawn {id}` |
-| `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s],…]}`, changed players only |
+| `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s,l?],…]}`, changed players only |
+| `bset {b, k: door\|light\|app, id, on}`, `bget {b}` | `bstate {b, s: {"door:front": true, …}, mine?, all?}` |
 | `travel {spawn}`, `invite {to}`, `join {from}` | `chat`, `emote`, `teleport`, `correct`, `invite`, `notify`, `online`, `error`, `kicked` |
 | | `shops` (storefronts or a catalogue changed: reload `/market/shops`), `order {number, status}` (to the buyer and the merchant) |
 | `ping {c}` | `pong {c, s}` |
@@ -329,6 +333,24 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 Close codes: 4401 not signed in, 4403 bad Origin, 4409 onboarding incomplete, 4009 replaced by
 a newer connection, 4003 suspended. The client reconnects with exponential backoff (1 → 15 s)
 except after these final codes.
+
+**Shared buildings** (`backend/app/multiplayer/buildings.py`, `frontend/src/lib/game/net/
+BuildingSync.ts`): every client builds the same interiors, so a door is named by its building
+(`osm:<buildings.id>` or a model building's id) and its own id. The room keeps what players
+changed, in memory, until its last player leaves; then everything is back to the default every
+client knows (doors shut, appliances off, switched lights on after dark). Rules on the server:
+the player must be within 15 m of the building's footprint (the model house: of its centre and
+radius, listed in `MODEL_BUILDINGS`); at most 8 changes and 40 requests a second; 64 parts per
+building and 4000 buildings per room. No database tables.
+
+- `bset` is kept and sent as `bstate` to every player in the 3 × 3 chunk cells around the sender,
+  the sender too (`mine`), in one order. The sender showed it already; while one of its changes
+  to a part is on its way, what the server sends about that part is older and is skipped, so
+  nothing flicks back to a stale state, and its own change coming back settles it. Every client
+  ends where the server did.
+- `bget` (sent when a building loads, and for every loaded building after a reconnect) is
+  answered with `all`: everything changed there; whatever is not listed goes back to its
+  default, except the client's own changes still on their way.
 
 **Client side** (`frontend/src/lib/game/net/`): `WorldSocket` (reconnect, ping),
 `Interpolator` (renders remote players 120 ms in the past; shortest-arc turns; ≤ 200 ms
