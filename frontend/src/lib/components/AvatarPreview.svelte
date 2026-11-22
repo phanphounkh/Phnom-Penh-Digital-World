@@ -1,19 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Rotate3d } from 'lucide-svelte';
 	import type { Material, Object3D } from 'three';
 	import type { Avatar } from '$lib/api/types';
 	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
 
 	/**
-	 * Turntable preview of the player's avatar in the chosen style (realistic or classic);
-	 * restyles live as `avatar` changes. Realistic models idle-animate; a different build
-	 * reloads the model.
+	 * Turntable preview of the player's avatar in the chosen style (realistic or classic, also
+	 * settable by the page: `bind:style`); restyles live as `avatar` changes. Realistic models
+	 * idle-animate; a different build reloads the model. `caption` describes the look below the
+	 * stage, where it never covers the avatar.
 	 */
-	let { avatar }: { avatar: Avatar } = $props();
+	let {
+		avatar,
+		style = $bindable(loadAvatarStyle()),
+		caption = ''
+	}: { avatar: Avatar; style?: AvatarStyle; caption?: string } = $props();
 	let host: HTMLDivElement;
 	let failed = $state(false);
 	let ready = $state(false);
-	let style = $state<AvatarStyle>(loadAvatarStyle());
+	let turned = $state(false);
 	let shown = $state<AvatarStyle | null>(null);
 
 	interface Model {
@@ -33,10 +39,8 @@
 		rebuild?.(snapshot);
 	});
 
-	function choose(next: AvatarStyle) {
-		style = next;
-		saveAvatarStyle(next);
-	}
+	// The look is also the one used in the world (players see everyone in it).
+	$effect(() => saveAvatarStyle(style));
 
 	async function realisticModel(a: Avatar): Promise<Model> {
 		const THREE = await import('three');
@@ -77,11 +81,14 @@
 				renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 				renderer.shadowMap.enabled = true;
 				renderer.toneMapping = THREE.ACESFilmicToneMapping;
+				// Out of the layout: the stage's size comes from the page, never from the canvas (a
+				// canvas sized for a narrow window would otherwise hold the column wide).
+				Object.assign(renderer.domElement.style, { display: 'block', position: 'absolute', inset: '0' });
 				host.appendChild(renderer.domElement);
 				const scene = new THREE.Scene();
 				const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
-				camera.position.set(0, 1.2, 4.3);
-				camera.lookAt(0, 0.95, 0);
+				camera.position.set(0, 1.1, 3.75);
+				camera.lookAt(0, 0.88, 0);
 				scene.add(new THREE.HemisphereLight('#fff6e6', '#2b4a46', 1.6));
 				const sun = new THREE.DirectionalLight('#ffe7c2', 2.2);
 				sun.position.set(2.5, 4, 3);
@@ -135,6 +142,7 @@
 				resize();
 				const down = (e: PointerEvent) => {
 					dragging = true;
+					turned = true;
 					lastX = e.clientX;
 				};
 				const move = (e: PointerEvent) => {
@@ -183,27 +191,42 @@
 </script>
 
 <div
-	bind:this={host}
-	class="relative h-full min-h-[340px] w-full cursor-grab touch-pan-y overflow-hidden rounded-3xl bg-gradient-to-b from-saffron-100 to-paper-2 active:cursor-grabbing"
+	class="flex h-full min-h-[340px] w-full flex-col overflow-hidden rounded-3xl bg-gradient-to-b from-saffron-100 to-paper-2"
 	data-testid="avatar-preview"
 	data-ready={ready}
 	data-style={shown ?? ''}
 >
-	{#if failed}
-		<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-ink-soft">
-			3D preview unavailable (WebGL required). Your choices are still saved.
+	<div class="flex items-center justify-between gap-3 px-4 pt-3">
+		<p class="flex items-center gap-1.5 text-xs text-ink-soft transition-opacity {turned ? 'opacity-0' : ''}" aria-hidden={turned}>
+			<Rotate3d size={14} /> Drag to turn
 		</p>
-	{:else if !ready}
-		<p class="absolute inset-0 grid place-items-center text-sm text-ink-soft">Loading avatar…</p>
-	{/if}
-	<div class="absolute right-3 top-3 grid grid-cols-2 gap-1 rounded-xl bg-white/80 p-1 text-xs font-semibold" role="radiogroup" aria-label="Avatar style">
-		{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [s, text] (s)}
-			<button type="button" role="radio" aria-checked={style === s} class="rounded-lg px-2 py-1 {style === s ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => choose(s)}>{text}</button>
-		{/each}
+		<div class="grid grid-cols-2 gap-1 rounded-xl bg-white/80 p-1 text-xs font-semibold" role="radiogroup" aria-label="Avatar style">
+			{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [s, text] (s)}
+				<button
+					type="button"
+					role="radio"
+					aria-checked={style === s}
+					class="rounded-lg px-2.5 py-1 {style === s ? 'bg-white text-river-900 shadow' : 'text-ink-soft hover:text-river-900'}"
+					onclick={() => (style = s)}>{text}</button
+				>
+			{/each}
+		</div>
 	</div>
-	{#if shown === 'realistic'}
-		<p class="absolute inset-x-3 bottom-3 rounded-xl bg-white/80 px-3 py-2 text-xs text-ink-soft">
-			Realistic: your build, skin, hair and clothing colours on a fixed outfit. Hairstyle, garment styles and accessories show in Classic.
-		</p>
+	<div bind:this={host} class="relative min-h-0 flex-1 cursor-grab touch-pan-y active:cursor-grabbing">
+		{#if failed}
+			<p class="absolute inset-0 grid place-items-center p-6 text-center text-sm text-ink-soft">
+				3D preview unavailable (WebGL required). Your choices are still saved.
+			</p>
+		{:else if !ready}
+			<p class="absolute inset-0 grid place-items-center text-sm text-ink-soft">Loading avatar…</p>
+		{/if}
+	</div>
+	{#if caption || shown === 'realistic'}
+		<div class="border-t border-river-900/10 bg-white/55 px-4 py-3" aria-live="polite">
+			{#if caption}<p class="text-sm text-river-950">{caption}</p>{/if}
+			{#if shown === 'realistic'}
+				<p class="mt-0.5 text-xs text-ink-soft">The realistic look wears one outfit in your colours. Hairstyles, garment styles and accessories show in Classic.</p>
+			{/if}
+		</div>
 	{/if}
 </div>
