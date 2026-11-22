@@ -3,7 +3,7 @@
 | Script | Output | Notes |
 |---|---|---|
 | `generate_avatars.py` | `frontend/static/models/characters/avatar.glb` | Modular player avatar (Phnom Penh Digital World) |
-| `generate_city_assets.py` | `frontend/static/models/city/*.glb`, `landmarks/*.glb` | Rain tree, ornamental tree, sugar palm, double-arm lamp, traffic signal, sign post; Phsar Thmei dome (real scale), Khmer stupa |
+| `generate_city_assets.py` | `frontend/static/models/city/*.glb`, `landmarks/*.glb` | Rain tree, ornamental tree, sugar palm, shrub (crowns of leaf clumps with bent normals and baked vertex-colour occlusion, clamped to ≤ 1), double-arm lamp, traffic signal, sign post; Phsar Thmei dome (real scale), Khmer stupa. Regenerate one family with `PPW_ASSET_FILTER=city/tree` |
 | `generate_shop_assets.py` | `frontend/static/models/shop/*.glb` | Shop shelf, island table, awning, generic product models (Phase 4) |
 | `generate_vehicle_assets.py` | `frontend/static/models/vehicles/*.glb` | Step-through city bicycle with basket, generic underbone motorbike (Phase 5) |
 | `compress_glb.mjs` | (in place) | Meshopt compression of the Phnom Penh Digital World GLBs (`cd frontend && npm run assets:compress`) |

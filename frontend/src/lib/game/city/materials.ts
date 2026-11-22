@@ -2,52 +2,112 @@
  * Shared city materials (main thread: they use canvas textures).
  *
  * The facade material is a MeshStandardMaterial extended with a small shader:
- *  - walls are tiled with 4 m × 3.3 m bays from an atlas (window bay | shopfront bay);
- *  - the ground storey of shophouse-type buildings (facade.x = 1) uses the shopfront bay;
+ *  - walls are tiled with 4 m × 3.3 m bays from an atlas: four window styles (modern, colonial
+ *    shutters, balconies, sun louvres with AC units) and two shopfronts (open shop, café);
+ *    each building picks a style from its seed (facade.y), with per-bay variation;
+ *  - the ground storey of shophouse-type buildings (facade.x = 1) uses a shopfront bay;
+ *  - street grime at the base, faint streaks higher up; glass is glossy by day (sky reflections);
  *  - at night (uNight → 1) a stable, per-building pseudo-random subset of windows and every
  *    shopfront glows warm. Lighting is decorative and says nothing about real occupancy.
  */
 import * as THREE from 'three';
+import { addSurfaceDetail, type SurfaceKind } from './surfaces';
 
 /** Walk-in shop doorways drawn at once (the nearest ones) and the opening height (m). */
 export const MAX_DOORS = 16;
 export const DOOR_HEIGHT = 2.9;
 
 const BAY = 128;
+/** Atlas bays (128 px = one 4 m × 3.3 m bay each): window styles 0–3, shopfronts 4–5. */
+export const FACADE_BAYS = 6;
 
+/**
+ * The facade atlas, drawn on a canvas. White areas take the building's colour (vertex colour),
+ * coloured details (shutters, awnings, railings) tint it. `mask` draws the glass/glow mask
+ * instead: white where windows are glazed (they reflect the sky by day and glow at night).
+ */
 function facadeCanvas(mask: boolean): HTMLCanvasElement {
 	const c = document.createElement('canvas');
-	c.width = BAY * 2;
+	c.width = BAY * FACADE_BAYS;
 	c.height = BAY;
 	const g = c.getContext('2d')!;
 	const paint = (colour: string, glow: string) => (g.fillStyle = mask ? glow : colour);
-	// ── window bay (left) ──
-	paint('#ffffff', '#000000');
-	g.fillRect(0, 0, BAY, BAY);
-	paint('#d6d0c6', '#000000');
-	g.fillRect(0, BAY - 9, BAY, 9); // floor slab
-	paint('#69777c', '#ffffff');
-	g.fillRect(28, 22, 72, 70); // glazing
-	paint('#8ea1a7', '#ffffff');
-	g.fillRect(32, 26, 30, 62);
-	g.fillRect(66, 26, 30, 62);
-	paint('rgba(255,255,255,0.35)', '#ffffff');
-	g.fillRect(34, 28, 9, 58);
-	paint('#cfc9bf', '#000000');
-	g.fillRect(24, 92, 80, 6); // sill
-	// ── shopfront bay (right) ──
-	const x0 = BAY;
-	paint('#ffffff', '#000000');
-	g.fillRect(x0, 0, BAY, BAY);
-	paint('#f3eee4', '#000000');
-	g.fillRect(x0 + 4, 6, BAY - 8, 22); // sign board (tinted by the facade colour)
-	paint('#3b3631', '#ffffff');
-	g.fillRect(x0 + 8, 34, BAY - 16, BAY - 34); // open shop / interior
+	const rect = (x: number, y: number, w: number, h: number) => g.fillRect(x, y, w, h);
+	const WALL = ['#ffffff', '#000000'] as const;
+	const GLASS = ['#5d6d73', '#ffffff'] as const;
+	const GLASS_HI = ['#8ea1a7', '#ffffff'] as const;
+	const SLAB = ['#d6d0c6', '#000000'] as const;
+
+	// ── 0: modern window with sill ──
+	let x0 = 0;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint(...SLAB); rect(x0, BAY - 9, BAY, 9);
+	paint(...GLASS); rect(x0 + 28, 22, 72, 70);
+	paint(...GLASS_HI); rect(x0 + 32, 26, 30, 62); rect(x0 + 66, 26, 30, 62);
+	paint('rgba(255,255,255,0.35)', '#ffffff'); rect(x0 + 34, 28, 9, 58);
+	paint('#cfc9bf', '#000000'); rect(x0 + 24, 92, 80, 6);
+
+	// ── 1: colonial window with louvred shutters (French-era shophouses) ──
+	x0 = BAY;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint(...SLAB); rect(x0, BAY - 9, BAY, 9);
+	paint('#e2ddd3', '#000000'); rect(x0 + 30, 8, 68, 8); // moulded lintel
+	paint('#3e4a4c', '#ffffff'); rect(x0 + 48, 18, 32, 80); // glazed opening
+	paint('#7d9397', '#ffffff'); rect(x0 + 52, 22, 11, 72); rect(x0 + 65, 22, 11, 72);
+	for (const sx of [32, 80]) {
+		paint('#4f8f86', '#000000'); rect(x0 + sx, 18, 16, 80); // shutter leaf
+		paint('#3b6f68', '#000000');
+		for (let y = 22; y < 96; y += 5) rect(x0 + sx + 2, y, 12, 2); // louvres
+	}
+	paint('#d9d3c8', '#000000'); rect(x0 + 28, 98, 72, 6);
+
+	// ── 2: balcony door with iron railing and pots ──
+	x0 = BAY * 2;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint('#4a4440', '#000000'); rect(x0 + 38, 10, 52, 98); // door frame
+	paint(...GLASS); rect(x0 + 42, 14, 21, 90); rect(x0 + 65, 14, 21, 90);
+	paint('rgba(255,255,255,0.3)', '#ffffff'); rect(x0 + 44, 16, 6, 86);
+	paint('#cfc9bf', '#000000'); rect(x0 + 6, 106, 116, 8); // balcony slab
+	paint('#2c2d30', '#000000');
+	rect(x0 + 6, 80, 116, 3); // handrail
+	for (let x = 8; x < 122; x += 7) rect(x0 + x, 83, 2, 23); // balusters
+	paint('#6b8f3c', '#000000'); g.beginPath(); g.arc(x0 + 20, 76, 8, 0, Math.PI * 2); g.arc(x0 + 108, 76, 8, 0, Math.PI * 2); g.fill();
+	paint('#a5603e', '#000000'); rect(x0 + 14, 76, 12, 6); rect(x0 + 102, 76, 12, 6);
+
+	// ── 3: window under concrete sun louvres, with an air-conditioning unit ──
+	x0 = BAY * 3;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint(...SLAB); rect(x0, BAY - 9, BAY, 9);
+	paint(...GLASS); rect(x0 + 24, 30, 80, 56);
+	paint(...GLASS_HI); rect(x0 + 28, 34, 34, 48); rect(x0 + 66, 34, 34, 48);
+	paint('#e4ded3', '#000000');
+	for (let y = 12; y < 30; y += 6) rect(x0 + 18, y, 92, 3); // brise-soleil fins
+	rect(x0 + 16, 12, 5, 76); rect(x0 + 107, 12, 5, 76);
+	paint('#d8d8d4', '#000000'); rect(x0 + 80, 92, 28, 20); // AC unit
+	paint('#9a9a96', '#000000'); g.beginPath(); g.arc(x0 + 94, 102, 7, 0, Math.PI * 2); g.fill();
+
+	// ── 4: open shopfront, rolled-up shutter ──
+	x0 = BAY * 4;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint('#f3eee4', '#000000'); rect(x0 + 4, 6, BAY - 8, 22); // sign board (tinted by the facade colour)
+	paint('#3b3631', '#ffffff'); rect(x0 + 8, 34, BAY - 16, BAY - 34); // interior
 	paint('#8c8a84', '#000000');
-	for (let y = 34; y < 62; y += 4) g.fillRect(x0 + 8, y, BAY - 16, 2); // rolled-up shutter
-	paint('#5b544b', '#7f7f7f');
-	g.fillRect(x0 + 16, 86, 34, 42); // goods / counter
-	g.fillRect(x0 + 78, 92, 34, 36);
+	for (let y = 34; y < 62; y += 4) rect(x0 + 8, y, BAY - 16, 2); // shutter
+	paint('#5b544b', '#7f7f7f'); rect(x0 + 16, 86, 34, 42); rect(x0 + 78, 92, 34, 36); // goods
+
+	// ── 5: café / glazed shopfront under a striped awning ──
+	x0 = BAY * 5;
+	paint(...WALL); rect(x0, 0, BAY, BAY);
+	paint('#f6f2ea', '#000000'); rect(x0 + 6, 4, BAY - 12, 14); // sign board
+	for (let i = 0; i < 16; i++) {
+		paint(i % 2 ? '#f4efe6' : '#b8432f', '#000000');
+		rect(x0 + i * 8, 20, 8, 18); // awning stripes
+	}
+	paint('#4b3a2c', '#ffffff'); rect(x0 + 6, 44, BAY - 12, BAY - 44); // warm interior
+	paint('#7f8f94', '#ffffff'); rect(x0 + 10, 48, 44, 70); rect(x0 + 74, 48, 44, 70); // glazing
+	paint('#2b2b2d', '#000000');
+	rect(x0 + 54, 44, 20, BAY - 44); // door
+	rect(x0 + 6, 44, 4, BAY - 44); rect(x0 + BAY - 10, 44, 4, BAY - 44); rect(x0 + 31, 48, 2, 70); rect(x0 + 95, 48, 2, 70);
 	return c;
 }
 
@@ -81,6 +141,10 @@ export class CityMaterials {
 	readonly poolMap = poolTexture();
 	/** 0 by day → 1 at night; drives windows, lamps and light pools. */
 	readonly night = { value: 0 };
+	/** Seconds, for animated surfaces (water ripples). */
+	readonly time = { value: 0 };
+	/** Procedural surface detail on (1, Quality) or off (0, Performance). */
+	readonly detail = { value: 1 };
 
 	readonly walls = new THREE.MeshStandardMaterial({ vertexColors: true, map: this.facadeMap, roughness: 0.85 });
 	readonly roofs = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
@@ -91,7 +155,7 @@ export class CityMaterials {
 	readonly sidewalk = mat('#b4aa9a', { polygonOffset: true, polygonOffsetFactor: -1 });
 	readonly marking = mat('#efe9da', { polygonOffset: true, polygonOffsetFactor: -3 });
 	readonly areas: Record<string, THREE.MeshStandardMaterial> = {
-		water: mat('#3b7f8c', { roughness: 0.22, metalness: 0.1 }),
+		water: mat('#2f6a74', { roughness: 0.22, metalness: 0.0, envMapIntensity: 0.7 }),
 		park: mat('#6f8f4e'),
 		grass: mat('#86a35d'),
 		pitch: mat('#7aa25a'),
@@ -118,6 +182,23 @@ export class CityMaterials {
 			m.polygonOffsetFactor = -1;
 		}
 		this.installFacadeShader();
+		// World-space surface detail (surfaces.ts): pavers, asphalt grain and gutters, grass, water.
+		const detail: [THREE.MeshStandardMaterial, SurfaceKind][] = [
+			[this.paving, 'paving'],
+			[this.sidewalk, 'sidewalk'],
+			[this.asphalt, 'asphalt'],
+			[this.asphaltMinor, 'asphalt'],
+			[this.terrain, 'soil'],
+			[this.areas.plaza, 'plaza'],
+			[this.areas.temple_grounds, 'plaza'],
+			[this.areas.parking, 'asphalt'],
+			[this.areas.park, 'grass'],
+			[this.areas.grass, 'grass'],
+			[this.areas.pitch, 'grass'],
+			[this.areas.wetland, 'grass'],
+			[this.areas.water, 'water']
+		];
+		for (const [material, kind] of detail) addSurfaceDetail(material, kind, { time: this.time, detail: this.detail });
 	}
 
 	/**
@@ -188,20 +269,35 @@ for (int i = 0; i < ${MAX_DOORS}; i++) {
 					`vec2 ppwCell = vWall / vec2(4.0, 3.3);
 float ppwStorey = floor(ppwCell.y);
 float ppwShop = step(0.5, vFacade.x) * (1.0 - step(0.5, ppwStorey));
+float ppwStyle = floor(vFacade.y * 4.0); // the building's window style (0..3)
+float ppwR = ppwHash(vec3(floor(ppwCell.x), ppwStorey, vFacade.y * 97.0));
+float ppwBay = ppwStyle;
+if (ppwStyle < 0.5 && ppwR > 0.8) ppwBay = 3.0; // a few AC units on modern blocks
+if (ppwStyle > 1.5 && ppwStyle < 2.5 && mod(ppwStorey, 2.0) < 1.0) ppwBay = 1.0; // balconies on alternate floors
+// Shopfronts vary along the street in 8 m pairs of bays: ~40 % café fronts, the rest open shops.
+if (ppwShop > 0.5) ppwBay = 4.0 + step(0.6, ppwHash(vec3(floor(ppwCell.x * 0.5), 3.0, vFacade.y * 31.0)));
 vec2 ppwLocal = fract(ppwCell);
-vec2 ppwAtlas = vec2((ppwLocal.x + ppwShop) * 0.5, ppwLocal.y);
-vec2 ppwGrad = ppwCell * 0.5;
-diffuseColor *= textureGrad(map, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad));`
+vec2 ppwAtlas = vec2((ppwLocal.x + ppwBay) / ${FACADE_BAYS}.0, ppwLocal.y);
+vec2 ppwGrad = ppwCell * vec2(1.0 / ${FACADE_BAYS}.0, 1.0);
+diffuseColor *= textureGrad(map, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad));
+float ppwGlass = textureGrad(uGlass, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
+// Street grime at the foot of the walls and faint rain streaks higher up.
+float ppwStreak = 0.93 + 0.07 * fract(sin(floor(vWall.x * 2.5) * 12.9898 + vFacade.y * 78.23) * 43758.5453);
+diffuseColor.rgb *= (0.76 + 0.24 * smoothstep(0.0, 0.9, vWall.y)) * mix(1.0, ppwStreak, smoothstep(1.5, 6.0, vWall.y));`
+				)
+				.replace(
+					'#include <roughnessmap_fragment>',
+					`#include <roughnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.15, ppwGlass * (1.0 - uNight)); // glass reflects the sky`
 				)
 				.replace(
 					'#include <emissivemap_fragment>',
 					`#include <emissivemap_fragment>
 float ppwLit = max(step(0.58, ppwHash(vec3(floor(ppwCell.x), ppwStorey, vFacade.y * 97.0))), ppwShop);
-float ppwGlass = textureGrad(uGlass, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
 totalEmissiveRadiance += uNight * ppwLit * ppwGlass * vec3(1.0, 0.6, 0.28) * 1.2;`
 				);
 		};
-		this.walls.customProgramCacheKey = () => 'ppw-facade-v3';
+		this.walls.customProgramCacheKey = () => 'ppw-facade-v5';
 	}
 
 	area(kind: string | undefined): THREE.Material | undefined {

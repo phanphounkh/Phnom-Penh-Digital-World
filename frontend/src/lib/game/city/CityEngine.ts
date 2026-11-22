@@ -15,6 +15,7 @@ import { CollisionWorld, escapeFootprint, moveCircle, rayFraction } from './coll
 import { DayNight, type TimeMode } from './lighting';
 import { CityMaterials } from './materials';
 import { PropLibrary } from './props';
+import { addSurfaceDetail } from './surfaces';
 import { Terrain, type Mound } from './terrain';
 import type { XZ } from '$lib/api/types';
 import { RoadNetwork } from '$lib/game/vehicles/RoadNetwork';
@@ -199,9 +200,10 @@ export async function createCity(
 	const sky = new Sky();
 	sky.scale.setScalar(4000);
 	const skyUniforms = sky.material.uniforms;
-	skyUniforms.turbidity.value = 7;
-	skyUniforms.rayleigh.value = 1.4;
-	skyUniforms.mieCoefficient.value = 0.004;
+	// A clearer, bluer tropical sky (was turbidity 7 / rayleigh 1.4: washed out to white).
+	skyUniforms.turbidity.value = 4.5;
+	skyUniforms.rayleigh.value = 2.2;
+	skyUniforms.mieCoefficient.value = 0.003;
 	skyUniforms.mieDirectionalG.value = 0.82;
 	scene.add(sky);
 
@@ -227,6 +229,8 @@ export async function createCity(
 
 	// ── world data ────────────────────────────────────────────────────────────────────
 	const materials = new CityMaterials();
+	(groundPlane.material as THREE.MeshStandardMaterial).color.set('#ffffff'); // colours come from the 'ground' detail
+	addSurfaceDetail(groundPlane.material as THREE.MeshStandardMaterial, 'ground', { time: materials.time, detail: materials.detail });
 	const props = new PropLibrary();
 	await props.load();
 	const hills = terrainMesh(terrain, materials.terrain);
@@ -384,6 +388,10 @@ export async function createCity(
 		renderer.shadowMap.needsUpdate = true;
 		chunks.radius = quality === 'high' ? 420 : 300;
 		chunks.shadows = quality === 'high';
+		// Performance: flat surfaces and no sky environment map (cheapest fragments and start-up).
+		materials.detail.value = quality === 'high' ? 1 : 0;
+		lighting.environment = quality === 'high';
+		lighting.update();
 		scene.traverse((n) => {
 			const m = (n as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
 			if (Array.isArray(m)) m.forEach((x) => (x.needsUpdate = true));
@@ -682,6 +690,7 @@ export async function createCity(
 		const dt = Math.min(elapsed, 0.25);
 		const t0 = performance.now();
 		if (!paused) step(dt);
+		materials.time.value += dt;
 		for (const callback of frameCallbacks) callback(dt);
 		lightTimer += dt;
 		if (lightTimer > 2) {
@@ -908,6 +917,7 @@ export async function createCity(
 			(shadowBlob.material as THREE.Material).dispose();
 			sky.geometry.dispose();
 			sky.material.dispose();
+			lighting.dispose();
 			renderer.dispose();
 			renderer.domElement.remove();
 		}

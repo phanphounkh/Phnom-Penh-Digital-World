@@ -52,7 +52,8 @@ const remoteModel = (page: Page, username: string) =>
 async function enter(page: Page) {
 	await page.goto('/world');
 	await expect(page.getByTestId('world-canvas')).toHaveAttribute('data-ready', 'true', { timeout: 180_000 });
-	await expect(page.getByTestId('hud-net')).toHaveAttribute('data-status', 'open', { timeout: 30_000 });
+	// Software rendering (SwiftShader) compiles every shader on the CPU: allow a slow start.
+	await expect(page.getByTestId('hud-net')).toHaveAttribute('data-status', 'open', { timeout: 90_000 });
 }
 
 /** Orbit the camera to look at the player's front and zoom in. */

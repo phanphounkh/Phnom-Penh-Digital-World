@@ -90,9 +90,10 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/game/city/chunkGeometry.ts` | **Worker-safe** chunk → typed arrays: mitred road ribbons that follow the terrain, sidewalks, dashed centre lines, area polygons, buildings (walls with facade attributes, roofs, terrain-aware bases), tiered Khmer roofs, prop instance matrices, light pools, colliders, label/sign/model specs |
 | `lib/game/city/chunk.worker.ts` | Web Worker: fetch → parse → `buildChunkData` → zero-copy `postMessage` |
 | `lib/game/city/assemble.ts` | Main thread: typed arrays → meshes, instanced props, landmark GLBs, label sprites, per-chunk street-sign atlas, a "detail" group for LOD |
-| `lib/game/city/materials.ts` | Shared materials; facade shader (window/shopfront atlas, night glow); light-pool and terrain materials |
-| `lib/game/city/props.ts` | Meshopt-aware GLB loader; flattens Blender props to one geometry per material; instancing; shared materials by name |
-| `lib/game/city/lighting.ts`, `sun.ts` | Day/night: NOAA-style solar position for Phnom Penh, presets, sun/moon, sky, fog, exposure, night factor |
+| `lib/game/city/materials.ts` | Shared materials; facade shader (6-bay atlas: four window styles and two shopfronts per building and bay, grime and streaks, glossy glass, night glow); light-pool and terrain materials |
+| `lib/game/city/surfaces.ts` | World-space surface detail in one shader program (pavers and kerbs, asphalt grain and gutters, grass, unmapped ground patches, water ripples) switched by a per-material uniform and off in Performance mode; per-tree foliage tint |
+| `lib/game/city/props.ts` | Meshopt-aware GLB loader; flattens Blender props to one geometry per material (keeping baked vertex colours); instancing; shared materials by name; foliage tint on leaf materials |
+| `lib/game/city/lighting.ts`, `sun.ts` | Day/night: NOAA-style solar position for Phnom Penh, presets, sun/moon, sky, fog, exposure, night factor; sky environment map (PMREM, regenerated only when the sun moves noticeably; Quality only) |
 | `lib/game/city/terrain.ts` | Mound terrain (mirror of `app/geography/terrain.py`) |
 | `lib/game/city/collision.ts` | Grid of wall segments per chunk, plus small circular posts (trunks, poles); circle movement with sub-steps and sliding; escape-from-footprint; height-aware camera ray |
 | `lib/game/city/ChunkManager.ts` | Worker pool (2), nearest-first streaming, one assembly per frame, unload with hysteresis, detail LOD, a change flag for the shadow cache, street and landmark lookup |

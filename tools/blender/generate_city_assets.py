@@ -27,9 +27,11 @@ random.seed(855)
 
 COLORS = {
     "Bark": ("#5a4636", 0.0, 0.95),
-    "Leaves": ("#4c7a37", 0.0, 0.85),
+    "Leaves": ("#5c8a3e", 0.0, 0.85),
     "LeavesLight": ("#6d9a45", 0.0, 0.85),
     "PalmLeaves": ("#5f8a3a", 0.0, 0.8),
+    "PalmDead": ("#8b7650", 0.0, 0.9),
+    "Shrub": ("#4f7d39", 0.0, 0.85),
     "Metal": ("#3d4448", 0.6, 0.45),
     "Lamp": ("#fff3d0", 0.0, 0.3),
     "Signal": ("#141618", 0.2, 0.5),
@@ -115,56 +117,187 @@ def export(path: str) -> None:
     target = os.path.join(OUT, path + ".glb")
     os.makedirs(os.path.dirname(target), exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=target + ".tmp.glb", export_format="GLB", export_yup=True,
-                              export_apply=True)
+                              export_apply=True, export_vertex_color="ACTIVE")
     os.replace(target + ".tmp.glb", target)
     print("Wrote", target)
     reset()
 
 
 # ── Trees ───────────────────────────────────────────────────────────────────────────────
+# Crowns are built from many small leaf clumps (one mesh, one `Leaves` material per tree) with
+#  * normals bent outward from the crown centre, so the canopy shades as one soft volume
+#    instead of faceted balls (the usual trick for stylised-realistic foliage), and
+#  * a vertex-colour ambient-occlusion term (darker underneath and inside, lighter on top)
+#    plus a small per-clump tint, exported as COLOR_0 and multiplied by the material colour.
+
+
+def _fib_dome(n, top_bias=0.65):
+    """n unit directions spread over a sphere, denser toward the top (golden-angle spiral)."""
+    out = []
+    for i in range(n):
+        y = 1 - (i + 0.5) / n * (1 + top_bias)  # 1 → -top_bias: skip most of the underside
+        r = math.sqrt(max(0.0, 1 - y * y))
+        a = i * 2.399963
+        out.append((math.cos(a) * r, math.sin(a) * r, y))
+    return out
+
+
+def leaf_crown(name, clumps, center, radii, material="Leaves", seed=1, tint=0.08, flat=0.75):
+    """One mesh of icosphere clumps [(x, y, z, radius)] with bent normals and AO colours."""
+    import bmesh
+    from mathutils import Vector
+
+    rng = random.Random(seed)
+    bm = bmesh.new()
+    clump_of = []
+    for k, (x, y, z, r) in enumerate(clumps):
+        made = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=r)
+        shade = 1 + rng.uniform(-tint, tint)
+        for v in made["verts"]:
+            v.co.x += rng.uniform(-0.2, 0.2) * r
+            v.co.y += rng.uniform(-0.2, 0.2) * r
+            v.co.z = v.co.z * flat + rng.uniform(-0.12, 0.12) * r
+            v.co += Vector((x, y, z))
+            clump_of.append(shade)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(o)
+    finish(o, material, smooth=True)
+    c = Vector(center)
+    lo, hi = c.z - radii[2], c.z + radii[2]
+    normals, colors = [], []
+    for i, v in enumerate(me.vertices):
+        d = v.co - c
+        d = Vector((d.x / radii[0], d.y / radii[1], d.z / radii[2]))
+        outward = min(1.0, d.length)
+        n = (v.normal * 0.3 + d.normalized() * 0.7).normalized()
+        normals.append(n)
+        height = max(0.0, min(1.0, (v.co.z - lo) / (hi - lo)))
+        ao = (0.45 + 0.55 * height) * (0.72 + 0.28 * outward) * clump_of[i] * 0.92
+        # glTF stores colours as normalised integers: values above 1 would wrap to near 0.
+        colors.append((min(ao, 1.0), min(ao * 1.01, 1.0), min(ao * 0.97, 1.0), 1.0))
+    me.normals_split_custom_set_from_vertices(normals)
+    attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
+    for i, col in enumerate(colors):
+        attr.data[i].color = col
+    me.color_attributes.active_color = attr
+    return o
+
+
+def trunk(name, r_base, r_top, height, lean=(0.0, 0.0), verts=10, flare=1.6):
+    """Tapered trunk with a root flare, leaning slightly."""
+    cylinder(f"{name}Flare", r_base * flare, r_base, 0.55, (0, 0, 0.275), "Bark", verts=verts)
+    o = cylinder(name, r_base, r_top, height, (lean[0] / 2, lean[1] / 2, height / 2 + 0.5), "Bark",
+                 verts=verts, rot=(math.atan2(-lean[1], height), math.atan2(lean[0], height), 0))
+    return o
+
+
+def limb(name, start, end, r0, r1, verts=6):
+    from mathutils import Vector
+
+    a, b = Vector(start), Vector(end)
+    d = b - a
+    mid = (a + b) / 2
+    rot = d.to_track_quat("Z", "Y").to_euler()
+    return cylinder(name, r0, r1, d.length, tuple(mid), "Bark", verts=verts, rot=tuple(rot))
+
+
 def rain_tree() -> None:
-    """Broad umbrella crown (rain tree / tamarind), the common shade tree of the riverside."""
-    cylinder("Trunk", 0.32, 0.2, 3.6, (0, 0, 1.8), "Bark", verts=7)
-    for i, (dx, dy) in enumerate(((1.0, 0.2), (-0.8, 0.6), (0.1, -1.0))):
-        length = 2.2
-        angle = math.atan2(dy, dx)
-        cylinder(f"Branch{i}", 0.16, 0.08, length, (dx * 0.7, dy * 0.7, 4.0), "Bark", verts=6,
-                 rot=(0, math.radians(55), angle))
-    for i in range(7):
-        a = i / 7 * math.tau
-        r = 2.4 if i else 0
-        blob(f"Crown{i}", 2.0, (math.cos(a) * r, math.sin(a) * r, 5.2 + random.uniform(-0.3, 0.5)),
-             (1.25, 1.25, 0.7), "Leaves" if i % 3 else "LeavesLight", jitter=0.25)
-    blob("CrownTop", 2.2, (0, 0, 6.1), (1.3, 1.3, 0.75), "LeavesLight", jitter=0.25)
+    """Rain tree / tamarind: the broad umbrella shade tree of Phnom Penh's boulevards."""
+    trunk("Trunk", 0.34, 0.24, 3.0, lean=(0.25, 0.1))
+    top = (0.25, 0.1, 3.45)
+    ends = []
+    for i in range(4):
+        a = i / 4 * math.tau + 0.4
+        end = (math.cos(a) * 2.3, math.sin(a) * 2.3, 5.3 + random.uniform(-0.3, 0.3))
+        limb(f"Limb{i}", top, end, 0.17, 0.08)
+        ends.append(end)
+    center, radii = (0.2, 0.1, 6.0), (4.6, 4.6, 1.9)
+    clumps = []
+    for k, (x, y, z) in enumerate(_fib_dome(20)):
+        r = random.uniform(1.15, 1.55)
+        clumps.append((center[0] + x * (radii[0] - 1.0), center[1] + y * (radii[1] - 1.0), center[2] + z * (radii[2] - 0.4), r))
+    for (x, y, z) in ends[:2]:  # fill the middle so the crown is not hollow from below
+        clumps.append((x * 0.4, y * 0.4, 5.6, 1.7))
+    leaf_crown("Crown", clumps, center, radii, seed=11)
     export("city/tree-rain")
+
+
+def slender_tree() -> None:
+    """A smaller ornamental street tree with an oval crown."""
+    trunk("Trunk", 0.15, 0.1, 2.4, lean=(0.08, -0.05), verts=8, flare=1.4)
+    for i in range(2):
+        a = i * math.pi + 0.7
+        limb(f"Limb{i}", (0.04, -0.02, 2.7), (math.cos(a) * 0.7, math.sin(a) * 0.7, 3.7), 0.08, 0.04)
+    center, radii = (0.05, 0.0, 4.3), (1.8, 1.8, 1.7)
+    clumps = [(center[0] + x * 1.1, center[1] + y * 1.1, center[2] + z * 1.15, random.uniform(0.75, 0.95))
+              for (x, y, z) in _fib_dome(9, top_bias=0.9)]
+    clumps.append((center[0], center[1], center[2], 1.15))
+    leaf_crown("Crown", clumps, center, radii, seed=23, flat=0.85)
+    export("city/tree-slender")
+
+
+def fan_leaf(bm, base, direction, tilt, radius=1.25, ribs=9, rng=random):
+    """A pleated palm fan: ribs alternating up and down, curving down at the tips."""
+    from mathutils import Matrix, Vector
+
+    rot = Matrix.Rotation(direction, 3, "Z") @ Matrix.Rotation(-tilt, 3, "Y")
+    centre = bm.verts.new(base)
+    rows = []
+    for ring, rr in ((0, 0.55), (1, 1.0)):
+        row = []
+        for j in range(ribs):
+            a = math.radians(-80 + 160 * j / (ribs - 1))
+            pleat = 0.07 * (1 if j % 2 else -1) * rr
+            droop = -0.25 * rr * rr
+            p = Vector((math.cos(a) * radius * rr, math.sin(a) * radius * rr, pleat + droop))
+            row.append(bm.verts.new(Vector(base) + rot @ p))
+        rows.append(row)
+    faces = []
+    for j in range(ribs - 1):
+        faces.append(bm.faces.new((centre, rows[0][j], rows[0][j + 1])))
+        faces.append(bm.faces.new((rows[0][j], rows[1][j], rows[1][j + 1], rows[0][j + 1])))
+    return faces
 
 
 def sugar_palm() -> None:
     """Sugar palm (Borassus flabellifer), Cambodia's national tree: tall trunk, round fan crown."""
+    import bmesh
+    from mathutils import Vector
+
     for k in range(6):
-        cylinder(f"TrunkRing{k}", 0.27 - k * 0.012, 0.26 - k * 0.012, 1.9,
-                 (0, 0, 0.95 + k * 1.9), "Bark", verts=8)
-    blob("CrownCore", 0.7, (0, 0, 11.6), (1, 1, 1), "Bark")
-    for i in range(14):
-        a = i / 14 * math.tau
-        tilt = math.radians(random.uniform(-20, 35))
-        # A fan leaf: a thin, wide disc pushed out from the crown.
-        bpy.ops.mesh.primitive_cylinder_add(vertices=10, radius=1.25, depth=0.06,
-                                            location=(math.cos(a) * 1.5, math.sin(a) * 1.5,
-                                                      11.6 + math.sin(tilt) * 1.2))
-        leaf = bpy.context.object
-        leaf.name = f"Fan{i}"
-        leaf.rotation_euler = (math.pi / 2 - tilt, 0, a + math.pi / 2)
-        finish(leaf, "PalmLeaves")
+        cylinder(f"TrunkRing{k}", 0.29 - k * 0.013, 0.27 - k * 0.013, 1.9, (0, 0, 0.95 + k * 1.9), "Bark", verts=9)
+    cylinder("Flare", 0.42, 0.29, 0.5, (0, 0, 0.25), "Bark", verts=9)
+    blob("CrownCore", 0.75, (0, 0, 11.6), (1, 1, 1.1), "Bark", jitter=0.08)
+    rng = random.Random(41)
+    for kind, count, tilt_range, material in (("live", 18, (-25, 40), "PalmLeaves"), ("dead", 6, (55, 80), "PalmDead")):
+        bm = bmesh.new()
+        for i in range(count):
+            a = i / count * math.tau + rng.uniform(-0.15, 0.15)
+            tilt = math.radians(rng.uniform(*tilt_range))
+            stalk = 0.9 + rng.uniform(-0.1, 0.2)
+            base = Vector((math.cos(a) * stalk * math.cos(tilt), math.sin(a) * stalk * math.cos(tilt),
+                           11.6 + math.sin(tilt) * stalk * (1 if kind == "live" else -1)))
+            fan_leaf(bm, base, a, tilt if kind == "live" else -tilt, radius=1.2 + rng.uniform(-0.1, 0.15), rng=rng)
+        me = bpy.data.meshes.new(f"Fans_{kind}")
+        bm.to_mesh(me)
+        bm.free()
+        o = bpy.data.objects.new(f"Fans_{kind}", me)
+        bpy.context.collection.objects.link(o)
+        finish(o, material, smooth=True)
+        for i in range(count):  # leaf stalks
+            a = i / count * math.tau
+            limb(f"Stalk_{kind}{i}", (0, 0, 11.6), (math.cos(a) * 0.95, math.sin(a) * 0.95, 11.6 + (0.3 if kind == "live" else -0.5)), 0.035, 0.025, verts=4)
     export("city/tree-palm")
 
 
-def slender_tree() -> None:
-    """A smaller ornamental street tree with a two-tier crown."""
-    cylinder("Trunk", 0.16, 0.1, 3.2, (0, 0, 1.6), "Bark", verts=6)
-    blob("CrownLow", 1.4, (0, 0, 3.6), (1.1, 1.1, 0.75), "Leaves", jitter=0.18)
-    blob("CrownHigh", 1.0, (0.2, 0.1, 4.6), (1, 1, 0.8), "LeavesLight", jitter=0.15)
-    export("city/tree-slender")
+def bush() -> None:
+    """A low shrub (parks, planters, temple grounds): a few leaf clumps, no trunk."""
+    clumps = [(0, 0, 0.55, 0.62), (0.45, 0.1, 0.42, 0.45), (-0.4, 0.2, 0.4, 0.48), (0.05, -0.42, 0.4, 0.44), (0.1, 0.35, 0.7, 0.4)]
+    leaf_crown("Shrub", clumps, (0, 0, 0.5), (0.9, 0.9, 0.55), material="Shrub", seed=5, flat=0.8)
+    export("city/bush")
 
 
 # ── Street furniture ────────────────────────────────────────────────────────────────────
@@ -255,6 +388,6 @@ def stupa() -> None:
 
 
 reset()
-for build in (rain_tree, sugar_palm, slender_tree, lamp_post, traffic_signal, sign_post,
+for build in (rain_tree, sugar_palm, slender_tree, bush, lamp_post, traffic_signal, sign_post,
               phsar_thmei_dome, stupa):
     build()

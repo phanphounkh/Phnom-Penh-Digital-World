@@ -18,7 +18,7 @@ import { FLAT, type Terrain } from './terrain';
 export type MeshKind =
 	| 'walls' | 'roofs' | 'khmerRoof' | 'sidewalk' | 'asphalt' | 'asphaltMinor' | 'paving'
 	| 'marking' | 'area';
-export type PropKind = 'tree-rain' | 'tree-palm' | 'tree-slender' | 'lamp' | 'traffic-signal' | 'sign-post';
+export type PropKind = 'tree-rain' | 'tree-palm' | 'tree-slender' | 'bush' | 'lamp' | 'traffic-signal' | 'sign-post';
 
 export interface MeshData {
 	kind: MeshKind;
@@ -29,6 +29,8 @@ export interface MeshData {
 	color?: Float32Array;
 	/** walls only: (shopfront 0|1, per-building seed 0..1) per vertex, for the facade shader */
 	facade?: Float32Array;
+	/** ribbons only: their width (m), with `uv` = (across, along) in metres (surface detail) */
+	band?: Float32Array;
 }
 
 export interface LabelSpec { title: string; subtitle: string | null; x: number; y: number; z: number }
@@ -82,7 +84,8 @@ function toMeshData(kind: MeshKind, geometry: THREE.BufferGeometry, area?: strin
 		normal: attr('normal')!,
 		uv: attr('uv'),
 		color: attr('color'),
-		facade: attr('facade')
+		facade: attr('facade'),
+		band: attr('band')
 	};
 }
 
@@ -149,15 +152,23 @@ export function ribbon(pts: XZ[], w: number, y: number, terrain: Terrain = FLAT)
 	}
 	const h = (x: number, z: number) => (hilly ? terrain.height(x, z) : 0) + y;
 	const positions: number[] = [];
+	// uv = (across, along) in metres: 0 … w from the left edge, distance along the centreline.
+	const uvs: number[] = [];
+	let along = 0;
 	for (let i = 0; i < pts.length - 1; i++) {
 		const [l0x, l0z] = left[i], [r0x, r0z] = right[i], [l1x, l1z] = left[i + 1], [r1x, r1z] = right[i + 1];
+		const next = along + Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
 		positions.push(
 			l0x, h(l0x, l0z), l0z, r0x, h(r0x, r0z), r0z, l1x, h(l1x, l1z), l1z,
 			r0x, h(r0x, r0z), r0z, r1x, h(r1x, r1z), r1z, l1x, h(l1x, l1z), l1z
 		);
+		uvs.push(0, along, w, along, 0, next, w, along, w, next, 0, next);
+		along = next;
 	}
 	const g = new THREE.BufferGeometry();
 	g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+	g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+	fill(g, 'band', [w]);
 	fixWinding(g);
 	g.computeVertexNormals();
 	if (!hilly) fill(g, 'normal', [0, 1, 0]);
@@ -166,6 +177,7 @@ export function ribbon(pts: XZ[], w: number, y: number, terrain: Terrain = FLAT)
 
 function fixWinding(g: THREE.BufferGeometry) {
 	const p = g.getAttribute('position') as THREE.BufferAttribute;
+	const uv = g.getAttribute('uv') as THREE.BufferAttribute | undefined;
 	for (let i = 0; i < p.count; i += 3) {
 		const ax = p.getX(i), az = p.getZ(i), bx = p.getX(i + 1), bz = p.getZ(i + 1), cx = p.getX(i + 2), cz = p.getZ(i + 2);
 		// Up-facing triangles: y of (B - A) × (C - A) must be positive.
@@ -173,6 +185,11 @@ function fixWinding(g: THREE.BufferGeometry) {
 			const tx = p.getX(i + 1), ty = p.getY(i + 1), tz = p.getZ(i + 1);
 			p.setXYZ(i + 1, p.getX(i + 2), p.getY(i + 2), p.getZ(i + 2));
 			p.setXYZ(i + 2, tx, ty, tz);
+			if (uv) {
+				const u = uv.getX(i + 1), v = uv.getY(i + 1);
+				uv.setXY(i + 1, uv.getX(i + 2), uv.getY(i + 2));
+				uv.setXY(i + 2, u, v);
+			}
 		}
 	}
 }
@@ -201,6 +218,44 @@ function dashes(road: ChunkRoad, y: number, terrain: Terrain): THREE.BufferGeome
 	return out;
 }
 
+/**
+ * Zebra crossings at OSM `highway=crossing` nodes: white bars across the carriageway of the
+ * nearest vehicle road (within 4 m), parallel to its direction.
+ */
+export function crossings(chunk: ChunkPayload, y: number, terrain: Terrain): THREE.BufferGeometry[] {
+	const out: THREE.BufferGeometry[] = [];
+	for (const f of chunk.features) {
+		if (f.k !== 'crossing') continue;
+		const [px, pz] = f.p;
+		let best: { d: number; dx: number; dz: number; w: number; cx: number; cz: number } | null = null;
+		for (const road of chunk.roads) {
+			if (!VEHICLE.has(road.cls)) continue;
+			for (let i = 0; i < road.pts.length - 1; i++) {
+				const [ax, az] = road.pts[i], [bx, bz] = road.pts[i + 1];
+				const lx = bx - ax, lz = bz - az, len2 = lx * lx + lz * lz;
+				if (len2 < 1e-6) continue;
+				const t = Math.max(0, Math.min(1, ((px - ax) * lx + (pz - az) * lz) / len2));
+				const cx = ax + lx * t, cz = az + lz * t;
+				const d = Math.hypot(px - cx, pz - cz);
+				if (d < 4 && (!best || d < best.d)) {
+					const l = Math.sqrt(len2);
+					best = { d, dx: lx / l, dz: lz / l, w: road.w, cx, cz };
+				}
+			}
+		}
+		if (!best) continue;
+		const { dx, dz, w, cx, cz } = best;
+		const nx = -dz, nz = dx; // across the road
+		const half = w / 2 - 0.4;
+		for (let o = -half + 0.25; o <= half - 0.25 + 1e-6; o += 1.0) {
+			const mx = cx + nx * o, mz = cz + nz * o;
+			const bar = ribbon([[mx - dx * 1.5, mz - dz * 1.5], [mx + dx * 1.5, mz + dz * 1.5]], 0.5, y, terrain);
+			if (bar) out.push(bar);
+		}
+	}
+	return out;
+}
+
 function buildRoads(chunk: ChunkPayload, terrain: Terrain): MeshData[] {
 	const major: THREE.BufferGeometry[] = [], minor: THREE.BufferGeometry[] = [];
 	const paths: THREE.BufferGeometry[] = [], walks: THREE.BufferGeometry[] = [], marks: THREE.BufferGeometry[] = [];
@@ -220,6 +275,7 @@ function buildRoads(chunk: ChunkPayload, terrain: Terrain): MeshData[] {
 			if (path) paths.push(path);
 		}
 	}
+	marks.push(...crossings(chunk, 0.04 + 6 * 0.006 + 0.012, terrain));
 	return [
 		merged('sidewalk', walks), merged('asphaltMinor', minor), merged('asphalt', major),
 		merged('paving', paths), merged('marking', marks)
@@ -375,6 +431,31 @@ export function parkTrees(chunk: ChunkPayload): XZ[] {
 	return out;
 }
 
+/** Deterministic shrub clusters in parks and temple grounds (decoration, ~1 per 50 m²),
+ * kept clear of tree trunks. */
+export function parkShrubs(chunk: ChunkPayload, trees: XZ[]): XZ[] {
+	const out: XZ[] = [];
+	const step = 7;
+	for (const area of chunk.areas) {
+		if (area.kind !== 'park' && area.kind !== 'temple_grounds' && area.kind !== 'grass') continue;
+		for (const rings of area.polys) {
+			const outer = rings[0];
+			let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+			for (const [x, z] of outer) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); }
+			for (let gx = Math.floor(minX / step) * step; gx < maxX; gx += step)
+				for (let gz = Math.floor(minZ / step) * step; gz < maxZ; gz += step) {
+					const seed = Math.round(gx) * 3571 + Math.round(gz) * 7351 + 17;
+					if (hash(seed + 2) < 0.45) continue;
+					const x = gx + hash(seed) * step, z = gz + hash(seed + 1) * step;
+					if (!pointInRing(x, z, outer) || rings.slice(1).some((h) => pointInRing(x, z, h))) continue;
+					if (trees.some(([tx, tz]) => Math.abs(tx - x) < 1.6 && Math.abs(tz - z) < 1.6)) continue;
+					out.push([x, z]);
+				}
+		}
+	}
+	return out;
+}
+
 /** Choose a tree species deterministically (decoration: OSM does not record species here). */
 export function treeKind(x: number, z: number): PropKind {
 	const r = hash(Math.round(x * 10) * 31 + Math.round(z * 10) * 17);
@@ -401,6 +482,8 @@ function placements(chunk: ChunkPayload, terrain: Terrain) {
 		put(kind, x, z, hash(Math.round(x * 13 + z)) * Math.PI * 2, scale);
 		posts.push(x, z, 0.45);
 	}
+	// Shrubs: decoration only, no collision (you walk through them like through long grass).
+	for (const [x, z] of parkShrubs(chunk, trees)) put('bush', x, z, hash(Math.round(x * 5 + z * 3)) * Math.PI * 2, 0.8 + hash(Math.round(z * 11 + x)) * 0.6);
 	for (const f of chunk.features) {
 		const [x, z] = f.p;
 		if (f.k === 'lamp_gen' || f.k === 'street_lamp') {
@@ -458,7 +541,7 @@ export function buildChunkData(chunk: ChunkPayload, terrain: Terrain = FLAT, pre
 export function transferables(build: ChunkBuild): ArrayBuffer[] {
 	const out = new Set<ArrayBuffer>();
 	for (const m of build.meshes)
-		for (const a of [m.position, m.normal, m.uv, m.color, m.facade]) if (a) out.add(a.buffer as ArrayBuffer);
+		for (const a of [m.position, m.normal, m.uv, m.color, m.facade, m.band]) if (a) out.add(a.buffer as ArrayBuffer);
 	for (const i of build.instances) out.add(i.matrices.buffer as ArrayBuffer);
 	out.add(build.pools.buffer as ArrayBuffer);
 	out.add(build.posts.buffer as ArrayBuffer);

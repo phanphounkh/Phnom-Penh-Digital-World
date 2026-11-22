@@ -21,6 +21,7 @@ function geometryOf(data: MeshData): THREE.BufferGeometry {
 	if (data.uv) g.setAttribute('uv', new THREE.BufferAttribute(data.uv, 2));
 	if (data.color) g.setAttribute('color', new THREE.BufferAttribute(data.color, 3));
 	if (data.facade) g.setAttribute('facade', new THREE.BufferAttribute(data.facade, 2));
+	if (data.band) g.setAttribute('band', new THREE.BufferAttribute(data.band, 1));
 	g.computeBoundingSphere();
 	return g;
 }
