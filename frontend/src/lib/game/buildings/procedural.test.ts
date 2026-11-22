@@ -8,7 +8,7 @@ import { Buildings, type BuildingHost, type BuildingInteraction } from './Buildi
 import { SWING_TIME } from './door';
 import { planInterior, type Plan, type XZ } from './footprint';
 import { findPath } from './nav';
-import { PARTITION, buildInterior, planRooms } from './procedural';
+import { PARTITION, SURFACE, buildInterior, planRooms } from './procedural';
 import { Frame, roomAt, type BuildingSpec } from './spec';
 
 const R = 0.35;
@@ -75,7 +75,9 @@ describe('generated interiors', () => {
 			const x = pos.getX(i),
 				y = pos.getY(i),
 				z = pos.getZ(i);
-			const isWall = Math.abs(col.getX(i) - wall.r) + Math.abs(col.getY(i) - wall.g) + Math.abs(col.getZ(i) - wall.b) < 1e-4;
+			// The wall's paint, give or take the plaster's mottling (the same tint in every channel).
+			const k = col.getX(i) / wall.r;
+			const isWall = k > 0.96 && k < 1.04 && Math.abs(col.getY(i) / wall.g - k) < 1e-4 && Math.abs(col.getZ(i) / wall.b - k) < 1e-4;
 			const onWall = isWall && (Math.abs(Math.abs(x) - plan.width / 2) < 1e-4 || Math.abs(z + plan.depth / 2) < 1e-4);
 			if (y === 0 && nor.getY(i) < 0.5 && Math.abs(nor.getY(i)) > 0.9) wrong++;
 			if (onWall && Math.abs(nor.getY(i)) < 0.1) {
@@ -664,4 +666,55 @@ describe('climbing in through a window, in the game', () => {
 		b.update(1 / 30, x, z, Math.atan2(0, 1) + frame.yaw);
 		expect(jump!()).toBe(false);
 	});
+});
+
+describe('materials', () => {
+	/** How many vertices of each surface kind an interior has (and which tile sizes). */
+	const surfaces = (type: 'house' | 'shop' | 'cafe', w: number, d: number, h = 7) => {
+		const { root } = buildInterior(type, planFor(w, d, h), 9, { value: 0 });
+		const counts = new Map<number, number>();
+		root.traverse((o) => {
+			const g = (o as THREE.Mesh).geometry;
+			const a = g?.getAttribute('surface');
+			if (!a) return;
+			for (let i = 0; i < a.count; i++) counts.set(a.getX(i), (counts.get(a.getX(i)) ?? 0) + 1);
+		});
+		return counts;
+	};
+	it('every surface says what it is made of: wood, fabric, metal, ceramic, tiles, glass…', () => {
+		const home = surfaces('house', 13, 10);
+		for (const kind of ['paint', 'wood', 'fabric', 'metal', 'ceramic', 'glass'] as const) expect(home.get(SURFACE[kind]) ?? 0, kind).toBeGreaterThan(0);
+		expect([...home.keys()].some((k) => k >= 10)).toBe(true); // tiled floors and walls
+		const shop = surfaces('shop', 8, 12);
+		expect(shop.get(SURFACE.card) ?? 0).toBeGreaterThan(0); // the goods on the shelves
+		expect(shop.get(SURFACE.concrete) ?? 0).toBeGreaterThan(0); // the storeroom floor
+		const cafe = surfaces('cafe', 9, 11);
+		expect(cafe.get(SURFACE.wood) ?? 0).toBeGreaterThan(cafe.get(SURFACE.paint) ?? 0); // a plank floor
+	});
+
+	it('tiles are laid on a fixed grid, so the grout lines fall between them', () => {
+		const { root } = buildInterior('house', planFor(13, 10), 9, { value: 0 });
+		const g = (root.getObjectByName('Interior') as THREE.Mesh).geometry;
+		const pos = g.getAttribute('position'),
+			nor = g.getAttribute('normal'),
+			surf = g.getAttribute('surface');
+		let checked = 0;
+		for (let i = 0; i < pos.count; i++) {
+			const kind = surf.getX(i);
+			if (kind < 10 || Math.abs(pos.getY(i)) > 1e-6 || nor.getY(i) < 0.9) continue;
+			const size = (kind - 10) / 10;
+			// A floor tile corner: on the grid, or where the floor ends (a wall, a doorway).
+			for (const v of [pos.getX(i), pos.getZ(i)]) {
+				const off = Math.abs(v / size - Math.round(v / size));
+				const edge = spec0.some((e) => Math.abs(e - v) < 1e-6);
+				expect(off < 1e-6 || edge).toBe(true);
+			}
+			checked++;
+		}
+		expect(checked).toBeGreaterThan(100);
+	});
+	const spec0: number[] = (() => {
+		const { spec } = buildInterior('house', planFor(13, 10), 9, { value: 0 });
+		return spec.rooms.flatMap((r) => r.rects[0]);
+	})();
 });

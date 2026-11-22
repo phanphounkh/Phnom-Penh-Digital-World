@@ -52,11 +52,38 @@ const hex = (h: string): V3 => {
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const overlaps = (a: Rect, b: Rect) => a[0] < b[1] && b[0] < a[1] && a[2] < b[3] && b[2] < a[3];
 
-/** Accumulates coloured triangles; `at` places a piece (x, z, yaw) in the building. */
+/** What a surface is made of: the interior shader draws its detail (grain, weave, grout…). */
+export const SURFACE = { paint: 0, wood: 1, fabric: 2, metal: 3, ceramic: 4, concrete: 5, card: 6, glass: 7 } as const;
+export type Surface = keyof typeof SURFACE;
+/** Square tiles of `size` metres (grout lines): surface ids 10 and up. */
+const tiles = (size: number) => 10 + Math.round(size * 10);
+
+/** A smooth ±2.5% variation over a metre or so: hand-applied paint on plaster. */
+function mottle([x, y, z]: V3): number {
+	const h = (a: number, b: number) => {
+		const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
+		return v - Math.floor(v);
+	};
+	const n = (a: number, b: number) => {
+		const i = Math.floor(a),
+			j = Math.floor(b),
+			fa = a - i,
+			fb = b - j;
+		const u = fa * fa * (3 - 2 * fa),
+			v = fb * fb * (3 - 2 * fb);
+		return (h(i, j) * (1 - u) + h(i + 1, j) * u) * (1 - v) + (h(i, j + 1) * (1 - u) + h(i + 1, j + 1) * u) * v;
+	};
+	return 0.975 + 0.05 * n(x * 1.3 + z * 0.7, y * 1.6 + z * 1.1);
+}
+
+/** Accumulates coloured triangles; `at` places a piece (x, z, yaw) in the building, `as` sets
+ * what the next ones are made of. */
 class MeshBuilder {
 	pos: number[] = [];
 	nor: number[] = [];
 	col: number[] = [];
+	surf: number[] = [];
+	private surface = 0;
 	glow: (Glow | undefined)[] = [];
 	kind: ('floor' | 'wall' | 'piece' | 'ceiling')[] = [];
 	idx: number[] = [];
@@ -64,6 +91,12 @@ class MeshBuilder {
 
 	at(x: number, z: number, yaw = 0): this {
 		this.t = { x, z, c: Math.cos(yaw), s: Math.sin(yaw) };
+		return this;
+	}
+
+	/** The material of what is drawn next (a surface kind, or a tile id from `tiles`). */
+	as(surface: Surface | number): this {
+		this.surface = typeof surface === 'number' ? surface : SURFACE[surface];
 		return this;
 	}
 
@@ -90,9 +123,13 @@ class MeshBuilder {
 				const u = i / nu,
 					v = j / nv;
 				const q: V3 = [0, 1, 2].map((k) => p0[k] * (1 - u) * (1 - v) + p1[k] * u * (1 - v) + p2[k] * u * v + p3[k] * (1 - u) * v) as V3;
-				this.pos.push(...this.p(q));
+				const at = this.p(q);
+				this.pos.push(...at);
 				this.nor.push(...n);
-				this.col.push(...color);
+				// Painted plaster: soft mottling, baked in (nothing to compute when drawing).
+				const k = this.surface === 0 && kind !== 'piece' ? mottle(at) : 1;
+				this.col.push(color[0] * k, color[1] * k, color[2] * k);
+				this.surf.push(this.surface);
 				this.glow.push(glow);
 				this.kind.push(kind);
 			}
@@ -154,6 +191,7 @@ class MeshBuilder {
 		g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
 		g.setAttribute('light', new THREE.BufferAttribute(light, 2));
 		g.setAttribute('channel', new THREE.BufferAttribute(channel, 1));
+		g.setAttribute('surface', new THREE.Float32BufferAttribute(this.surf, 1));
 		g.setIndex(this.idx);
 		g.computeBoundingSphere();
 		return g;
@@ -390,27 +428,67 @@ function lightUp(b: MeshBuilder, ctx: LightContext): { light: Float32Array; chan
 	return { light, channel };
 }
 
-/** The interior material: vertex colour × (daylight × day factor + lamplight × its room's
- * lights level). */
+/** Surface detail by material, in the fragment shader from the surface's position (no
+ * textures, no UVs), kept cheap for integrated GPUs: wood grain, fabric weave, brushed metal and
+ * tile grout from a few sines and a fract; concrete with one noise lookup; glazed ceramic from
+ * the normal. (Painted plaster's mottling is baked into the vertex colours instead, free to draw.)
+ * It fades out where it would shimmer, and with the detail switch (off in Performance mode). */
+const SURFACE_GLSL = /* glsl */ `
+float ppwH(vec2 p) { p = fract(p * vec2(0.1031, 0.1030)); p += dot(p, p.yx + 33.33); return fract((p.x + p.y) * p.x); }
+float ppwN(vec2 p) {
+	vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f);
+	return mix(mix(ppwH(i), ppwH(i + vec2(1.0, 0.0)), u.x), mix(ppwH(i + vec2(0.0, 1.0)), ppwH(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float ppwSurface(float kind, vec2 uv, vec3 n, float px) {
+	// px: metres per pixel here; detail smaller than ~2 pixels fades out.
+	if (kind > 9.5) {
+		// Tiles of (kind - 10) / 10 m: grout lines.
+		float size = (kind - 10.0) * 0.1;
+		vec2 g = abs(fract(uv / size) - 0.5) * 2.0;
+		float grout = smoothstep(1.0 - 0.014 / size, 1.0, max(g.x, g.y)) * (1.0 - smoothstep(0.004, 0.012, px));
+		return 1.0 - 0.32 * grout;
+	}
+	if (kind < 0.5) return 1.0;
+	if (kind < 1.5) {
+		// Wood: wavering grain along the surface's first axis.
+		float grain = 0.5 + 0.5 * sin(uv.y * 230.0 + 5.0 * sin(uv.x * 2.1 + uv.y * 7.0) + 2.0 * sin(uv.x * 9.0));
+		return 0.9 + 0.16 * mix(0.5, grain * grain, 1.0 - smoothstep(0.006, 0.02, px));
+	}
+	if (kind < 2.5) return 1.0 + 0.05 * sin(uv.x * 760.0) * sin(uv.y * 760.0) * (1.0 - smoothstep(0.003, 0.008, px));
+	if (kind < 3.5) return 0.97 + 0.05 * sin(uv.y * 520.0 + 3.0 * sin(uv.x * 4.0)) * (1.0 - smoothstep(0.004, 0.01, px));
+	if (kind < 4.5) return 1.0 + 0.06 * max(n.y, 0.0);
+	if (kind < 5.5) return 0.92 + 0.12 * ppwN(uv * 6.0);
+	if (kind < 6.5) return 0.95 + 0.05 * sin(uv.y * 160.0 + 2.0 * sin(uv.x * 7.0));
+	return 1.0;
+}
+`;
+
+/** The interior material: vertex colour × surface detail × (daylight × day factor + lamplight ×
+ * its room's lights level). */
 function interiorMaterial(uniforms: Record<string, { value: unknown }>): THREE.MeshBasicMaterial {
 	const m = new THREE.MeshBasicMaterial({ vertexColors: true });
 	m.onBeforeCompile = (shader) => {
 		Object.assign(shader.uniforms, uniforms);
 		shader.vertexShader = shader.vertexShader
-			.replace('#include <common>', '#include <common>\nattribute vec2 light;\nattribute float channel;\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;')
-			.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPpwLight = light;\nvPpwChannel = channel;');
+			.replace('#include <common>', '#include <common>\nattribute vec2 light;\nattribute float channel;\nattribute float surface;\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;\nflat varying float vPpwSurface;\nvarying vec3 vPpwPos;\nvarying vec3 vPpwNor;')
+			.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPpwLight = light;\nvPpwChannel = channel;\nvPpwSurface = surface;\nvPpwPos = position;\nvPpwNor = normal;');
 		shader.fragmentShader = shader.fragmentShader
-			.replace('#include <common>', '#include <common>\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;\nuniform vec4 uLampsOn;\nuniform vec4 uLampsOn2;\nuniform float uNight;\nuniform float uGain;\nuniform vec3 uLampColor;')
+			.replace('#include <common>', '#include <common>\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;\nflat varying float vPpwSurface;\nvarying vec3 vPpwPos;\nvarying vec3 vPpwNor;\nuniform vec4 uLampsOn;\nuniform vec4 uLampsOn2;\nuniform float uNight;\nuniform float uGain;\nuniform float uDetail;\nuniform vec3 uLampColor;\n' + SURFACE_GLSL)
 			.replace(
 				'#include <color_fragment>',
 				`#include <color_fragment>
+if (uDetail > 0.5 && vPpwSurface > 0.5) {
+	vec3 ppwN3 = normalize(vPpwNor);
+	vec2 ppwUv = abs(ppwN3.y) > 0.6 ? vPpwPos.xz : abs(ppwN3.x) > 0.6 ? vPpwPos.zy : vPpwPos.xy;
+	diffuseColor.rgb *= ppwSurface(vPpwSurface, ppwUv, ppwN3, length(fwidth(ppwUv)));
+}
 vec4 ppwSet = vPpwChannel < 3.5 ? uLampsOn : uLampsOn2;
 float ppwCh = mod(vPpwChannel, 4.0);
 float ppwOn = ppwCh < 0.5 ? ppwSet.x : ppwCh < 1.5 ? ppwSet.y : ppwCh < 2.5 ? ppwSet.z : ppwSet.w;
 diffuseColor.rgb *= ( vPpwLight.x * ( 1.0 - 0.9 * uNight ) + vPpwLight.y * ppwOn * uLampColor ) * uGain;`
 			);
 	};
-	m.customProgramCacheKey = () => 'ppw-procedural-interior-rooms';
+	m.customProgramCacheKey = () => 'ppw-procedural-interior-materials';
 	return m;
 }
 
@@ -422,16 +500,16 @@ export interface ProceduralBuilding {
 }
 
 /** Surfaces per kind of room: walls, a wainscot (or skirting, or tiles) and its height, the floor. */
-const STYLE: Record<RoomKind, { wall: string; band: string; bandH: number; floor: [string, string]; pattern: 'planks' | number; ceiling: string }> = {
-	living: { wall: '#f1ead8', band: '#b9c9b5', bandH: 0.9, floor: ['#e9e1cf', '#a8452f'], pattern: 0.3, ceiling: '#fbf8f0' },
-	bedroom: { wall: '#ece2d2', band: '#8a6a4a', bandH: 0.1, floor: ['#a8794e', '#93673f'], pattern: 'planks', ceiling: '#fbf8f0' },
-	kitchen: { wall: '#f2efe6', band: '#cfe0dc', bandH: 1.25, floor: ['#d9d6cf', '#b8b4ab'], pattern: 0.3, ceiling: '#fbf8f0' },
-	bathroom: { wall: '#e8f0f2', band: '#9cc6d6', bandH: 1.5, floor: ['#e9eef0', '#7fb2c8'], pattern: 0.2, ceiling: '#ffffff' },
-	sales: { wall: '#f3f3ee', band: '#c9d7d2', bandH: 0.12, floor: ['#e4e2dc', '#cfcdc6'], pattern: 0.5, ceiling: '#ffffff' },
-	store: { wall: '#e6e4de', band: '#9a978f', bandH: 0.12, floor: ['#b9b6ae', '#b1aea6'], pattern: 1.0, ceiling: '#f4f4f2' },
-	dining: { wall: '#efe2cc', band: '#5b3a28', bandH: 1.0, floor: ['#8a5a38', '#7a4c2e'], pattern: 'planks', ceiling: '#f6efe2' },
-	galley: { wall: '#f2efe6', band: '#e0d6c2', bandH: 1.25, floor: ['#cfc8bb', '#b3ab9c'], pattern: 0.3, ceiling: '#fbf8f0' },
-	family: { wall: '#f0e6d6', band: '#c9b89a', bandH: 0.9, floor: ['#9c6b43', '#8a5c38'], pattern: 'planks', ceiling: '#fbf8f0' }
+const STYLE: Record<RoomKind, { wall: string; band: string; bandH: number; bandOf: Surface | number; floor: [string, string]; pattern: 'planks' | number; floorOf?: Surface; ceiling: string }> = {
+	living: { wall: '#f1ead8', band: '#b9c9b5', bandH: 0.9, bandOf: 'paint', floor: ['#e9e1cf', '#a8452f'], pattern: 0.3, ceiling: '#fbf8f0' },
+	bedroom: { wall: '#ece2d2', band: '#8a6a4a', bandH: 0.1, bandOf: 'wood', floor: ['#a8794e', '#93673f'], pattern: 'planks', ceiling: '#fbf8f0' },
+	kitchen: { wall: '#f2efe6', band: '#cfe0dc', bandH: 1.25, bandOf: tiles(0.15), floor: ['#d9d6cf', '#b8b4ab'], pattern: 0.3, ceiling: '#fbf8f0' },
+	bathroom: { wall: '#e8f0f2', band: '#9cc6d6', bandH: 1.5, bandOf: tiles(0.15), floor: ['#e9eef0', '#7fb2c8'], pattern: 0.2, ceiling: '#ffffff' },
+	sales: { wall: '#f3f3ee', band: '#c9d7d2', bandH: 0.12, bandOf: 'paint', floor: ['#e4e2dc', '#cfcdc6'], pattern: 0.5, ceiling: '#ffffff' },
+	store: { wall: '#e6e4de', band: '#9a978f', bandH: 0.12, bandOf: 'concrete', floor: ['#b9b6ae', '#b1aea6'], pattern: 1.0, floorOf: 'concrete', ceiling: '#f4f4f2' },
+	dining: { wall: '#efe2cc', band: '#5b3a28', bandH: 1.0, bandOf: 'wood', floor: ['#8a5a38', '#7a4c2e'], pattern: 'planks', ceiling: '#f6efe2' },
+	galley: { wall: '#f2efe6', band: '#e0d6c2', bandH: 1.25, bandOf: tiles(0.15), floor: ['#cfc8bb', '#b3ab9c'], pattern: 0.3, ceiling: '#fbf8f0' },
+	family: { wall: '#f0e6d6', band: '#c9b89a', bandH: 0.9, bandOf: 'paint', floor: ['#9c6b43', '#8a5c38'], pattern: 'planks', ceiling: '#fbf8f0' }
 };
 
 const SIGN_NAMES = { cafe: 'Café', shop: 'Mini-mart', house: 'House' } as const;
@@ -534,7 +612,7 @@ interface Flight {
 
 /** Build the interior of a planned building: the ground floor and, in a building tall enough,
  * an upper floor reached by stairs. */
-export function buildInterior(type: InteriorType, plan: Plan, seed: number, night: { value: number }, name?: string | null): ProceduralBuilding {
+export function buildInterior(type: InteriorType, plan: Plan, seed: number, night: { value: number }, name?: string | null, detail: { value: number } = { value: 1 }): ProceduralBuilding {
 	const r = rng(seed);
 	// Uniforms shared by all materials of this building (the lights levels are set by Buildings):
 	// eight light channels (two storeys of up to four rooms).
@@ -542,6 +620,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		uLampsOn: { value: new THREE.Vector4(1, 0, 0, 0) },
 		uLampsOn2: { value: new THREE.Vector4(0, 0, 0, 0) },
 		uNight: night,
+		uDetail: detail,
 		uGain: { value: PROCEDURAL_GAIN },
 		uLampColor: { value: new THREE.Vector3(1.25, 1.0, 0.75) }
 	};
@@ -699,18 +778,20 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	const toB = (m: Mount, lx: number, lz: number): XZ => [m.x + lx * Math.cos(m.yaw) + lz * Math.sin(m.yaw), m.z - lx * Math.sin(m.yaw) + lz * Math.cos(m.yaw)];
 	const lampAt = (room: RoomPlan, x: number, z: number, drop: number, power: number, shade?: string) => {
 		const y = H - drop;
-		b.cylinder(x, z, y, H, 0.006, hex('#222222'), 4, [0.3, 0]);
-		if (shade) b.cylinder(x, z, y - 0.16, y, 0.18, hex(shade), 14, [0.6, 1.4], 0.05);
-		else b.cylinder(x, z, y - 0.12, y, 0.07, hex('#fff4dc'), 8, [0.6, 1.6]);
+		b.as('paint').cylinder(x, z, y, H, 0.006, hex('#222222'), 4, [0.3, 0]);
+		if (shade) b.as('fabric').cylinder(x, z, y - 0.16, y, 0.18, hex(shade), 14, [0.6, 1.4], 0.05);
+		else b.as('glass').cylinder(x, z, y - 0.12, y, 0.07, hex('#fff4dc'), 8, [0.6, 1.6]);
+		b.as('paint');
 		ctx.lamps.push({ x, y: y - 0.15, z, power, channel: room.channel });
 	};
 	const tube = (room: RoomPlan, x: number, z: number) => {
-		b.box(x - 0.6, x + 0.6, H - 0.05, H - 0.01, z - 0.05, z + 0.05, hex('#ffffff'), [0.6, 1.6]);
+		b.as('glass').box(x - 0.6, x + 0.6, H - 0.05, H - 0.01, z - 0.05, z + 0.05, hex('#ffffff'), [0.6, 1.6]);
+		b.as('paint');
 		ctx.lamps.push({ x, y: H - 0.2, z, power: 0.6, channel: room.channel });
 	};
 	/** A toggled part (steam, a flame, running water): its own small mesh, hidden while off. */
 	const toggled = (node: string, draw: (mb: MeshBuilder) => void) => {
-		const mb = new MeshBuilder();
+		const mb = new MeshBuilder().as('glass');
 		draw(mb);
 		const mesh = lit(mb);
 		mesh.name = node;
@@ -751,11 +832,13 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			[1, '#d6ebf7', 1.55] // sky
 		];
 		let lo = y0;
+		b.as('glass');
 		for (const [t, color, glow] of bands) {
 			const hi = y0 + (y1 - y0) * t;
 			b.quad([a[0], lo, a[1]], [c[0], lo, c[1]], [c[0], hi, c[1]], [a[0], hi, a[1]], hex(color), 'piece', [glow, 0]);
 			lo = hi;
 		}
+		b.as('paint');
 	};
 	const pane = (x0: number, x1: number, y0: number, y1: number) => {
 		if (x1 - x0 < 0.8) return;
@@ -771,6 +854,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			// Floor (around a stairwell).
 			const floor = (fx0: number, fx1: number, fz0: number, fz1: number, c: V3) => b.quad([fx0, 0, fz1], [fx1, 0, fz1], [fx1, 0, fz0], [fx0, 0, fz0], c, 'floor');
 			for (const [px0, px1, pz0, pz1] of minus(room.rect, floorHole)) {
+				b.as(st.pattern === 'planks' ? 'wood' : (st.floorOf ?? tiles(st.pattern)));
 				if (st.pattern === 'planks') {
 					for (let z = pz0, row = 0; z < pz1 - 1e-6; z += 0.18, row++) {
 						const zz = Math.min(pz1, z + 0.18);
@@ -780,12 +864,15 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 						}
 					}
 				} else {
+					// Tiles on a fixed grid (so the shader's grout lines fall between them).
 					const s = st.pattern;
-					for (let x = px0, i = 0; x < px1 - 1e-6; x += s, i++)
-						for (let z = pz0, k = 0; z < pz1 - 1e-6; z += s, k++) floor(x, Math.min(px1, x + s), z, Math.min(pz1, z + s), hex((i + k) % 2 ? st.floor[0] : st.floor[1]));
+					for (let i = Math.floor(px0 / s + 1e-6); i * s < px1 - 1e-6; i++)
+						for (let k = Math.floor(pz0 / s + 1e-6); k * s < pz1 - 1e-6; k++)
+							floor(Math.max(px0, i * s), Math.min(px1, (i + 1) * s), Math.max(pz0, k * s), Math.min(pz1, (k + 1) * s), hex((((i + k) % 2) + 2) % 2 ? st.floor[0] : st.floor[1]));
 				}
 			}
 			// Walls, facing into the room; the back and front walls with their doorways.
+			b.as('paint');
 			const nv = div(H);
 			for (const [side, z, facing] of [['back', z0, 1], ['front', z1, -1]] as const) {
 				const open = openings(room, side);
@@ -793,7 +880,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 					facing > 0
 						? b.quad([a, y0, z], [c, y0, z], [c, y1, z], [a, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)))
 						: b.quad([c, y0, z], [a, y0, z], [a, y1, z], [c, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)));
-				const band = (a: number, c: number, y1: number) => b.box(a, c, 0, y1, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
+				const band = (a: number, c: number, y1: number) => {
+					b.as(st.bandOf).box(a, c, 0, y1, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
+					b.as('paint');
+				};
 				for (const [a, c] of spans(x0, x1, open)) {
 					quad(a, c, 0, H);
 					band(a, c, st.bandH);
@@ -809,8 +899,9 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			}
 			b.quad([x0, 0, z1], [x0, 0, z0], [x0, H, z0], [x0, H, z1], wall, 'wall', null, div(z1 - z0), nv);
 			b.quad([x1, 0, z0], [x1, 0, z1], [x1, H, z1], [x1, H, z0], wall, 'wall', null, div(z1 - z0), nv);
-			b.box(x0, x0 + 0.012, 0, st.bandH, z0, z1, hex(st.band));
+			b.as(st.bandOf).box(x0, x0 + 0.012, 0, st.bandH, z0, z1, hex(st.band));
 			b.box(x1 - 0.012, x1, 0, st.bandH, z0, z1, hex(st.band));
+			b.as('paint');
 			// Ceiling (around a stairwell).
 			for (const [cx0, cx1, cz0, cz1] of minus(room.rect, ceilingHole)) b.quad([cx0, H, cz0], [cx1, H, cz0], [cx1, H, cz1], [cx0, H, cz1], hex(st.ceiling), 'ceiling', null, div(cx1 - cx0), div(cz1 - cz0));
 		}
@@ -823,7 +914,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			b.quad([ga, 0, zf], [ga, 0, zb], [ga, h, zb], [ga, h, zf], c, 'wall');
 			b.quad([gb, 0, zb], [gb, 0, zf], [gb, h, zf], [gb, h, zb], c, 'wall');
 			b.quad([ga, h, zb], [gb, h, zb], [gb, h, zf], [ga, h, zf], c, 'wall');
-			b.quad([ga, 0.002, zf], [gb, 0.002, zf], [gb, 0.002, zb], [ga, 0.002, zb], hex('#8a7a66'), 'floor');
+			b.as('wood').quad([ga, 0.002, zf], [gb, 0.002, zf], [gb, 0.002, zb], [ga, 0.002, zb], hex('#8a7a66'), 'floor');
+			b.as('paint');
 			const frame = hex('#e9e2d4');
 			for (const [fa, fb] of [[zf, zf + 0.015], [zb - 0.015, zb]]) {
 				b.box(ga - 0.06, ga, 0, h + 0.06, fa, fb, frame);
@@ -852,8 +944,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		};
 		for (let k = 0; k < steps; k++) {
 			const [a0, a1, c0, c1] = tread(k);
-			b.box(a0, a1, 0, (k + 1) * rise, c0, c1, hex(k % 2 ? '#c9bba3' : '#d3c6ae'));
-			b.box(a0, a1, (k + 1) * rise, (k + 1) * rise + 0.02, c0, c1, hex('#8a6a4a'));
+			b.as('paint').box(a0, a1, 0, (k + 1) * rise, c0, c1, hex(k % 2 ? '#c9bba3' : '#d3c6ae'));
+			b.as('wood').box(a0, a1, (k + 1) * rise, (k + 1) * rise + 0.02, c0, c1, hex('#8a6a4a'));
 		}
 		// The open side (away from the wall it runs along): balusters and a sloping rail.
 		const [rx0, rx1, rz0, rz1] = entrance.rect;
@@ -871,12 +963,14 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			b.box(px - 0.02, px + 0.02, y, y + 0.9, pz - 0.02, pz + 0.02, hex('#5a3824'));
 		}
 		b.beam(point(0, rise + 0.9), point(steps - 1, steps * rise + 0.9), 0.06, 0.05, hex('#6e4a2c'));
+		b.as('paint');
 	}
 	/** Upstairs: a railing round the stairwell, open where the stairs arrive. */
 	function railing(f: Flight) {
 		const [x0, x1, z0, z1] = f.rect;
 		const [rx0, rx1, rz0, rz1] = entrance.rect;
 		const wood = hex('#6e4a2c');
+		b.as('wood');
 		const rail = (a: XZ, c: XZ) => {
 			const [ax, az] = a,
 				[cx, cz] = c;
@@ -900,18 +994,19 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const end = f.dir > 0 ? z0 : z1;
 			rail([x0, end], [x1, end]);
 		}
+		b.as('paint');
 	}
 
 	// ── Furniture ──────────────────────────────────────────────────────────────────────────
 	/** A chair; its stand-up spot is beside it: towards `out` (building frame) if given, else on
 	 * the side towards the middle of its room. */
 	function chair(x: number, z: number, yaw: number, id: string, out?: XZ) {
-		b.at(x, z, yaw);
+		b.at(x, z, yaw).as('wood');
 		const wood = hex('#4a2f20');
 		b.box(-0.21, 0.21, 0.42, 0.46, -0.21, 0.21, wood);
 		b.box(-0.21, 0.21, 0.46, 0.92, -0.23, -0.19, wood);
 		for (const lx of [-0.17, 0.17]) for (const lz of [-0.19, 0.17]) b.box(lx - 0.02, lx + 0.02, 0, 0.42, lz - 0.02, lz + 0.02, wood);
-		b.at(0, 0, 0);
+		b.at(0, 0, 0).as('paint');
 		const c = Math.cos(yaw),
 			s = Math.sin(yaw);
 		const [rx0, rx1, rz0, rz1] = current.rect;
@@ -926,10 +1021,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// The table, its chairs and the spots beside them to sit down from.
 		const reach: Rect = four ? [cx - 1.3, cx + 1.3, cz - hz - 0.75, cz + hz + 0.75] : [cx - hx - 0.1, cx + hx + 0.1, cz - hz - 0.75, cz + hz + 0.75];
 		if (!free(room, reach)) return false;
-		b.at(cx, cz);
+		b.at(cx, cz).as('wood');
 		b.box(-hx, hx, 0.72, 0.76, -hz, hz, hex('#9a6a3e'));
 		for (const lx of [-hx + 0.07, hx - 0.07]) for (const lz of [-hz + 0.07, hz - 0.07]) b.box(lx - 0.03, lx + 0.03, 0, 0.72, lz - 0.03, lz + 0.03, hex('#9a6a3e'));
-		b.at(0, 0, 0);
+		b.at(0, 0, 0).as('paint');
 		block(cx - hx, cx + hx, cz - hz - 0.02, cz + hz + 0.02);
 		const ids: string[] = [];
 		const spots = four ? [[-0.35, -1], [0.35, -1], [-0.35, 1], [0.35, 1]] : [[0, -1], [0, 1]];
@@ -943,7 +1038,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	}
 	function plant(room: RoomPlan, x: number, z: number) {
 		if (!free(room, [x - 0.24, x + 0.24, z - 0.24, z + 0.24])) return;
-		b.cylinder(x, z, 0, 0.42, 0.2, hex('#a5583a'), 10, null, 0.16);
+		b.as('ceramic').cylinder(x, z, 0, 0.42, 0.2, hex('#a5583a'), 10, null, 0.16);
+		b.as('paint');
 		for (let k = 0; k < 8; k++) {
 			const a = k * 2.4,
 				rr = 0.08 + 0.03 * k;
@@ -955,10 +1051,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	}
 	/** Something on a wall (a picture, a mirror): the item stands 0.6 m out in front of it. */
 	function onWall(m: Mount, y0: number, y1: number, half: number, frame: string, face: string, glow: Glow, item: Omit<ItemSpec, 'x' | 'z' | 'y'>) {
-		b.at(m.x, m.z, m.yaw);
+		b.at(m.x, m.z, m.yaw).as(item.id === 'mirror' ? 'metal' : 'wood');
 		b.box(-half, half, y0, y1, 0, 0.03, hex(frame));
-		b.box(-half + 0.06, half - 0.06, y0 + 0.06, y1 - 0.06, 0.03, 0.035, hex(face), glow);
-		b.at(0, 0, 0);
+		b.as(item.id === 'mirror' ? 'glass' : 'paint').box(-half + 0.06, half - 0.06, y0 + 0.06, y1 - 0.06, 0.03, 0.035, hex(face), glow);
+		b.at(0, 0, 0).as('paint');
 		const [ix, iz] = toB(m, 0, 0.6);
 		items.push({ ...item, x: ix, z: iz, y: (y0 + y1) / 2 });
 	}
@@ -972,9 +1068,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	}
 	/** A big glazed water jar (every Khmer kitchen and bathroom has one). */
 	function waterJar(room: RoomPlan, x: number, z: number) {
-		b.cylinder(x, z, 0, 0.55, 0.3, hex('#5a3b26'), 12, null, 0.24);
+		b.as('ceramic').cylinder(x, z, 0, 0.55, 0.3, hex('#5a3b26'), 12, null, 0.24);
 		b.cylinder(x, z, 0.55, 0.62, 0.2, hex('#4a2f1f'), 12);
-		b.cylinder(x, z, 0.61, 0.62, 0.18, hex('#6f9fb5'), 12, [0.5, 0.4]);
+		b.as('glass').cylinder(x, z, 0.61, 0.62, 0.18, hex('#6f9fb5'), 12, [0.5, 0.4]);
+		b.as('paint');
 		block(x - 0.31, x + 0.31, z - 0.31, z + 0.31);
 		const [ix, iz] = towardsMiddle(room, x, z, 0.7);
 		items.push({ id: room.kind === 'bathroom' ? 'jar' : 'kitchen-jar', label: 'Water Jar', title: 'Water jar', text: 'A big glazed jar from Kampong Chhnang, full of rainwater, with a plastic dipper floating on top.', x: ix, z: iz, y: 0.6 });
@@ -987,11 +1084,11 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const prefer = clamp((z1 - 1.6 - z0) / (z1 - z0), 0.2, 0.8);
 		const sofa = mount(room, sofaSide, 1.9, 0.84, prefer);
 		if (sofa) {
-			b.at(sofa.x, sofa.z, sofa.yaw);
+			b.at(sofa.x, sofa.z, sofa.yaw).as('fabric');
 			b.box(-0.95, 0.95, 0.1, 0.44, 0.03, 0.87, hex('#5b6f8a'));
 			b.box(-0.95, 0.95, 0.44, 0.82, 0.03, 0.25, hex('#5b6f8a'));
 			b.box(-0.9, 0.9, 0.44, 0.5, 0.25, 0.85, hex('#d8b26a'));
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(sofa.rect);
 			for (const [k, lx] of [[0, -0.42], [1, 0.42]] as const) {
 				const [sx, sz] = toB(sofa, lx, 0.45);
@@ -1001,15 +1098,16 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const [ta, tb] = [toB(sofa, -0.35, 1.75), toB(sofa, 0.35, 2.45)];
 			const table: Rect = [Math.min(ta[0], tb[0]), Math.max(ta[0], tb[0]), Math.min(ta[1], tb[1]), Math.max(ta[1], tb[1])];
 			if (free(room, table, 0.3)) {
-				b.box(table[0], table[1], 0.4, 0.44, table[2], table[3], hex('#9a6a3e'));
+				b.as('wood').box(table[0], table[1], 0.4, 0.44, table[2], table[3], hex('#9a6a3e'));
+				b.as('paint');
 				ctx.blockers.push(table);
 			}
 			const tv = mount(room, sofaSide === 'left' ? 'right' : 'left', 1.4, 0.44, prefer);
 			if (tv) {
-				b.at(tv.x, tv.z, tv.yaw);
+				b.at(tv.x, tv.z, tv.yaw).as('wood');
 				b.box(-0.7, 0.7, 0, 0.5, 0, 0.44, hex('#9a6a3e'));
-				b.box(-0.45, 0.45, 0.6, 1.1, 0.02, 0.06, hex('#1d1e20'));
-				b.at(0, 0, 0);
+				b.as('glass').box(-0.45, 0.45, 0.6, 1.1, 0.02, 0.06, hex('#1d1e20'));
+				b.at(0, 0, 0).as('paint');
 				ctx.blockers.push(tv.rect);
 			}
 			lampAt(room, (sofa.x + (tv?.x ?? sofa.x)) / 2 || 0, sofa.z, 0.3, 1.0);
@@ -1017,8 +1115,9 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// The family altar high on the wall by the entrance.
 		const altarX = sofaSide === 'left' ? x0 : x1;
 		const sx = sofaSide === 'left' ? 1 : -1;
-		b.box(Math.min(altarX, altarX + sx * 0.3), Math.max(altarX, altarX + sx * 0.3), 1.9, 1.94, z1 - 0.9, z1 - 0.3, hex('#a8322c'));
-		b.cylinder(altarX + sx * 0.16, z1 - 0.6, 1.94, 2.12, 0.05, hex('#d4a63f'), 8);
+		b.as('wood').box(Math.min(altarX, altarX + sx * 0.3), Math.max(altarX, altarX + sx * 0.3), 1.9, 1.94, z1 - 0.9, z1 - 0.3, hex('#a8322c'));
+		b.as('metal').cylinder(altarX + sx * 0.16, z1 - 0.6, 1.94, 2.12, 0.05, hex('#d4a63f'), 8);
+		b.as('paint');
 		items.push({ id: 'altar', label: 'Family Altar', title: 'Family altar', text: 'A small Buddha, jasmine and incense, high on the wall as in every Khmer home.', x: altarX + sx * 0.5, z: z1 - 0.6, y: 2.0 });
 		if (dining) {
 			const tz = z1 - z0 > 7 ? (z0 + z1) / 2 : z0 + 1.4;
@@ -1036,12 +1135,12 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		if (bed) {
 			const half = (bed.rect[1] - bed.rect[0] > 1.5 && bed.yaw === 0) || (bed.rect[3] - bed.rect[2] > 1.5 && bed.yaw !== 0) ? 0.8 : 0.5;
 			const len = bed.yaw === 0 ? bed.rect[3] - bed.rect[2] : bed.rect[1] - bed.rect[0];
-			b.at(bed.x, bed.z, bed.yaw);
+			b.at(bed.x, bed.z, bed.yaw).as('fabric');
 			b.box(-half, half, 0.12, 0.52, 0.05, len, hex('#efe9df'));
 			b.box(-half - 0.02, half + 0.02, 0.5, 0.55, 0.75, len, hex('#b0262c'));
 			b.box(-half + 0.08, half - 0.08, 0.52, 0.64, 0.12, 0.5, hex('#f7f3ea'));
-			b.box(-half - 0.05, half + 0.05, 0.12, 1.1, 0, 0.07, hex('#5a3824'));
-			b.at(0, 0, 0);
+			b.as('wood').box(-half - 0.05, half + 0.05, 0.12, 1.1, 0, 0.07, hex('#5a3824'));
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(bed.rect);
 			const [sx, sz] = toB(bed, 0, len - 0.35);
 			const stand = toB(bed, 0, len + 0.45);
@@ -1053,10 +1152,11 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 				return [Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz)];
 			})();
 			if (free(room, side)) {
-				b.box(side[0], side[1], 0, 0.5, side[2], side[3], hex('#7a5232'));
+				b.as('wood').box(side[0], side[1], 0, 0.5, side[2], side[3], hex('#7a5232'));
 				const [lx, lz] = [(side[0] + side[1]) / 2, (side[2] + side[3]) / 2];
-				b.cylinder(lx, lz, 0.5, 0.75, 0.03, hex('#d9c7a0'), 6);
-				b.cylinder(lx, lz, 0.75, 0.95, 0.13, hex('#f3e2bd'), 10, [0.6, 1.3], 0.08);
+				b.as('ceramic').cylinder(lx, lz, 0.5, 0.75, 0.03, hex('#d9c7a0'), 6);
+				b.as('fabric').cylinder(lx, lz, 0.75, 0.95, 0.13, hex('#f3e2bd'), 10, [0.6, 1.3], 0.08);
+				b.as('paint');
 				ctx.blockers.push(side);
 				ctx.lamps.push({ x: lx, y: 0.85, z: lz, power: 0.5, channel: room.channel });
 			}
@@ -1066,10 +1166,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		if (photo) onWall(photo, 1.35, 1.85, 0.4, '#3a2a1c', '#c9a46a', [0.8, 0.4], { id: 'photo', label: 'Photo', title: 'Wedding photo', text: 'The couple in gold silk, the day of their wedding in Kandal.' });
 		const wardrobe = mount(room, doorAt > (x0 + x1) / 2 ? 'right' : 'left', 1.2, 0.6, 0.3) ?? mount(room, 'back', 1.2, 0.6, 0.5);
 		if (wardrobe) {
-			b.at(wardrobe.x, wardrobe.z, wardrobe.yaw);
+			b.at(wardrobe.x, wardrobe.z, wardrobe.yaw).as('wood');
 			b.box(-0.6, 0.6, 0, 2.0, 0, 0.6, hex('#9a6a3e'));
 			b.box(-0.01, 0.01, 0.2, 1.9, 0.6, 0.61, hex('#6e4a2c'));
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(wardrobe.rect);
 		}
 		lampAt(room, (x0 + x1) / 2, (z0 + z1) / 2, 0.3, 0.8);
@@ -1082,17 +1182,18 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const counter = mount(room, 'back', len(x1 - x0), 0.6, 0.5) ?? mount(room, 'left', len(z1 - z0), 0.6, 0.5) ?? mount(room, 'right', len(z1 - z0), 0.6, 0.5) ?? mount(room, 'back', 1.4, 0.6, 0.5);
 		if (counter) {
 			const L = counter.yaw === 0 || counter.yaw === Math.PI ? counter.rect[1] - counter.rect[0] : counter.rect[3] - counter.rect[2];
-			b.at(counter.x, counter.z, counter.yaw);
+			b.at(counter.x, counter.z, counter.yaw).as('wood');
 			b.box(-L / 2, L / 2, 0, 0.88, 0, 0.6, hex('#c9b79a'));
-			b.box(-L / 2 - 0.02, L / 2 + 0.02, 0.88, 0.92, 0, 0.62, hex('#e9e4da'));
+			b.as('ceramic').box(-L / 2 - 0.02, L / 2 + 0.02, 0.88, 0.92, 0, 0.62, hex('#e9e4da'));
 			// Gas stove on the left, sink on the right.
-			b.box(-L / 2 + 0.15, -L / 2 + 0.75, 0.92, 1.0, 0.1, 0.5, hex('#2a2c2e'));
+			b.as('metal').box(-L / 2 + 0.15, -L / 2 + 0.75, 0.92, 1.0, 0.1, 0.5, hex('#2a2c2e'));
 			b.box(L / 2 - 0.75, L / 2 - 0.2, 0.86, 0.93, 0.12, 0.48, hex('#9aa3a8'));
 			b.box(L / 2 - 0.5, L / 2 - 0.46, 0.92, 1.2, 0.06, 0.1, hex('#b8bcbf'));
 			// A shelf above with jars and pots.
-			b.box(-L / 2, L / 2, 1.6, 1.63, 0, 0.3, hex('#7a5232'));
+			b.as('wood').box(-L / 2, L / 2, 1.6, 1.63, 0, 0.3, hex('#7a5232'));
+			b.as('ceramic');
 			for (let k = 0; k < Math.floor(L / 0.22); k++) b.cylinder(-L / 2 + 0.12 + k * 0.22, 0.15, 1.63, 1.75 + (k % 3) * 0.04, 0.06, hex(['#d9a441', '#7a2e1d', '#e7e1d3', '#4e7a3a'][k % 4]), 8);
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(counter.rect);
 			const [fx, fz] = toB(counter, -L / 2 + 0.45, 0.3);
 			toggled('Flame_stove', (mb) => {
@@ -1104,10 +1205,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// The fridge in a corner, the water jar in another.
 		const fridge = mount(room, 'back', 0.7, 0.7, 0.95) ?? mount(room, 'left', 0.7, 0.7, 0.1) ?? mount(room, 'right', 0.7, 0.7, 0.1);
 		if (fridge) {
-			b.at(fridge.x, fridge.z, fridge.yaw);
+			b.at(fridge.x, fridge.z, fridge.yaw).as('metal');
 			b.box(-0.35, 0.35, 0, 1.8, 0, 0.7, hex('#e8eeef'));
 			b.box(0.25, 0.28, 0.9, 1.4, 0.7, 0.74, hex('#b8bcbf'));
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(fridge.rect);
 		}
 		const jar = mount(room, 'front', 0.7, 0.7, 0.9) ?? mount(room, 'front', 0.7, 0.7, 0.1);
@@ -1125,19 +1226,19 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const white = hex('#f4f4f2');
 		const toilet = mount(room, 'back', 0.5, 0.75, 0.75) ?? mount(room, 'left', 0.5, 0.75, 0.3);
 		if (toilet) {
-			b.at(toilet.x, toilet.z, toilet.yaw);
+			b.at(toilet.x, toilet.z, toilet.yaw).as('ceramic');
 			b.box(-0.2, 0.2, 0, 0.4, 0.2, 0.68, white);
 			b.box(-0.22, 0.22, 0.4, 0.44, 0.18, 0.72, hex('#e8e8e4'));
 			b.box(-0.24, 0.24, 0.3, 0.85, 0, 0.2, white);
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(toilet.rect);
 		}
 		const basin = mount(room, 'left', 0.6, 0.45, 0.4) ?? mount(room, 'right', 0.6, 0.45, 0.4);
 		if (basin) {
-			b.at(basin.x, basin.z, basin.yaw);
+			b.at(basin.x, basin.z, basin.yaw).as('ceramic');
 			b.box(-0.05, 0.05, 0, 0.75, 0.12, 0.22, white);
 			b.box(-0.3, 0.3, 0.75, 0.85, 0, 0.45, white);
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(basin.rect);
 			onWall(basin, 1.2, 1.75, 0.28, '#b8bcbf', '#cfe4ec', [1.1, 0.6], { id: 'mirror', label: 'Mirror', title: 'Mirror', text: 'You look ready for a day in Phnom Penh.' });
 		}
@@ -1147,7 +1248,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const [jx, jz] = [(jarSpot.rect[0] + jarSpot.rect[1]) / 2, (jarSpot.rect[2] + jarSpot.rect[3]) / 2];
 			waterJar(room, jx, jz);
 			const [hx, hz] = toB(jarSpot, 0, 0.08);
-			b.cylinder(hx, hz, 1.95, 2.0, 0.07, hex('#b8bcbf'), 8);
+			b.as('metal').cylinder(hx, hz, 1.95, 2.0, 0.07, hex('#b8bcbf'), 8);
+			b.as('paint');
 			const [wx, wz] = toB(jarSpot, 0, 0.35);
 			toggled('Water_shower', (mb) => {
 				for (const [ox, oz] of [[-0.04, 0], [0.04, 0.03], [0, -0.04]]) mb.cylinder(wx + ox, wz + oz, 0.65, 1.95, 0.008, hex('#cfe9f5'), 4, [1.3, 0.4]);
@@ -1167,20 +1269,21 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// (Further in if a window's landing spot is in the way.)
 		const ccz = [z1 - 1.2, z1 - 1.75].find((z) => free(room, [ccx - 0.82, ccx + 0.82, z - 0.32, z + 0.32])) ?? z1 - 1.2;
 		if (free(room, [ccx - 0.82, ccx + 0.82, ccz - 0.32, ccz + 0.32])) {
-			b.box(ccx - 0.8, ccx + 0.8, 0, 0.95, ccz - 0.3, ccz + 0.3, hex('#c45a2d'));
-			b.box(ccx - 0.82, ccx + 0.82, 0.95, 0.99, ccz - 0.32, ccz + 0.32, hex('#efe7d6'));
-			b.box(ccx - 0.15, ccx + 0.15, 0.99, 1.22, ccz - 0.12, ccz + 0.12, hex('#2a2c2e'));
+			b.as('wood').box(ccx - 0.8, ccx + 0.8, 0, 0.95, ccz - 0.3, ccz + 0.3, hex('#c45a2d'));
+			b.as('ceramic').box(ccx - 0.82, ccx + 0.82, 0.95, 0.99, ccz - 0.32, ccz + 0.32, hex('#efe7d6'));
+			b.as('metal').box(ccx - 0.15, ccx + 0.15, 0.99, 1.22, ccz - 0.12, ccz + 0.12, hex('#2a2c2e'));
+			b.as('paint');
 			block(ccx - 0.82, ccx + 0.82, ccz - 0.32, ccz + 0.32);
 			items.push({ id: 'cards', label: 'Phone Cards', title: 'Phone top-up cards', text: 'Scratch cards for every network, and a QR code to pay by KHQR.', x: ccx, z: ccz, y: 1.1 });
 		}
 		// The drinks fridge on the back wall (glowing glass), first: the shelves give way to it.
 		const fridge = mount(room, 'back', 1.12, 0.74, side > 0 ? 0.15 : 0.85) ?? mount(room, 'back', 1.12, 0.74, 0.5);
 		if (fridge) {
-			b.at(fridge.x, fridge.z, fridge.yaw);
+			b.at(fridge.x, fridge.z, fridge.yaw).as('metal');
 			b.box(-0.55, 0.55, 0, 2.0, 0, 0.7, hex('#e8eeef'));
-			b.box(-0.5, 0.5, 0.1, 1.9, 0.7, 0.72, hex('#cfe8f2'), [0.6, 1.6]);
+			b.as('glass').box(-0.5, 0.5, 0.1, 1.9, 0.7, 0.72, hex('#cfe8f2'), [0.6, 1.6]);
 			for (let k = 0; k < 4; k++) for (let j = 0; j < 6; j++) b.cylinder(-0.38 + j * 0.15, 0.6, 0.2 + k * 0.42, 0.44 + k * 0.42, 0.035, hex(['#d23b2f', '#3fa34d', '#f2c230', '#2f7bd2'][k]), 6, [0.5, 1.2]);
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(fridge.rect);
 			const [ix, iz] = toB(fridge, 0, 0.75);
 			items.push({ id: 'fridge', label: 'Drinks Fridge', title: 'Drinks fridge', text: 'Cold Angkor beer, sugarcane juice, coconut water and soy milk.', x: ix, z: iz, y: 1.2 });
@@ -1192,17 +1295,19 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			// Shorten it until it is clear of doorways and other furniture.
 			while (sz1 - sz0 > 1.2 && !free(room, [sx0, sx1, sz0, sz1])) sz0 += 0.2;
 			if (sz1 - sz0 <= 1.2 || !free(room, [sx0, sx1, sz0, sz1])) return false;
-			b.box(sx0, sx1, 0, 1.8, sz0, sz0 + 0.03, hex('#8c9aa3'));
+			b.as('metal').box(sx0, sx1, 0, 1.8, sz0, sz0 + 0.03, hex('#8c9aa3'));
 			b.box(sx0, sx1, 0, 1.8, sz1 - 0.03, sz1, hex('#8c9aa3'));
 			b.box(facing > 0 ? sx0 : sx1 - 0.03, facing > 0 ? sx0 + 0.03 : sx1, 0, 1.8, sz0, sz1, hex('#8c9aa3'));
 			for (const y of [0.1, 0.55, 1.0, 1.45]) {
-				b.box(sx0, sx1, y, y + 0.03, sz0, sz1, hex('#d5dbe0'));
+				b.as('metal').box(sx0, sx1, y, y + 0.03, sz0, sz1, hex('#d5dbe0'));
+				b.as('card');
 				for (let z = sz0 + 0.06; z < sz1 - 0.12; z += 0.16) {
 					const hgt = 0.14 + r() * 0.2;
 					const tone = ['#d23b2f', '#f2c230', '#2f7bd2', '#3fa34d', '#f08a24', '#7c4bc9', '#f4f1ea'][Math.floor(r() * 7)];
 					b.box(sx0 + 0.05, sx1 - 0.05, y + 0.03, y + 0.03 + hgt, z + 0.01, Math.min(sz1 - 0.06, z + 0.12), hex(tone));
 				}
 			}
+			b.as('paint');
 			block(sx0, sx1, sz0, sz1);
 			return true;
 		};
@@ -1225,7 +1330,9 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const spot = mount(room, 'back', 0.74, 0.5, prefer) ?? mount(room, 'left', 0.74, 0.5, 0.5) ?? mount(room, 'right', 0.74, 0.5, 0.5);
 		if (!spot) return;
 		const [rx0, rx1, rz0, rz1] = spot.rect;
+		b.as('fabric');
 		for (let k = 0; k < 3; k++) b.box(rx0 + 0.02, rx1 - 0.02, k * 0.22, k * 0.22 + 0.22, rz0 + 0.02, rz1 - 0.02, hex(k % 2 ? '#e9e1cf' : '#d8ccb0'));
+		b.as('paint');
 		ctx.blockers.push(spot.rect);
 		const [ix, iz] = toB(spot, 0, 0.8);
 		items.push({ id: 'rice', label: 'Rice', title: 'Rice sacks', text: 'Jasmine rice from Battambang, sold by the kilo or by the 25 kg sack.', x: ix, z: iz, y: 0.6 });
@@ -1237,23 +1344,24 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const rack = mount(room, 'back', Math.min(3.0, x1 - x0 - 1.4), 0.5, 0.5);
 		if (rack) {
 			const L = rack.rect[1] - rack.rect[0];
-			b.at(rack.x, rack.z, rack.yaw);
+			b.at(rack.x, rack.z, rack.yaw).as('metal');
 			for (const lx of [-L / 2, L / 2 - 0.04]) b.box(lx, lx + 0.04, 0, 2.0, 0, 0.5, hex('#5d6770'));
 			for (const y of [0.15, 0.85, 1.55]) {
-				b.box(-L / 2, L / 2, y, y + 0.03, 0, 0.5, hex('#8c9aa3'));
+				b.as('metal').box(-L / 2, L / 2, y, y + 0.03, 0, 0.5, hex('#8c9aa3'));
+				b.as('card');
 				for (let x = -L / 2 + 0.08; x < L / 2 - 0.4; x += 0.42) b.box(x, x + 0.38, y + 0.03, y + 0.33 + r() * 0.1, 0.05, 0.45, hex(r() > 0.3 ? '#b88a55' : '#d9c7a0'));
 			}
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(rack.rect);
 		}
 		riceSacks(room, 0.1);
 		const desk = mount(room, 'left', 1.1, 0.6, 0.6) ?? mount(room, 'right', 1.1, 0.6, 0.6);
 		if (desk) {
-			b.at(desk.x, desk.z, desk.yaw);
+			b.at(desk.x, desk.z, desk.yaw).as('wood');
 			b.box(-0.55, 0.55, 0.72, 0.76, 0, 0.6, hex('#7a5232'));
 			for (const lx of [-0.5, 0.5]) b.box(lx - 0.03, lx + 0.03, 0, 0.72, 0.05, 0.55, hex('#5a3824'));
-			b.box(-0.2, 0.15, 0.76, 0.8, 0.2, 0.45, hex('#2f5d8c'));
-			b.at(0, 0, 0);
+			b.as('card').box(-0.2, 0.15, 0.76, 0.8, 0.2, 0.45, hex('#2f5d8c'));
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(desk.rect);
 			const [ix, iz] = toB(desk, 0, 0.9);
 			items.push({ id: 'ledger', label: 'Stock Book', title: 'Stock book', text: 'Water: 40 cases. Rice: 12 sacks. Instant noodles: order more before the weekend.', x: ix, z: iz, y: 0.9 });
@@ -1263,7 +1371,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 				cz = z0 + 0.8 + r() * Math.max(0, z1 - z0 - 1.6);
 			if (free(room, [cx - 0.3, cx + 0.3, cz - 0.25, cz + 0.25], 0.3)) {
 				const hgt = 0.3 + Math.floor(r() * 3) * 0.3;
-				b.box(cx - 0.3, cx + 0.3, 0, hgt, cz - 0.25, cz + 0.25, hex('#b88a55'));
+				b.as('card').box(cx - 0.3, cx + 0.3, 0, hgt, cz - 0.25, cz + 0.25, hex('#b88a55'));
+				b.as('paint');
 				block(cx - 0.3, cx + 0.3, cz - 0.25, cz + 0.25);
 			}
 		}
@@ -1281,19 +1390,21 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const L = counter.rect[1] - counter.rect[0];
 			const cx0 = counter.rect[0];
 			const cz = z0 + 0.95;
-			b.box(cx0, cx0 + L, 0, 1.0, cz - 0.3, cz + 0.3, hex('#6b4530'));
-			b.box(cx0 - 0.03, cx0 + L + 0.03, 1.0, 1.04, cz - 0.33, cz + 0.33, hex('#d9cbb3'));
+			b.as('wood').box(cx0, cx0 + L, 0, 1.0, cz - 0.3, cz + 0.3, hex('#6b4530'));
+			b.as('ceramic').box(cx0 - 0.03, cx0 + L + 0.03, 1.0, 1.04, cz - 0.33, cz + 0.33, hex('#d9cbb3'));
 			ctx.blockers.push([cx0, cx0 + L, cz - 0.33, cz + 0.33]);
 			const mx = cx0 + L - 0.5;
-			b.box(mx - 0.25, mx + 0.25, 1.04, 1.5, cz - 0.2, cz + 0.12, hex('#b8bcbf'));
+			b.as('metal').box(mx - 0.25, mx + 0.25, 1.04, 1.5, cz - 0.2, cz + 0.12, hex('#b8bcbf'));
 			b.box(mx - 0.2, mx + 0.2, 1.3, 1.36, cz + 0.12, cz + 0.2, hex('#2a2c2e'));
+			b.as('paint');
 			toggled('Steam', (mb) => {
 				for (let k = 0; k < 3; k++) mb.cylinder(mx - 0.08 + k * 0.08, cz + 0.16, 1.16 + k * 0.05, 1.3 + k * 0.08, 0.025, hex('#ffffff'), 6, [1.4, 0.5], 0.04);
 			});
 			toggles.push({ id: 'coffee', label: 'Coffee Machine', node: 'Steam', kind: 'flame', x: mx, z: cz + 0.3, y: 1.3 });
 			const px = cx0 + 0.75;
 			if (L > 2.2) {
-				b.box(px - 0.55, px + 0.55, 1.04, 1.38, cz - 0.1, cz + 0.3, hex('#cfe0e6'), [1.0, 0.8]);
+				b.as('glass').box(px - 0.55, px + 0.55, 1.04, 1.38, cz - 0.1, cz + 0.3, hex('#cfe0e6'), [1.0, 0.8]);
+				b.as('paint');
 				for (let k = 0; k < 6; k++) b.cylinder(px - 0.4 + k * 0.16, cz + 0.1, 1.08, 1.14, 0.05, hex(k % 2 ? '#d7a24a' : '#8a4a2a'), 8);
 				items.push({ id: 'pastries', label: 'Pastries', title: 'Pastry case', text: 'Croissants, num kom and banana cake, baked this morning.', x: px, z: cz + 0.3, y: 1.2 });
 			}
@@ -1301,8 +1412,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			b.box(mbx - 0.7, mbx + 0.7, 1.6, 2.4, z0 + 0.01, z0 + 0.04, hex('#2b2b2b'));
 			for (let k = 0; k < 5; k++) b.box(mbx - 0.55, mbx + 0.25 - (k % 2) * 0.2, 2.25 - k * 0.13, 2.28 - k * 0.13, z0 + 0.04, z0 + 0.045, hex('#f1e9d8'), [0.9, 0.3]);
 			items.push({ id: 'menu', label: 'Menu', title: 'Menu', text: 'Iced coffee with condensed milk · lemongrass tea · fresh coconut · num pang · mango sticky rice.', x: mbx, z: z0 + 0.6, y: 2.0 });
-			b.box(cx0, cx0 + L, 1.75, 1.78, z0, z0 + 0.25, hex('#6b4530'));
+			b.as('wood').box(cx0, cx0 + L, 1.75, 1.78, z0, z0 + 0.25, hex('#6b4530'));
+			b.as('ceramic');
 			for (let k = 0; k < Math.floor(L / 0.18); k++) b.cylinder(cx0 + 0.1 + k * 0.18, z0 + 0.12, 1.78, 1.86, 0.04, hex(k % 3 ? '#f4f1ea' : '#3e6fa3'), 8);
+			b.as('paint');
 			lampAt(room, mbx, cz, 0.6, 0.6, '#c9894a');
 		}
 		// Tables for two in a roomy grid, keeping an aisle from the door to the counter and a
@@ -1315,13 +1428,13 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 				if (Math.abs(x - dx) < 1.0 && z > z1 - 2.6) continue;
 				if (!free(room, [x - 0.38, x + 0.38, z - 1.0, z + 1.0])) continue;
 				n++;
-				b.at(x, z);
+				b.at(x, z).as('ceramic');
 				b.box(-0.36, 0.36, 0.72, 0.75, -0.36, 0.36, hex('#d9cbb3'));
-				b.cylinder(0, 0, 0, 0.72, 0.04, hex('#2a2c2e'), 8);
+				b.as('metal').cylinder(0, 0, 0, 0.72, 0.04, hex('#2a2c2e'), 8);
 				b.box(-0.25, 0.25, 0, 0.02, -0.25, 0.25, hex('#2a2c2e'));
-				b.cylinder(0.1, 0.05, 0.75, 0.83, 0.035, hex('#f4f1ea'), 8);
-				b.cylinder(-0.05, -0.1, 0.75, 0.84, 0.03, hex('#6db33f'), 6);
-				b.at(0, 0, 0);
+				b.as('ceramic').cylinder(0.1, 0.05, 0.75, 0.83, 0.035, hex('#f4f1ea'), 8);
+				b.as('glass').cylinder(-0.05, -0.1, 0.75, 0.84, 0.03, hex('#6db33f'), 6);
+				b.at(0, 0, 0).as('paint');
 				block(x - 0.38, x + 0.38, z - 0.38, z + 0.38);
 				chair(x, z - 0.6, 0, `t${n}a`);
 				chair(x, z + 0.6, Math.PI, `t${n}b`);
@@ -1340,12 +1453,12 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const counter = mount(room, 'back', Math.min(3.6, x1 - x0 - 1.2), 0.65, 0.6);
 		if (counter) {
 			const L = counter.rect[1] - counter.rect[0];
-			b.at(counter.x, counter.z, counter.yaw);
+			b.at(counter.x, counter.z, counter.yaw).as('metal');
 			b.box(-L / 2, L / 2, 0, 0.88, 0, 0.65, hex('#b8bcbf'));
 			b.box(-L / 2, L / 2, 0.88, 0.91, 0, 0.66, hex('#d5dbe0'));
 			for (const ox of [-L / 2 + 0.4, -L / 2 + 1.0]) b.cylinder(ox, 0.33, 0.91, 1.05, 0.22, hex('#2a2c2e'), 12, null, 0.26);
 			b.box(L / 2 - 0.7, L / 2 - 0.15, 0.85, 0.92, 0.12, 0.5, hex('#9aa3a8'));
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(counter.rect);
 			toggled('Flame_wok', (mb) => {
 				for (const ox of [-L / 2 + 0.4, -L / 2 + 1.0]) {
@@ -1359,9 +1472,9 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		}
 		const fridge = mount(room, 'right', 0.75, 0.7, 0.3) ?? mount(room, 'left', 0.75, 0.7, 0.3);
 		if (fridge) {
-			b.at(fridge.x, fridge.z, fridge.yaw);
+			b.at(fridge.x, fridge.z, fridge.yaw).as('metal');
 			b.box(-0.37, 0.37, 0, 1.9, 0, 0.7, hex('#d5dbe0'));
-			b.at(0, 0, 0);
+			b.at(0, 0, 0).as('paint');
 			ctx.blockers.push(fridge.rect);
 		}
 		riceSacks(room, 0.95);
@@ -1391,11 +1504,11 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const bz = z0 + 1.05;
 			const bed: Rect = [x0 + 0.38, x0 + 2.02, z0, bz + 1.0];
 			if (free(entrance, bed)) {
-				b.at(x0 + 1.2, bz);
+				b.at(x0 + 1.2, bz).as('fabric');
 				b.box(-0.8, 0.8, 0.12, 0.52, -1.0, 1.0, hex('#efe9df'));
 				b.box(-0.82, 0.82, 0.5, 0.55, -0.3, 1.0, hex('#b0262c'));
-				b.box(-0.85, 0.85, 0.12, 1.1, -1.05, -0.98, hex('#5a3824'));
-				b.at(0, 0, 0);
+				b.as('wood').box(-0.85, 0.85, 0.12, 1.1, -1.05, -0.98, hex('#5a3824'));
+				b.at(0, 0, 0).as('paint');
 				ctx.blockers.push(bed);
 				seats.push({ id: 'bed', label: 'bed', x: x0 + 1.2, z: bz + 0.7, yaw: 0, height: 0.52, stand: [x0 + 1.2, bz + 1.35] });
 			}
@@ -1430,7 +1543,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		interior.position.y = y;
 		root.add(interior);
 		if (switches.size) {
-			const sb = new MeshBuilder();
+			const sb = new MeshBuilder().as('ceramic');
 			for (const [sx, sz] of switches.values()) sb.box(sx - 0.04, sx + 0.04, 1.24, 1.36, sz - 0.03, sz + 0.03, hex('#f4f4f2'), [0.8, 0.6]);
 			extra.add(lit(sb));
 		}
@@ -1448,8 +1561,9 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	b.quad([g0, 0, fz], [g0, 0, d / 2], [g0, DOOR_H, d / 2], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces +X
 	b.quad([g1, 0, d / 2], [g1, 0, fz], [g1, DOOR_H, fz], [g1, DOOR_H, d / 2], entranceWall, 'wall'); // faces -X
 	b.quad([g0, DOOR_H, d / 2], [g1, DOOR_H, d / 2], [g1, DOOR_H, fz], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces down
-	b.quad([g0, 0.002, fz], [g1, 0.002, fz], [g1, 0.002, d / 2], [g0, 0.002, d / 2], hex('#9a948a'), 'floor');
+	b.as('concrete').quad([g0, 0.002, fz], [g1, 0.002, fz], [g1, 0.002, d / 2], [g0, 0.002, d / 2], hex('#9a948a'), 'floor');
 	b.quad([g0, -FLOOR_LIFT, fz], [g1, -FLOOR_LIFT, fz], [g1, 0.002, fz], [g0, 0.002, fz], hex('#8a847a'), 'wall'); // the sill's front, down to the street
+	b.as(type === 'cafe' ? 'wood' : 'paint');
 	b.box(g0 - 0.08, g0, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
 	b.box(g1, g1 + 0.08, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
 	b.box(g0 - 0.08, g1 + 0.08, DOOR_H, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
@@ -1466,11 +1580,13 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		b.quad([gb, y0, d / 2], [gb, y0, fz], [gb, y1, fz], [gb, y1, d / 2], entranceWall, 'wall'); // faces -X
 		b.quad([ga, y1, d / 2], [gb, y1, d / 2], [gb, y1, fz], [ga, y1, fz], entranceWall, 'wall'); // faces down
 		b.quad([ga, y0, fz], [gb, y0, fz], [gb, y0, d / 2], [ga, y0, d / 2], entranceWall, 'wall'); // faces up
-		b.box(ga - 0.06, gb + 0.06, y0 - 0.04, y0, d / 2 - 0.14, d / 2, trim);
+		b.as(type === 'cafe' ? 'wood' : 'paint').box(ga - 0.06, gb + 0.06, y0 - 0.04, y0, d / 2 - 0.14, d / 2, trim);
 		b.box(ga - 0.06, ga, y0, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
 		b.box(gb, gb + 0.06, y0, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
 		b.box(ga - 0.06, gb + 0.06, y1, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
+		b.as('paint');
 	});
+	b.as('paint');
 	const switches0 = furnish();
 	const storeys: { level: number; doors: InnerDoor[]; light: LightContext }[] = [{ level: 0, doors, light: ctx }];
 	storeyMeshes('', FLOOR_LIFT, switches0);
@@ -1531,16 +1647,16 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	const leafW = plan.doorWidth - 0.04;
 	leafNode('Door_front', hingeX, hingeZ, 0, (lb) => {
 		if (type === 'house') {
-			lb.box(0, leafW, 0.01, DOOR_H - 0.01, -0.025, 0.025, hex('#6e3f22'));
-			lb.box(leafW - 0.16, leafW - 0.06, 1.0, 1.03, -0.06, 0.06, hex('#c8a24a'));
+			lb.as('wood').box(0, leafW, 0.01, DOOR_H - 0.01, -0.025, 0.025, hex('#6e3f22'));
+			lb.as('metal').box(leafW - 0.16, leafW - 0.06, 1.0, 1.03, -0.06, 0.06, hex('#c8a24a'));
 		} else {
 			const frame = hex('#9aa3a8');
-			lb.box(0, leafW, 0.01, 0.12, -0.025, 0.025, frame);
+			lb.as('metal').box(0, leafW, 0.01, 0.12, -0.025, 0.025, frame);
 			lb.box(0, leafW, DOOR_H - 0.12, DOOR_H - 0.01, -0.025, 0.025, frame);
 			lb.box(0, 0.06, 0.12, DOOR_H - 0.12, -0.025, 0.025, frame);
 			lb.box(leafW - 0.06, leafW, 0.12, DOOR_H - 0.12, -0.025, 0.025, frame);
-			lb.box(0.06, leafW - 0.06, 0.12, DOOR_H - 0.12, -0.01, 0.01, hex('#bcd3dc'), [0.9, 0.4]);
-			lb.box(leafW - 0.16, leafW - 0.12, 0.8, 1.3, -0.06, 0.06, hex('#d0d4d6'));
+			lb.as('glass').box(0.06, leafW - 0.06, 0.12, DOOR_H - 0.12, -0.01, 0.01, hex('#bcd3dc'), [0.9, 0.4]);
+			lb.as('metal').box(leafW - 0.16, leafW - 0.12, 0.8, 1.3, -0.06, 0.06, hex('#d0d4d6'));
 		}
 	});
 	const doorSpecs: DoorSpec[] = [
@@ -1552,10 +1668,10 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			const hx = dr.x - INNER_DOOR.width / 2 + 0.02;
 			const node = `Inner_${dr.id}`;
 			leafNode(node, hx, dr.z, level, (lb) => {
-				lb.box(0, innerW, 0.01, INNER_DOOR.height - 0.01, -0.02, 0.02, hex('#8a5a36'));
+				lb.as('wood').box(0, innerW, 0.01, INNER_DOOR.height - 0.01, -0.02, 0.02, hex('#8a5a36'));
 				lb.box(0.1, innerW - 0.1, 0.2, 0.95, -0.025, 0.025, hex('#7a4c2c'));
 				lb.box(0.1, innerW - 0.1, 1.1, INNER_DOOR.height - 0.15, -0.025, 0.025, hex('#7a4c2c'));
-				lb.box(innerW - 0.14, innerW - 0.06, 0.98, 1.01, -0.05, 0.05, hex('#c8a24a'));
+				lb.as('metal').box(innerW - 0.14, innerW - 0.06, 0.98, 1.01, -0.05, 0.05, hex('#c8a24a'));
 			});
 			doorSpecs.push({ id: dr.id, label: dr.label, node, hinge: [hx, dr.z], width: innerW, thickness: 0.04, height: INNER_DOOR.height, openYaw: Math.PI / 2, center: [dr.x, dr.z], outward: [0, 1], level });
 		}
@@ -1569,12 +1685,12 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		leafNode(node, hx, hz, 0, (lb) => {
 			const frame = hex(type === 'cafe' ? '#3e2a1e' : type === 'shop' ? '#9aa3a8' : '#6e4a2c');
 			const y = sill + 0.01;
-			lb.box(0, lw, y, y + 0.07, -0.02, 0.02, frame);
+			lb.as(type === 'shop' ? 'metal' : 'wood').box(0, lw, y, y + 0.07, -0.02, 0.02, frame);
 			lb.box(0, lw, y + lh - 0.07, y + lh, -0.02, 0.02, frame);
 			lb.box(0, 0.06, y + 0.07, y + lh - 0.07, -0.02, 0.02, frame);
 			lb.box(lw - 0.06, lw, y + 0.07, y + lh - 0.07, -0.02, 0.02, frame);
-			lb.box(0.06, lw - 0.06, y + 0.07, y + lh - 0.07, -0.008, 0.008, hex('#cfe2ea'), [0.7, 0.3]);
-			lb.box(lw - 0.14, lw - 0.1, y + lh / 2 - 0.08, y + lh / 2 + 0.08, -0.05, 0.05, hex('#c8a24a'));
+			lb.as('glass').box(0.06, lw - 0.06, y + 0.07, y + lh - 0.07, -0.008, 0.008, hex('#cfe2ea'), [0.7, 0.3]);
+			lb.as('metal').box(lw - 0.14, lw - 0.1, y + lh / 2 - 0.08, y + lh / 2 + 0.08, -0.05, 0.05, hex('#c8a24a'));
 		});
 		doorSpecs.push({ id: wn.id, label: 'Window', node, hinge: [hx, hz], width: lw, thickness: 0.04, height: lh, openYaw: Math.PI / 2, center: [wn.x, hz], outward: [0, 1], level: 0, kind: 'window', sill });
 	}

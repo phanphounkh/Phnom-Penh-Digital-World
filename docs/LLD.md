@@ -269,6 +269,19 @@ name if it has one.
   - café kitchen: wok burners, a recipe board.
   Prompts are offered only for what is in the player's room, so nothing is reached through a
   wall.
+- **Materials:** every face says what it is made of (`SURFACE`: paint, wood, fabric, metal,
+  ceramic, concrete, cardboard, glass; or tiles of a given size), and the interior shader draws
+  its detail from the surface's position, with no textures or UVs.
+  - Wood gets grain, fabric a weave, metal brushing, tiles grout lines (laid on a fixed grid so
+    the grout falls between the coloured tiles). Ceramic gets a glaze on top, concrete a speckle,
+    cardboard fibres.
+  - Painted plaster's mottling is baked into the vertex colours at build time, so it costs
+    nothing to draw.
+  - The fragment cost is a few sines and a fract (one noise for concrete), fading out below a
+    couple of pixels. It is switched by `Buildings.interiorDetail`, which follows the city's
+    quality (off in Performance mode).
+  - Measured inside the café at 1920×1080 in GPU Chrome: 49.5 fps with interior detail on,
+    50.2 off.
 - **Lighting:** per vertex and computed at build time: daylight from the street front (back
   rooms get a little), lamp light from the same room, occlusion. Each vertex carries its room's
   light channel, so each room switches its own lamps (house rooms have a switch by their door,

@@ -67,7 +67,7 @@ export interface BuildingHost {
 	readonly collision: CollisionWorld;
 	readonly terrain: Terrain;
 	/** The city's shared night factor uniform (0 day … 1 night), and the facade doorways. */
-	readonly materials?: { readonly night: { value: number }; setDoorSet?(owner: string, doors: Doorway[]): void };
+	readonly materials?: { readonly night: { value: number }; readonly detail?: { value: number }; setDoorSet?(owner: string, doors: Doorway[]): void };
 	readonly seated: boolean;
 	setGround(provider: ((x: number, z: number) => number | null) | null): void;
 	setInterior(view: { ceiling: number; maxDistance: number; lamp: number } | null): void;
@@ -179,6 +179,8 @@ export class Buildings {
 	/** An open window the player faces, near enough to climb through (and where they are,
 	 * locally). */
 	private windowAhead: { building: string; door: string; local: XZ } | null = null;
+	/** Surface detail in generated interiors (1 on, 0 off): follows the city's quality setting. */
+	readonly interiorDetail = { value: 1 };
 	private disposed = false;
 	private walkingToSeat = false;
 	private lastLocal: [number, number] | null = null;
@@ -387,6 +389,7 @@ export class Buildings {
 		if (this.disposed) return;
 		this.sinceScan += dt;
 		this.sinceBuild += dt;
+		this.interiorDetail.value = this.host.materials?.detail?.value ?? 1;
 		if (this.osm && this.sinceScan >= OSM_SCAN_EVERY) {
 			this.sinceScan = 0;
 			this.discover(px, pz);
@@ -681,7 +684,7 @@ export class Buildings {
 		if (p.procedural) {
 			const { type, plan, seed, name } = p.procedural;
 			try {
-				const built = buildInterior(type, plan, seed, this.host.materials?.night ?? { value: 0 }, name);
+				const built = buildInterior(type, plan, seed, this.host.materials?.night ?? { value: 0 }, name, this.interiorDetail);
 				this.attach(p, built.spec, built.root, undefined, built.uniforms);
 			} catch (error) {
 				console.warn(`Building ${p.id} could not be generated:`, error);
