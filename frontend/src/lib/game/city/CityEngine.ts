@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import type { WorldBootstrap } from '$lib/api/types';
+import type { ChunkPayload, WorldBootstrap } from '$lib/api/types';
 import { WorldProjection, compassHeading, yawForHeading } from '$lib/geo/projection';
 import { createCharacter, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { EmoteName } from '$lib/game/net/protocol';
@@ -99,6 +99,9 @@ export interface CityController {
 	/** Floor heights that differ from the terrain (enterable buildings, porches, steps): return a
 	 * height for (x, z), or null for the terrain. null removes the provider. */
 	setGround(provider: ((x: number, z: number) => number | null) | null): void;
+	/** The ceiling over (x, z) for a camera at height y, if that is inside a building's room
+	 * (enterable buildings): the camera never ends up above it, inside the building. */
+	setCeiling(provider: ((x: number, y: number, z: number) => number | null) | null): void;
 	/** Indoor view: the camera stays under `ceiling` (world y) and within `maxDistance` of the
 	 * avatar, and the sun on the avatar softens. null = outdoors. */
 	setInterior(view: { ceiling: number; maxDistance: number; lamp?: number } | null): void;
@@ -109,6 +112,8 @@ export interface CityController {
 	readonly seated: boolean;
 	/** Something static changed near the player (a building appeared): re-render shadows. */
 	invalidateShadows(): void;
+	/** The loaded chunks' data (buildings, roads…), e.g. to find buildings to open. */
+	chunkData(): ChunkPayload[];
 	readonly walking: boolean;
 	/** Runs every frame after the player has moved (dt in seconds). */
 	onFrame(callback: (dt: number) => void): () => void;
@@ -305,6 +310,7 @@ export async function createCity(
 	// Enterable buildings: floor heights, the indoor camera and seats.
 	let groundProvider: ((x: number, z: number) => number | null) | null = null;
 	const groundAt = (x: number, z: number) => groundProvider?.(x, z) ?? terrain.height(x, z);
+	let ceilingProvider: ((x: number, y: number, z: number) => number | null) | null = null;
 	let footY = NaN; // the avatar's floor height, eased over steps
 	let interior: { ceiling: number; maxDistance: number; lamp?: number } | null = null;
 	let indoor = 0; // 0 outdoors … 1 indoors (eased)
@@ -610,6 +616,18 @@ export async function createCity(
 			const k = Math.max(0.18, f - 0.4 / distance);
 			desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
 		}
+		// Ended up over a room (through its doorway, from a player standing in it): under the
+		// ceiling, not up in the building above it, then checked again from there.
+		const roof = ceilingProvider?.(desired.x, desired.y, desired.z) ?? null;
+		if (roof !== null && desired.y > roof - 0.3) {
+			desired.y = Math.max(head, roof - 0.3);
+			const g = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
+			if (g < 1) {
+				const k = Math.max(0.18, g - 0.4 / distance);
+				desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
+			}
+			f = Math.min(f, g);
+		}
 		desired.y = Math.max(desired.y, groundAt(desired.x, desired.z) + 0.8);
 		if (interior) {
 			// Cramped (a wall close behind): rise and look down over the avatar's head instead.
@@ -620,6 +638,8 @@ export async function createCity(
 		camera.position.lerp(desired, 1 - Math.exp(-dt * (f < 1 ? 20 : 8)));
 		camera.position.y = Math.max(camera.position.y, groundAt(camera.position.x, camera.position.z) + 0.6);
 		if (interior) camera.position.y = Math.min(camera.position.y, interior.ceiling - 0.25);
+		const over = ceilingProvider?.(camera.position.x, camera.position.y, camera.position.z) ?? null;
+		if (over !== null) camera.position.y = Math.min(camera.position.y, over - 0.25);
 		cameraTarget.set(px, head, pz);
 		camera.lookAt(cameraTarget);
 		// Small rooms: a short near plane (no wall clipping); outdoors the usual one (depth precision).
@@ -891,6 +911,9 @@ export async function createCity(
 		setGround(provider) {
 			groundProvider = provider;
 		},
+		setCeiling(provider) {
+			ceilingProvider = provider;
+		},
 		setInterior(view) {
 			interior = view;
 		},
@@ -911,6 +934,7 @@ export async function createCity(
 		invalidateShadows() {
 			renderer.shadowMap.needsUpdate = true;
 		},
+		chunkData: () => chunks.payloads(),
 		onFrame(callback) {
 			frameCallbacks.add(callback);
 			return () => frameCallbacks.delete(callback);

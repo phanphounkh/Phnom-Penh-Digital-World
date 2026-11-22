@@ -299,6 +299,13 @@ describe('the house in the world', () => {
 		expect(at(from, [painting.x, painting.z])).toMatchObject({ kind: 'inspect', label: 'Close' });
 		b.interact();
 		expect(card()).toBeNull();
+		// Right after E opens the card (no prompt until the next frame), E closes it again too.
+		at(from, [painting.x, painting.z]);
+		b.interact();
+		expect(card()).not.toBeNull();
+		expect(b.interaction).toBeNull();
+		b.interact();
+		expect(card()).toBeNull();
 	});
 
 	it('"Sit at the Table" picks the nearest chair and sits facing the table; E stands up', () => {

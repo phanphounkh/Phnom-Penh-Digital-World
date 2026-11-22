@@ -188,6 +188,48 @@ kitchen, bedroom, bathroom and hall. Each building is a GLB plus a JSON spec (fo
 - **Cost:** the exterior, door and glass use PBR materials and take the city's sun, sky and
   shadows. Plain-coloured parts are vertex colours on one material per node.
 
+#### Real OpenStreetMap buildings (`footprint.ts`, `osm.ts`, `procedural.ts`)
+
+The same system opens real OSM buildings. Listed ones (`ENTERABLE` in `placements.ts`: a café, a
+mini-mart and a house on Sisowath Quay) get an interior generated to fit their footprint. An auto
+mode (`AUTO_ENTERABLE`, off) would open every eligible building near the player.
+
+- **Eligibility** (`planInterior`). A building is skipped, never given a broken door, when it has:
+  - a courtyard (holes), a raised part, or a landmark model or temple roof;
+  - fewer than 18 m² or more than 450 m², or a height under 2.8 m;
+  - an irregular shape: the room must be a rectangle well inside the walls; small notches are
+    absorbed by shrinking it;
+  - a room narrower than 3.4 m;
+  - no entrance. The door needs a straight stretch of real wall, a road within 25 m in front,
+    and no other building in front (shared walls of terraced shophouses). The straight way from
+    the door to that road must not cross another building (no doors onto walled-in back yards).
+- **The room** is at most 12 × 12 m (a house: 8 × 7.5 m, `fitRoom`), against the entrance; deep
+  shophouses and big villas keep their back rooms closed.
+- **Scan results** (`Buildings.scan`, 300 m around a spawn, E2E dataset): 324 of the 502
+  buildings around Central Market (65%), 79 of 149 around Canadia Garden (53%) and 63 of the 114
+  loaded around the Riverside (55%) qualify. Most rejections are irregular shapes, then big
+  halls, narrow rooms and tiny sheds; 2–5% have no usable entrance.
+- **Generation:** a café, shop or house layout fitted to the room, from shared furniture
+  templates merged into one mesh. Lighting is per vertex and computed at build time: daylight from
+  the shopfront, lamp light, occlusion. The shader scales it by day/night and the lights switch,
+  so there are no textures and no runtime lights. That is two to four draw calls per interior.
+- **Entering:** the doorway is cut into the OSM facade (`materials.setDoorSet`, shader discard)
+  and into the building's collision ring (`collision.setDoors`). Both are per-owner sets shared
+  with the walk-in shops. A glass or wooden door is hinged in the opening, and cafés and shops
+  get a painted name board over it (a canvas texture). The floor sits 5 cm above the street,
+  clear of the ground and plaza layers.
+- **The camera** never ends up inside a building's mass: if it lands over a room (a player in
+  the doorway, the camera behind them), it drops under that room's ceiling (`setCeiling`).
+- **The server** lets players on foot stand inside these footprints. Each building in
+  `ENTERABLE_BUILDING_IDS` (`backend/app/multiplayer/enterable.py`, kept equal to `ENTERABLE` by
+  a test) is an open zone of the movement validator, like a walk-in shop floor. Any other
+  building would get rubber-banding at its doorway: the auto mode needs the server to know its
+  buildings first.
+- **Lifetime:** interiors are built within 70 m and freed beyond 100 m (never while the player is
+  inside). Model buildings load within 160 m. Interiors are drawn only when they can be seen: from
+  inside, through an open door within 35 m (OSM buildings), or within 60 m (the model house's
+  windows).
+
 ## Multiplayer protocol (`/api/v1/world/ws`)
 
 JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.py`).

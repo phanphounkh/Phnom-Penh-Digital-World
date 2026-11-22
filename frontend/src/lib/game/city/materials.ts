@@ -17,6 +17,18 @@ import { addSurfaceDetail, type SurfaceKind } from './surfaces';
 export const MAX_DOORS = 16;
 export const DOOR_HEIGHT = 2.9;
 
+/** A doorway in an OSM facade: centre and along-wall unit (world), base y, half width, height
+ * (default DOOR_HEIGHT). */
+export interface Doorway {
+	x: number;
+	z: number;
+	ux: number;
+	uz: number;
+	y: number;
+	halfWidth: number;
+	height?: number;
+}
+
 const BAY = 128;
 /** Atlas bays (128 px = one 4 m × 3.3 m bay each): window styles 0–3, shopfronts 4–5. */
 export const FACADE_BAYS = 6;
@@ -202,20 +214,31 @@ export class CityMaterials {
 	}
 
 	/**
-	 * Walk-in shop doorways (Phase 4): wall fragments inside an opening are discarded, so the
-	 * street frontage of a claimed unit opens into its interior without rebuilding the chunk.
-	 * A: (centre x, centre z, along-wall unit x, along-wall unit z); B: (base y, half width).
+	 * Doorways cut into OSM facades (walk-in shops, enterable buildings): wall fragments inside
+	 * an opening are discarded, so a frontage opens into its interior without rebuilding the
+	 * chunk. A: (centre x, centre z, along-wall unit x, along-wall unit z); B: (base y, half
+	 * width, height). Each system owns a set (setDoorSet); at most MAX_DOORS are cut, the sets
+	 * of enterable buildings first (there are few of them).
 	 */
 	readonly doorA = { value: Array.from({ length: MAX_DOORS }, () => new THREE.Vector4()) };
-	readonly doorB = { value: Array.from({ length: MAX_DOORS }, () => new THREE.Vector2()) };
+	readonly doorB = { value: Array.from({ length: MAX_DOORS }, () => new THREE.Vector3()) };
 	readonly doorCount = { value: 0 };
+	private doorSets = new Map<string, Doorway[]>();
 
-	setDoors(doors: { x: number; z: number; ux: number; uz: number; y: number; halfWidth: number }[]) {
-		const n = Math.min(MAX_DOORS, doors.length);
+	/** The walk-in shops' doorways (Storefronts). */
+	setDoors(doors: Doorway[]) {
+		this.setDoorSet('shops', doors);
+	}
+
+	setDoorSet(owner: string, doors: Doorway[]) {
+		if (doors.length) this.doorSets.set(owner, doors);
+		else this.doorSets.delete(owner);
+		const all = [...[...this.doorSets].filter(([o]) => o !== 'shops').flatMap(([, d]) => d), ...(this.doorSets.get('shops') ?? [])];
+		const n = Math.min(MAX_DOORS, all.length);
 		for (let i = 0; i < n; i++) {
-			const d = doors[i];
+			const d = all[i];
 			this.doorA.value[i].set(d.x, d.z, d.ux, d.uz);
-			this.doorB.value[i].set(d.y, d.halfWidth);
+			this.doorB.value[i].set(d.y, d.halfWidth, d.height ?? DOOR_HEIGHT);
 		}
 		this.doorCount.value = n;
 	}
@@ -246,7 +269,7 @@ export class CityMaterials {
 uniform float uNight;
 uniform sampler2D uGlass;
 uniform vec4 uDoorA[${MAX_DOORS}];
-uniform vec2 uDoorB[${MAX_DOORS}];
+uniform vec3 uDoorB[${MAX_DOORS}];
 uniform int uDoorCount;
 varying vec2 vFacade;
 varying vec2 vWall;
@@ -261,7 +284,7 @@ for (int i = 0; i < ${MAX_DOORS}; i++) {
 	vec2 ppwD = vPpwWorld.xz - uDoorA[i].xy;
 	float ppwAlong = dot(ppwD, uDoorA[i].zw);
 	float ppwAcross = dot(ppwD, vec2(-uDoorA[i].w, uDoorA[i].z));
-	if (abs(ppwAlong) < uDoorB[i].y && abs(ppwAcross) < 0.3 && vPpwWorld.y < uDoorB[i].x + ${DOOR_HEIGHT.toFixed(2)}) discard;
+	if (abs(ppwAlong) < uDoorB[i].y && abs(ppwAcross) < 0.3 && vPpwWorld.y < uDoorB[i].x + uDoorB[i].z) discard;
 }`
 				)
 				.replace(

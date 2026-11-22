@@ -139,9 +139,15 @@
 					onInteraction: (i) => (prompt = i)
 				});
 				(globalThis as { __ppwShops?: unknown }).__ppwShops = shops;
-				const { Buildings } = await import('$lib/game/buildings/Buildings');
+				const [{ Buildings }, { ENTERABLE, AUTO_ENTERABLE }] = await Promise.all([import('$lib/game/buildings/Buildings'), import('$lib/game/buildings/placements')]);
 				if (disposed) return;
-				houses = new Buildings(created, (i) => (housePrompt = i), undefined, (x) => (inspection = x));
+				houses = new Buildings(created, (i) => (housePrompt = i), undefined, (x) => (inspection = x), {
+					payloads: () => created.chunkData(),
+					list: ENTERABLE,
+					auto: AUTO_ENTERABLE,
+					// Buildings with a walk-in shop already have an interior.
+					claimed: () => shops?.list.map((s) => [s.unit.door_x, s.unit.door_z] as [number, number]) ?? []
+				});
 				net.remotes.groundAt = (x, z) => houses?.floorAt(x, z) ?? null; // others stand on the floor too
 				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
 				let parkCheck = 0;
@@ -185,7 +191,7 @@
 			if (e.key.toLowerCase() === 'v') panel = panel === 'garage' ? '' : 'garage';
 			if (e.key.toLowerCase() === 'f' && !panel) rideOrPark();
 			if (e.key.toLowerCase() === 'e' && !panel) {
-				if (housePrompt) houses?.interact();
+				if (housePrompt || inspection) houses?.interact();
 				else void interact();
 			}
 			if (e.key.toLowerCase() === 'c') panel = panel === 'cart' ? '' : 'cart';

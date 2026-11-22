@@ -42,28 +42,51 @@ class ChunkColliders {
 
 const cellKey = (cx: number, cz: number) => cx * 73856093 + cz * 19349663;
 
-/** A doorway: a gap in any wall that runs along this segment (walk-in shops). */
+/** A doorway: a gap in any wall that runs along this segment (walk-in shops, enterable
+ * buildings). Rays pass it below `top` (world y; default DOORWAY_HEIGHT). */
 export interface Door {
 	ax: number;
 	az: number;
 	bx: number;
 	bz: number;
+	top?: number;
 }
 
 export class CollisionWorld {
 	private chunks = new Map<string, ChunkColliders>();
 	/** Rectangular world limit (the edge of the mapped neighbourhood). */
 	bounds: { minX: number; minZ: number; maxX: number; maxZ: number } | null = null;
-	/** Openings cut into walls; contacts that fall inside one are ignored. */
-	doors: Door[] = [];
+	private doorSets = new Map<string, Door[]>();
+	private allDoors: Door[] = [];
+
+	/** Openings cut into walls; contacts that fall inside one are ignored. Setting it replaces the
+	 * walk-in shops' set; other systems use setDoors(owner, …). */
+	get doors(): Door[] {
+		return this.allDoors;
+	}
+
+	set doors(doors: Door[]) {
+		this.setDoors('shops', doors);
+	}
+
+	setDoors(owner: string, doors: Door[]): void {
+		if (doors.length) this.doorSets.set(owner, doors);
+		else this.doorSets.delete(owner);
+		this.allDoors = [...this.doorSets.values()].flat();
+	}
+
+	/** The doorway at (x, z) (within 6 cm of its segment), if any. */
+	doorAt(x: number, z: number): Door | null {
+		for (const d of this.allDoors) {
+			const [cx, cz] = closestOnSegment(x, z, { ax: d.ax, az: d.az, bx: d.bx, bz: d.bz, h: 0, base: 0, poly: 0 });
+			if ((cx - x) * (cx - x) + (cz - z) * (cz - z) < 0.0036) return d;
+		}
+		return null;
+	}
 
 	/** True if (x, z) lies on a doorway (within 6 cm of its segment). */
 	inDoor(x: number, z: number): boolean {
-		for (const d of this.doors) {
-			const [cx, cz] = closestOnSegment(x, z, { ax: d.ax, az: d.az, bx: d.bx, bz: d.bz, h: 0, base: 0, poly: 0 });
-			if ((cx - x) * (cx - x) + (cz - z) * (cz - z) < 0.0036) return true;
-		}
-		return false;
+		return this.doorAt(x, z) !== null;
 	}
 
 	addRing(owner: string, ring: XZ[], height: number, base = 0): void {
@@ -269,7 +292,10 @@ export function rayFraction(
 		if (t <= 0 || t >= best || u < 0 || u > 1) continue;
 		const y = ay + (by - ay) * t;
 		if (y >= w.h || y < w.base) continue;
-		if (world.doors.length && y < DOORWAY_HEIGHT && world.inDoor(ax + dx * t, az + dz * t)) continue;
+		if (world.doors.length) {
+			const door = world.doorAt(ax + dx * t, az + dz * t);
+			if (door && y < (door.top ?? DOORWAY_HEIGHT)) continue;
+		}
 		best = t;
 	}
 	return best;

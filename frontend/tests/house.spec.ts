@@ -28,13 +28,13 @@ const state = (page: Page) =>
 		page,
 		`(() => {
 			const b = globalThis.__ppwBuildings, st = globalThis.__ppwNet.city.localState();
-			const l = b.list[0];
+			const l = b.list.find((x) => x.id === 'riverside-house');
 			return { x: st.x, z: st.z, inside: b.insideOf, door: l?.door ?? null, doors: l?.doors ?? {}, lights: l?.lights ?? {}, gait: globalThis.__ppwPerf.avatar().gait, seated: globalThis.__ppwNet.city.seated,
 				prompt: document.querySelector('[data-testid="house-prompt"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? null };
 		})()`
 	);
 /** Model-space points of the house, in world coordinates. */
-const world = (page: Page, pts: [number, number][]) => ev<[number, number][]>(page, `${JSON.stringify(pts)}.map((p) => globalThis.__ppwBuildings.list[0].frame.toWorld(p))`);
+const world = (page: Page, pts: [number, number][]) => ev<[number, number][]>(page, `${JSON.stringify(pts)}.map((p) => globalThis.__ppwBuildings.list.find((b) => b.id === 'riverside-house').frame.toWorld(p))`);
 /** Walk like a player (the engine's autopilot: collision, no teleport); resolves on arrival. */
 const walk = async (page: Page, pts: [number, number][]) =>
 	expect(await ev<boolean>(page, `new Promise((r) => globalThis.__ppwNet.city.walkTo(${JSON.stringify(await world(page, pts))}, r))`)).toBe(true);
@@ -75,8 +75,9 @@ test('a player opens the house door, walks in, switches the lights, sits at the 
 	await page.goto('/world');
 	await expect(page.getByTestId('world-canvas')).toHaveAttribute('data-ready', 'true', { timeout: 180_000 });
 	await expect(page.getByTestId('hud-net')).toHaveAttribute('data-status', 'open', { timeout: 90_000 });
-	// The house loads lazily once the player is near it (the Riverside spawn is 25 m away).
-	await expect.poll(() => ev<number>(page, 'globalThis.__ppwBuildings?.list.length ?? 0'), FRAMES).toBe(1);
+	// The house loads lazily once the player is near it (the Riverside spawn is 25 m away; the
+	// generated café across the street may load too).
+	await expect.poll(() => ev<boolean>(page, `!!globalThis.__ppwBuildings?.list.some((b) => b.id === 'riverside-house')`), FRAMES).toBe(true);
 	await page.getByTestId('world-canvas').click({ position: { x: 20, y: 300 } });
 
 	// Up the porch towards the front door: the prompt.
@@ -102,12 +103,14 @@ test('a player opens the house door, walks in, switches the lights, sits at the 
 	await page.waitForTimeout(1500);
 	await page.screenshot({ path: `${SHOTS}/inside.png` });
 
-	// The light switch by the front door: the living and dining room lamps (off by day).
+	// The light switch by the front door: the living and dining room lamps (off by day, on after
+	// dark: the world runs on live Phnom Penh time).
 	await approach(page, [[-2.75, 2.6]], [-2.75, 3.45], [-3.12, 4.15]);
-	await expect(page.getByTestId('house-prompt')).toHaveText(/Turn Lights On/, FRAMES);
+	const lit = (await state(page)).lights.front;
+	await expect(page.getByTestId('house-prompt')).toHaveText(lit ? /Turn Lights Off/ : /Turn Lights On/, FRAMES);
 	await page.keyboard.press('e');
-	await expect.poll(async () => (await state(page)).lights.front, FRAMES).toBe(true);
-	await expect(page.getByTestId('house-prompt')).toHaveText(/Turn Lights Off/, FRAMES);
+	await expect.poll(async () => (await state(page)).lights.front, FRAMES).toBe(!lit);
+	await expect(page.getByTestId('house-prompt')).toHaveText(lit ? /Turn Lights On/ : /Turn Lights Off/, FRAMES);
 
 	// The bedroom door opens from the living room.
 	await approach(page, [[-2.0, 2.2]], [-2.0, 1.15], [-2.0, 0.3]);
@@ -128,7 +131,7 @@ test('a player opens the house door, walks in, switches the lights, sits at the 
 
 	// Inspect the painting above the sofa: a card with its story; E closes it. (Round the dining
 	// table from whichever side the avatar stood up on.)
-	const [lx] = await ev<[number, number]>(page, `(() => { const s = globalThis.__ppwNet.city.localState(); return globalThis.__ppwBuildings.list[0].frame.toLocal(s.x, s.z); })()`);
+	const [lx] = await ev<[number, number]>(page, `(() => { const s = globalThis.__ppwNet.city.localState(); return globalThis.__ppwBuildings.list.find((b) => b.id === 'riverside-house').frame.toLocal(s.x, s.z); })()`);
 	const round: [number, number][] = lx > 2.8 ? [[4.1, 2.3], [3.9, 1.0], [1.6, 1.0]] : [[1.4, 3.6]];
 	await approach(page, [...round, [-2.6, 2.8]], [-3.7, 2.65], [-3.7, 0.42]);
 	await expect(page.getByTestId('house-prompt')).toHaveText(/Inspect Painting/, FRAMES);

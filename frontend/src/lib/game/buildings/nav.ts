@@ -66,14 +66,32 @@ export function findPath(area: NavArea, from: XZ, to: XZ): XZ[] | null {
 			}
 	}
 	const cellOf = ([x, z]: XZ) => [Math.max(0, Math.min(nx - 1, Math.floor((x - x0) / CELL))), Math.max(0, Math.min(nz - 1, Math.floor((z - z0) / CELL)))] as const;
-	const [si, sk] = cellOf(from);
-	const [ti, tk] = cellOf(to);
-	const start = sk * nx + si,
-		goal = tk * nx + ti;
 	// Start and goal may sit right at an obstacle's edge (the stand-up spot of a dining chair):
-	// they count as free.
-	blocked[start] = 0;
-	blocked[goal] = 0;
+	// search from/to the nearest free cell within half a metre; the path still ends exactly at `to`.
+	const nearestFree = (p: XZ): number => {
+		const [i0, k0] = cellOf(p);
+		let best = k0 * nx + i0;
+		if (!blocked[best]) return best;
+		let bestD = Infinity;
+		for (let di = -3; di <= 3; di++)
+			for (let dk = -3; dk <= 3; dk++) {
+				const i = i0 + di,
+					k = k0 + dk;
+				if (i < 0 || k < 0 || i >= nx || k >= nz || blocked[k * nx + i]) continue;
+				const [cx, cz] = centre(i, k);
+				const d = Math.hypot(cx - p[0], cz - p[1]);
+				if (d < bestD) {
+					bestD = d;
+					best = k * nx + i;
+				}
+			}
+		blocked[best] = 0;
+		return best;
+	};
+	const start = nearestFree(from),
+		goal = nearestFree(to);
+	const ti = goal % nx,
+		tk = Math.floor(goal / nx);
 	const g = new Float32Array(nx * nz).fill(Infinity);
 	const came = new Int32Array(nx * nz).fill(-1);
 	const closed = new Uint8Array(nx * nz);
@@ -116,9 +134,7 @@ export function findPath(area: NavArea, from: XZ, to: XZ): XZ[] | null {
 	const cells: number[] = [];
 	for (let c = goal; c !== -1; c = came[c]) cells.push(c);
 	cells.reverse();
-	const points: XZ[] = cells.map((c) => centre(c % nx, Math.floor(c / nx)));
-	points[0] = from;
-	points[points.length - 1] = to;
+	const points: XZ[] = [from, ...cells.map((c) => centre(c % nx, Math.floor(c / nx))), to];
 	// String pulling: keep only the corners a straight walk needs.
 	const clear = (a: XZ, b: XZ) => {
 		const steps = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (CELL / 2));

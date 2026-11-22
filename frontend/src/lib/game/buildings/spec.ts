@@ -93,7 +93,7 @@ export interface BuildingSpec {
 	model: string;
 	/** Baked interior light: `day` (sun and sky, sRGB RGB / dayScale) and `lamps` (one light
 	 * group per channel, luminance^(1/2.2) / lampScale, times lampColor). */
-	lightmaps: { day: string; lamps: string; dayScale: number; lampScale: number; lampColor: [number, number, number] };
+	lightmaps?: { day: string; lamps: string; dayScale: number; lampScale: number; lampColor: [number, number, number] };
 	/** Floor height above the ground under the building (m). */
 	floor: number;
 	wallTop: number;
@@ -124,12 +124,14 @@ export interface BuildingSpec {
 /** Where a building stands in the world. */
 export interface BuildingPlacement {
 	id: string;
-	/** Spec URL (the GLB and lightmap are next to it). */
+	/** Spec URL (the GLB and lightmap are next to it); empty for generated interiors. */
 	spec: string;
 	x: number;
 	z: number;
 	/** rotation.y of the model: 0 = front door facing +Z (south), π/2 = facing +X (east). */
 	yaw: number;
+	/** An interior generated inside an OpenStreetMap building (procedural.ts). */
+	procedural?: { type: 'house' | 'shop' | 'cafe'; plan: import('./footprint').Plan; seed: number; name?: string | null };
 }
 
 /** Model ↔ world transform of one placed building. */

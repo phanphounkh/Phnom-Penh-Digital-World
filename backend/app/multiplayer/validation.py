@@ -33,12 +33,16 @@ class MovementValidator:
         self.obstacles = [p for p in shrunk if not p.is_empty]
         self.tree = STRtree(self.obstacles) if self.obstacles else None
         self.bounds = bounds  # min_x, min_z, max_x, max_z
-        # Walk-in shop interiors (Phase 4): open floor cut into building footprints.
+        # Open floor cut into building footprints, by source: walk-in shop units (Phase 4) and
+        # the buildings with an interior to walk into (app/multiplayer/enterable.py).
+        self.zones: dict[str, list[Polygon]] = {}
         self.open_zones: list[Polygon] = []
         self.zone_tree: STRtree | None = None
 
-    def set_open_zones(self, zones: list[Polygon]) -> None:
-        self.open_zones = [z for z in zones if z.is_valid and not z.is_empty]
+    def set_open_zones(self, zones: list[Polygon], source: str = "shops") -> None:
+        """Replace the open zones from `source` (the others stay)."""
+        self.zones[source] = [z for z in zones if z.is_valid and not z.is_empty]
+        self.open_zones = [z for group in self.zones.values() for z in group]
         self.zone_tree = STRtree(self.open_zones) if self.open_zones else None
 
     def inside_obstacle(self, x: float, z: float, open_zones: bool = True) -> bool:
@@ -47,7 +51,8 @@ class MovementValidator:
         point = Point(x, z)
         if not len(self.tree.query(point, predicate="within")):
             return False
-        # Inside a footprint: allowed only on foot, on the floor of an open shop unit.
+        # Inside a footprint: allowed only on foot, on the floor of an open shop unit or inside
+        # an enterable building.
         if not open_zones or self.zone_tree is None:
             return True
         return not len(self.zone_tree.query(point, predicate="within"))

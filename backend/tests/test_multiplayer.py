@@ -293,3 +293,56 @@ async def test_players_arriving_at_the_same_spawn_do_not_overlap(client: httpx.A
     for i, (x1, z1) in enumerate(spots):
         for x2, z2 in spots[i + 1 :]:
             assert ((x1 - x2) ** 2 + (z1 - z2) ** 2) ** 0.5 >= 1.2
+
+
+def test_open_zones_from_shops_and_enterable_buildings_add_up():
+    from shapely.geometry import Polygon as P
+
+    from app.multiplayer.validation import MovementValidator
+
+    square = lambda x, z, s: P([(x, z), (x + s, z), (x + s, z + s), (x, z + s)])  # noqa: E731
+    v = MovementValidator([square(0, 0, 10), square(20, 0, 10)], (-100, -100, 100, 100))
+    v.set_open_zones([square(20, 0, 10)], source="buildings")
+    v.set_open_zones([square(2, 2, 3)], source="shops")
+    assert not v.inside_obstacle(25, 5)  # inside the enterable building
+    assert not v.inside_obstacle(3, 3)  # on the shop floor
+    assert v.inside_obstacle(8, 8)  # the rest of the first building is solid
+    v.set_open_zones([], source="shops")  # the shop closes: the building stays open
+    assert v.inside_obstacle(3, 3) and not v.inside_obstacle(25, 5)
+    assert v.inside_obstacle(25, 5, open_zones=False)  # never by vehicle
+
+
+def test_enterable_buildings_match_the_client():
+    """The client opens the same buildings the server lets players stand in."""
+    import re
+    from pathlib import Path
+
+    from app.multiplayer.enterable import ENTERABLE_BUILDING_IDS
+
+    source = Path(__file__).resolve().parents[2] / "frontend/src/lib/game/buildings/placements.ts"
+    if not source.exists():
+        pytest.skip("frontend sources not available")
+    block = source.read_text().split("export const ENTERABLE", 1)[1].split("];", 1)[0]
+    assert {int(i) for i in re.findall(r"id:\s*(\d+)", block)} == ENTERABLE_BUILDING_IDS
+
+
+async def test_players_can_walk_into_an_enterable_building(client: httpx.AsyncClient):
+    from app.multiplayer.enterable import ENTERABLE_BUILDING_IDS
+
+    me = await onboard(client, "dara")
+    async with world_socket(client) as ws:
+        await expect(ws, "welcome")
+        async with SessionLocal() as session:
+            bx, bz = (
+                await session.execute(
+                    text("""
+                SELECT ST_X(ST_Transform(ST_PointOnSurface(footprint), 32648)) - 491403.0801141087,
+                       1278957.2265911433 - ST_Y(ST_Transform(ST_PointOnSurface(footprint), 32648))
+                FROM buildings WHERE id = :id
+            """),
+                    {"id": min(ENTERABLE_BUILDING_IDS)},
+                )
+            ).one()
+        hub.by_user[me_id(me)].t_move -= 120
+        await send(ws, t="move", x=bx, z=bz, yaw=0, s=2)
+        await never(ws, "correct")

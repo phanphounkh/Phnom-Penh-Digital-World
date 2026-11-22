@@ -4,16 +4,25 @@
  * whose lamps switch on and off per room, an indoor camera, and things to do inside: sit down
  * (or sit at a table), inspect objects, switch the lights, the TV and the stove.
  *
- * A building is a GLB plus a JSON spec (spec.ts) made by tools/blender/generate_house.py; where
- * it stands comes from `placements.ts`. Nothing here talks to the server: door, light and
- * appliance states are local, kept as shareable { on/open, changedAt } values (door.ts) for when
- * they are synced between players.
+ * Two kinds of building share everything (interactions, collision, camera, culling):
+ * - hand-made models: a GLB plus a JSON spec from tools/blender/generate_house.py, placed by
+ *   `placements.ts` on open land;
+ * - real OpenStreetMap buildings: the listed ones (or, in auto mode, the eligible ones nearest
+ *   the player) get an interior generated to fit their footprint (footprint.ts, procedural.ts),
+ *   a doorway cut into the facade, and are freed again when the player leaves.
+ * Nothing here talks to the server: door, light and appliance states are local, kept as
+ * shareable { on/open, changedAt } values (door.ts) for when they are synced between players.
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import type { ChunkPayload } from '$lib/api/types';
 import type { CollisionWorld } from '$lib/game/city/collision';
+import type { Doorway } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
+import { fitRoom, type XZ as FXZ } from './footprint';
+import { report, scan, type Candidate, type InteriorType } from './osm';
+import { buildInterior } from './procedural';
 import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
 import { findPath } from './nav';
@@ -23,6 +32,16 @@ import { TvPicture } from './tv';
 /** Load within this distance (m) of the building, unload beyond the second. */
 export const LOAD_RADIUS = 160;
 export const UNLOAD_RADIUS = 230;
+/** Generated interiors (OSM buildings): built within this distance, freed beyond the second;
+ * the chunks around the player are searched for them every OSM_SCAN_EVERY seconds. */
+export const OSM_LOAD_RADIUS = 70;
+export const OSM_UNLOAD_RADIUS = 100;
+const OSM_SCAN_EVERY = 1.0;
+/** A generated house keeps a living-room-sized room against its entrance (m). */
+const HOUSE_ROOM = { width: 8, depth: 7.5 };
+/** Interiors are drawn only when they can be seen: from inside, through an open door nearby
+ * (OSM buildings), or within this distance (the model house, which has real windows). */
+const INTERIOR_VISIBLE = { doorway: 35, windows: 60 };
 /** How close the player must be to use each kind of thing (m). */
 export const REACH = { seat: 0.95, switch: 1.2, toggle: 1.5, item: 1.8, table: 1.1 };
 /** Indoor camera: the furthest the camera may sit from the avatar. */
@@ -42,15 +61,29 @@ export interface BuildingHost {
 	readonly scene: THREE.Scene;
 	readonly collision: CollisionWorld;
 	readonly terrain: Terrain;
-	/** The city's shared night factor uniform (0 day … 1 night). */
-	readonly materials?: { readonly night: { value: number } };
+	/** The city's shared night factor uniform (0 day … 1 night), and the facade doorways. */
+	readonly materials?: { readonly night: { value: number }; setDoorSet?(owner: string, doors: Doorway[]): void };
 	readonly seated: boolean;
 	setGround(provider: ((x: number, z: number) => number | null) | null): void;
 	setInterior(view: { ceiling: number; maxDistance: number; lamp: number } | null): void;
+	/** Keeps the camera under a room's ceiling (optional: tests). */
+	setCeiling?(provider: ((x: number, y: number, z: number) => number | null) | null): void;
 	sit(seat: { x: number; z: number; yaw: number }, standAt: [number, number]): boolean;
 	stand(): void;
 	walkTo(points: [number, number][], onDone?: (arrived: boolean) => void): void;
 	invalidateShadows(): void;
+}
+
+/** Where OpenStreetMap buildings to enter come from. */
+export interface OsmSource {
+	/** The loaded chunks (CityController.chunkData). */
+	payloads(): ChunkPayload[];
+	/** OSM buildings that get an interior, and which kind. */
+	list: { id: number; type: InteriorType; name?: string }[];
+	/** Auto mode: every eligible building within `radius` (only the `max` nearest at a time). */
+	auto?: { enabled: boolean; radius: number; max: number; type?: (c: Candidate) => InteriorType };
+	/** Points of walk-in shop doors: their buildings are taken. */
+	claimed?(): FXZ[];
 }
 
 export type BuildingInteraction =
@@ -98,6 +131,10 @@ interface Loaded {
 	/** Shader uniforms shared by every interior material of this building. */
 	uniforms: { uLampsOn: { value: THREE.Vector4 } } | null;
 	owner: string;
+	/** Nodes drawn only when the interior can be seen (culling). */
+	inside: THREE.Object3D[];
+	/** Generated interiors: the doorway in the OSM facade (world). */
+	facade: { doorway: Doorway; gap: { ax: number; az: number; bx: number; bz: number; top: number } } | null;
 }
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -107,6 +144,8 @@ const sameInteraction = (a: BuildingInteraction | null, b: BuildingInteraction |
 export class Buildings {
 	private loaded = new Map<string, Loaded>();
 	private loading = new Set<string>();
+	/** Buildings that could not be built (not tried again). */
+	private failed = new Set<string>();
 	private current: BuildingInteraction | null = null;
 	private inside: string | null = null;
 	private insideLamp = -1;
@@ -116,14 +155,66 @@ export class Buildings {
 	/** The seat the player sits on (or is walking to). */
 	private seatedOn: { building: string; seat: SeatSpec } | null = null;
 	private inspecting: (Inspection & { x: number; z: number }) | null = null;
+	/** OSM buildings found near the player (placements made from their plans). */
+	private osmPlacements = new Map<string, BuildingPlacement>();
+	private sinceScan = Infinity;
 
 	constructor(
 		private host: BuildingHost,
 		private onInteraction?: (interaction: BuildingInteraction | null) => void,
 		private placements: BuildingPlacement[] = PLACEMENTS,
-		private onInspect?: (inspection: Inspection | null) => void
+		private onInspect?: (inspection: Inspection | null) => void,
+		private osm?: OsmSource
 	) {
 		host.setGround((x, z) => this.floorAt(x, z));
+		host.setCeiling?.((x, y, z) => this.ceilingAt(x, y, z));
+	}
+
+	/** Eligibility of the OSM buildings around (x, z): totals, reasons and the eligible ones
+	 * (inspection, tests and choosing which buildings to open). */
+	scan(x: number, z: number, radius = 120) {
+		if (!this.osm) return null;
+		const candidates = scan(this.osm.payloads(), x, z, radius, this.osm.claimed?.() ?? [], (cx, cz, r) => this.host.terrain.affects(cx, cz, r));
+		return {
+			...report(candidates),
+			eligible: candidates
+				.filter((c) => c.result.ok)
+				.map((c) => ({ id: c.id, name: c.name, kind: c.kind, plan: c.result.ok ? c.result.plan : null }))
+		};
+	}
+
+	/** Find OSM buildings to open near the player; drop the ones no longer around. */
+	private discover(px: number, pz: number): void {
+		const osm = this.osm;
+		if (!osm) return;
+		const listed = new Map(osm.list.map((b) => [b.id, b]));
+		const auto = osm.auto?.enabled ? osm.auto : null;
+		const radius = Math.max(OSM_UNLOAD_RADIUS, auto?.radius ?? 0);
+		const candidates = scan(osm.payloads(), px, pz, radius, osm.claimed?.() ?? [], (cx, cz, r) => this.host.terrain.affects(cx, cz, r), auto ? undefined : new Set(listed.keys()));
+		const wanted = new Map<string, BuildingPlacement>();
+		const take = (c: Candidate, type: InteriorType, name?: string | null) => {
+			if (!c.result.ok) return;
+			const plan = type === 'house' ? fitRoom(c.result.plan, HOUSE_ROOM.width, HOUSE_ROOM.depth) : c.result.plan;
+			const id = `osm:${c.id}`;
+			wanted.set(id, this.osmPlacements.get(id) ?? { id, spec: '', x: plan.x, z: plan.z, yaw: plan.yaw, procedural: { type, plan, seed: c.id, name: name ?? c.name } });
+		};
+		for (const c of candidates) {
+			const l = listed.get(c.id);
+			if (l) take(c, l.type, l.name);
+		}
+		if (auto) {
+			const near = candidates
+				.filter((c) => c.result.ok && !listed.has(c.id))
+				.map((c) => ({ c, d: c.result.ok ? Math.hypot(c.result.plan.x - px, c.result.plan.z - pz) : Infinity }))
+				.filter((e) => e.d < auto.radius)
+				.sort((a, b) => a.d - b.d)
+				.slice(0, auto.max);
+			for (const { c } of near) take(c, auto.type?.(c) ?? (c.kind === 'house' || c.kind === 'residential' ? 'house' : c.id % 2 ? 'shop' : 'cafe'));
+		}
+		for (const [id] of this.osmPlacements) if (!wanted.has(id) && this.loaded.has(id) && this.inside !== id) this.unload(id);
+		// Keep a building the player is still inside (it unloads once they are out and away).
+		for (const [id, p] of this.osmPlacements) if (!wanted.has(id) && this.loaded.has(id)) wanted.set(id, p);
+		this.osmPlacements = wanted;
 	}
 
 	/** The interaction the E key would perform now. */
@@ -155,6 +246,19 @@ export class Buildings {
 		}));
 	}
 
+	/** The ceiling of the room around (x, y, z), if the point is inside a loaded building (within
+	 * its walls, below its roof). */
+	ceilingAt(x: number, y: number, z: number): number | null {
+		for (const b of this.loaded.values()) {
+			const [lx, lz] = b.frame.toLocal(x, z);
+			const fp = bounds(b.spec.footprint);
+			if (lx < fp.minX || lx > fp.maxX || lz < fp.minZ || lz > fp.maxZ) continue;
+			if (y > b.frame.ground + (b.spec.roofTop ?? b.spec.wallTop)) continue;
+			return b.frame.ground + b.spec.interior.ceiling;
+		}
+		return null;
+	}
+
 	floorAt(x: number, z: number): number | null {
 		for (const b of this.loaded.values()) {
 			const h = floorAt(b.spec, b.frame, x, z);
@@ -166,16 +270,33 @@ export class Buildings {
 	/** Per frame, after the player moved. */
 	update(dt: number, px: number, pz: number, yaw: number): void {
 		if (this.disposed) return;
-		for (const p of this.placements) {
-			const d = Math.hypot(p.x - px, p.z - pz);
-			if (d < LOAD_RADIUS && !this.loaded.has(p.id) && !this.loading.has(p.id)) void this.load(p);
-			else if (d > UNLOAD_RADIUS && this.loaded.has(p.id)) this.unload(p.id);
+		this.sinceScan += dt;
+		if (this.osm && this.sinceScan >= OSM_SCAN_EVERY) {
+			this.sinceScan = 0;
+			this.discover(px, pz);
 		}
-		for (const b of this.loaded.values()) this.animate(b, dt);
+		for (const p of [...this.placements, ...this.osmPlacements.values()]) {
+			const [load, unload] = p.procedural ? [OSM_LOAD_RADIUS, OSM_UNLOAD_RADIUS] : [LOAD_RADIUS, UNLOAD_RADIUS];
+			const d = Math.hypot(p.x - px, p.z - pz);
+			if (d < load && !this.loaded.has(p.id) && !this.loading.has(p.id) && !this.failed.has(p.id)) void this.load(p);
+			else if (d > unload && this.loaded.has(p.id) && this.inside !== p.id) this.unload(p.id);
+		}
+		for (const b of this.loaded.values()) {
+			this.animate(b, dt);
+			this.cull(b, px, pz);
+		}
 		this.updateInside(px, pz);
 		if (this.seatedOn && !this.host.seated && !this.walkingToSeat) this.seatedOn = null;
 		if (this.inspecting && Math.hypot(this.inspecting.x - px, this.inspecting.z - pz) > REACH.item + 0.9) this.closeInspection();
 		this.pick(px, pz, yaw);
+	}
+
+	/** Draw an interior only when it can be seen. */
+	private cull(b: Loaded, px: number, pz: number): void {
+		const d = Math.hypot(b.frame.x - px, b.frame.z - pz);
+		const seen =
+			this.inside === b.placement.id || (b.facade ? b.doors.some((x) => x.door.t > 0) && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
+		for (const n of b.inside) if (n.visible !== seen) n.visible = seen;
 	}
 
 	private animate(b: Loaded, dt: number): void {
@@ -200,10 +321,10 @@ export class Buildings {
 		}
 	}
 
-	/** Do what the prompt says. */
+	/** Do what the prompt says (with no prompt, E still closes an open inspection card). */
 	interact(): void {
 		const i = this.current;
-		if (!i) return;
+		if (!i) return this.closeInspection();
 		const b = this.loaded.get(i.building);
 		if (!b) return;
 		if (i.kind === 'door') {
@@ -383,10 +504,22 @@ export class Buildings {
 	}
 
 	private async load(p: BuildingPlacement): Promise<void> {
+		if (p.procedural) {
+			const { type, plan, seed, name } = p.procedural;
+			try {
+				const built = buildInterior(type, plan, seed, this.host.materials?.night ?? { value: 0 }, name);
+				this.attach(p, built.spec, built.root, undefined, built.uniforms);
+			} catch (error) {
+				console.warn(`Building ${p.id} could not be generated:`, error);
+				this.failed.add(p.id);
+			}
+			return;
+		}
 		this.loading.add(p.id);
 		try {
 			const base = p.spec.slice(0, p.spec.lastIndexOf('/') + 1);
 			const spec = (await (await fetch(p.spec)).json()) as BuildingSpec;
+			if (!spec.lightmaps) throw new Error('a model building needs lightmaps');
 			const [gltf, day, lamps] = await Promise.all([
 				loader.loadAsync(base + spec.model),
 				textures.loadAsync(base + spec.lightmaps.day),
@@ -412,7 +545,13 @@ export class Buildings {
 
 	/** Put a loaded building into the world: scene, collision, doors, lights, appliances, fans.
 	 * Tests call it directly with a stand-in model (and no lightmaps). */
-	attach(p: BuildingPlacement, spec: BuildingSpec, root: THREE.Object3D, maps?: { day: THREE.Texture; lamps: THREE.Texture }): void {
+	attach(
+		p: BuildingPlacement,
+		spec: BuildingSpec,
+		root: THREE.Object3D,
+		maps?: { day: THREE.Texture; lamps: THREE.Texture },
+		ownUniforms?: { uLampsOn: { value: THREE.Vector4 } }
+	): void {
 		const frame = new Frame(p.x, p.z, p.yaw, this.host.terrain.height(p.x, p.z));
 		const group = root as THREE.Group;
 		group.name = `building:${p.id}`;
@@ -420,8 +559,13 @@ export class Buildings {
 		group.rotation.y = frame.yaw;
 		// Lights start on after dark, off by day (the switches change that).
 		const night = (this.host.materials?.night.value ?? 0) > 0.5;
-		const lights: LightGroup[] = spec.lights.map((l) => ({ spec: l, state: new Switch(night), level: night ? 1 : 0, glow: [] }));
-		const uniforms = maps ? prepareMaterials(group, spec, maps, lights, this.host.materials?.night ?? { value: 0 }) : null;
+		// Lights without a switch (shops, cafés) are always on.
+		const lights: LightGroup[] = spec.lights.map((l) => {
+			const on = l.switches.length ? night : true;
+			return { spec: l, state: new Switch(on), level: on ? 1 : 0, glow: [] };
+		});
+		const uniforms = maps ? prepareMaterials(group, spec, maps, lights, this.host.materials?.night ?? { value: 0 }) : (ownUniforms ?? null);
+		if (ownUniforms) ownUniforms.uLampsOn.value.set(lights[0]?.level ?? 1, lights[1]?.level ?? 0, lights[2]?.level ?? 0, lights[3]?.level ?? 0);
 		const appliances: Appliance[] = spec.toggles.map((t) => {
 			const node = group.getObjectByName(t.node) ?? null;
 			const a: Appliance = { spec: t, state: new Switch(false), node, tv: null, screen: null };
@@ -446,12 +590,33 @@ export class Buildings {
 			appliances,
 			fans: spec.fans.map((f) => ({ node: group.getObjectByName(f.node), rpm: f.rpm })).filter((f): f is { node: THREE.Object3D; rpm: number } => !!f.node),
 			uniforms,
-			owner
+			owner,
+			inside: group.children.filter((n) => n.name === 'Interior' || n.name === 'Extras' || n.name === 'Glass' || n.name === 'TVScreen' || n.name === 'StoveFlame' || n.name.startsWith('Fan_')),
+			facade: null
 		};
+		if (p.procedural) {
+			const { facade, doorWidth } = p.procedural.plan;
+			const half = doorWidth / 2;
+			// The opening runs from the street up to the top of the door (the floor is raised).
+			const height = spec.floor + (spec.doors[0]?.height ?? 2.2);
+			const top = frame.ground + height;
+			b.facade = {
+				doorway: { x: facade.x, z: facade.z, ux: facade.ux, uz: facade.uz, y: frame.ground, halfWidth: half, height },
+				gap: { ax: facade.x - facade.ux * half, az: facade.z - facade.uz * half, bx: facade.x + facade.ux * half, bz: facade.z + facade.uz * half, top }
+			};
+		}
 		this.collide(b);
 		this.loaded.set(p.id, b);
 		this.loading.delete(p.id);
+		this.refreshDoorways();
 		this.host.invalidateShadows();
+	}
+
+	/** Cut the doorways of generated interiors into the OSM facades and the collision walls. */
+	private refreshDoorways(): void {
+		const open = [...this.loaded.values()].filter((b) => b.facade);
+		this.host.materials?.setDoorSet?.('buildings', open.map((b) => b.facade!.doorway));
+		this.host.collision.setDoors('buildings', open.map((b) => b.facade!.gap));
 	}
 
 	private collide(b: Loaded): void {
@@ -487,6 +652,7 @@ export class Buildings {
 			this.host.setInterior(null);
 		}
 		if (this.inspecting?.building === id) this.closeInspection();
+		if (b.facade) this.refreshDoorways();
 		for (const a of b.appliances) {
 			a.tv?.dispose();
 			a.screen?.on.dispose();
@@ -501,6 +667,7 @@ export class Buildings {
 		this.disposed = true;
 		for (const id of [...this.loaded.keys()]) this.unload(id);
 		this.host.setGround(null);
+		this.host.setCeiling?.(null);
 		this.host.setInterior(null);
 	}
 }
@@ -523,7 +690,7 @@ function prepareMaterials(
 	lights: LightGroup[],
 	night: { value: number }
 ): { uLampsOn: { value: THREE.Vector4 } } {
-	const lm = spec.lightmaps;
+	const lm = spec.lightmaps!; // model buildings always have them (checked in load)
 	const level = (channel: number) => lights.find((l) => l.spec.channel === channel)?.level ?? 0;
 	const uniforms = {
 		uLampMap: { value: maps.lamps },

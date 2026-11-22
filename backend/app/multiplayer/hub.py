@@ -30,6 +30,7 @@ from app.core.database import SessionLocal
 from app.geography.projection import default_projection
 from app.models import ChatMessage, GeographicRegion, PlayerSession, Vehicle, WorldRoom
 from app.multiplayer import chatfilter
+from app.multiplayer.enterable import ENTERABLE_BUILDING_IDS
 from app.multiplayer.protocol import (
     MAX_MESSAGE_BYTES,
     NEARBY_CHAT_RADIUS_M,
@@ -289,18 +290,22 @@ class Hub:
         projection = default_projection()
         rows = await session.execute(
             text("""
-            SELECT ST_AsBinary(footprint) AS g FROM buildings WHERE region_id = :r
+            SELECT id, ST_AsBinary(footprint) AS g FROM buildings WHERE region_id = :r
             UNION ALL
-            SELECT ST_AsBinary(geom) FROM land_areas WHERE region_id = :r AND kind = 'water'
+            SELECT NULL, ST_AsBinary(geom) FROM land_areas WHERE region_id = :r AND kind = 'water'
         """),
             {"r": region.id},
         )
         from shapely import wkb
 
         polygons: list[Polygon] = []
+        enterable: list[Polygon] = []
         for row in rows:
             geom = projection.geometry_to_world(wkb.loads(bytes(row.g)))
-            polygons.extend(g for g in getattr(geom, "geoms", [geom]) if isinstance(g, Polygon))
+            parts = [g for g in getattr(geom, "geoms", [geom]) if isinstance(g, Polygon)]
+            polygons.extend(parts)
+            if row.id in ENTERABLE_BUILDING_IDS:
+                enterable.extend(parts)
         bbox = (
             await session.execute(
                 text("""
@@ -325,6 +330,7 @@ class Hub:
             x, z = projection.to_world(sp.lat, sp.lon)
             spawns[sp.slug] = (x, z, yaw_for_heading(sp.heading_deg))
         validator = MovementValidator(polygons, bounds)
+        validator.set_open_zones(enterable, source="buildings")
         template = Room(
             id=uuid.uuid4(),
             slug="template",
