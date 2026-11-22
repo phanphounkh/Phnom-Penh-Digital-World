@@ -117,7 +117,7 @@
 				});
 				if (disposed) return created.dispose();
 				city = created;
-				quality = touch ? 'low' : 'high';
+				quality = created.quality; // 'low' on touch devices and without a GPU
 				avatarStyle = created.avatarStyle; // realistic falls back to classic if it cannot load
 				ready = true;
 				const { WorldSession } = await import('$lib/game/net/WorldSession.svelte');

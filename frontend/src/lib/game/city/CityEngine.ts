@@ -26,6 +26,14 @@ import { RouteLine } from '$lib/game/vehicles/RouteLine';
 import { PathFollower, RouteGuide, lanePath, stepText, type Progress, type Route } from '$lib/game/vehicles/route';
 
 export type Quality = 'high' | 'low';
+
+/** True when WebGL runs on a CPU rasteriser (SwiftShader, llvmpipe, …): no usable GPU. */
+export function softwareRenderer(renderer: THREE.WebGLRenderer): boolean {
+	const gl = renderer.getContext();
+	const info = gl.getExtension('WEBGL_debug_renderer_info');
+	const name = String(info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+	return /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+}
 export type { TimeMode };
 
 export interface CityState {
@@ -113,6 +121,8 @@ export interface CityController {
 	setAvatarStyle(style: AvatarStyle): Promise<void>;
 	/** The avatar style in use (realistic falls back to classic if its models cannot load). */
 	readonly avatarStyle: AvatarStyle;
+	/** Current graphics preset (may start at 'low' on software rendering, see softwareRenderer). */
+	readonly quality: Quality;
 	setQuality(q: Quality): void;
 	setTimeMode(mode: TimeMode): void;
 	setPaused(paused: boolean): void;
@@ -190,6 +200,8 @@ export async function createCity(
 	// changes or chunks change, not every frame (the biggest GPU cost on integrated graphics).
 	renderer.shadowMap.autoUpdate = false;
 	host.appendChild(renderer.domElement);
+	// No GPU (software rasteriser): start conservative; the player can still choose Quality.
+	if (quality === 'high' && softwareRenderer(renderer)) quality = 'low';
 	renderer.domElement.style.touchAction = 'none';
 
 	const scene = new THREE.Scene();
@@ -858,6 +870,9 @@ export async function createCity(
 				player.rotation.set(0, 0, 0);
 				rider = character.mount(mounted, player);
 			}
+		},
+		get quality() {
+			return quality;
 		},
 		get avatarStyle() {
 			return character.style;
