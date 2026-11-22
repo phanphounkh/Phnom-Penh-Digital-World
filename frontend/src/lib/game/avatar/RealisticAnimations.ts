@@ -8,6 +8,7 @@
  *   step. Playback speed follows the ground speed (`speeds` = each clip's no-foot-sliding speed,
  *   measured by the generator), so the feet do not skate.
  * - Air: Jump → Fall → Land one-shot clips, driven by `airborne()` (the engine owns the physics).
+ * - Posture: a held pose such as Sit (on a chair), set and cleared by the engine with posture().
  * - Lean: the whole body tilts about the feet into turns (from the yaw rate and speed) and
  *   forward/back while speeding up or braking. It is derived from the root's own motion, so it
  *   works for remote players too.
@@ -73,6 +74,8 @@ export const RATE_LIMITS: [number, number] = [0.45, 2.0];
  * Fall's playback rate (the clip is shorter than a fall), where Land starts, and how long Land
  * holds before the gait takes over when the avatar lands moving / standing. */
 export const AIR = { jumpFrom: 0.1, fallRate: 0.8, landFrom: 0.03, landMoving: 0.14, landStanding: 0.42 };
+/** Crossfade into and out of a held posture (sitting down takes about this long). */
+export const POSTURE_FADE = 0.6;
 /** Lean: share of the physical lean angle (atan(a / g)) the body takes, and the limits (rad). */
 export const LEAN = { turn: 0.7, maxRoll: 0.2, accel: 0.6, maxPitch: 0.1 };
 
@@ -96,6 +99,7 @@ export class RealisticAnimations {
 	private base: THREE.AnimationAction | null = null;
 	private fading: THREE.AnimationAction | null = null;
 	private air: AirState = '';
+	private posed: THREE.AnimationAction | null = null;
 	private landed = 0;
 	private flying = false;
 	private vy = 0;
@@ -155,7 +159,7 @@ export class RealisticAnimations {
 	}
 
 	get gait(): string {
-		return this.air || this.state;
+		return this.posed ? this.posed.getClip().name.toLowerCase() : this.air || this.state;
 	}
 
 	get playing(): EmoteName | null {
@@ -186,6 +190,13 @@ export class RealisticAnimations {
 			this.hips.position.copy(this.savedPos);
 			this.hips.quaternion.copy(this.savedQuat);
 			this.leaned = false;
+		}
+		if (this.posed) {
+			// Held posture (seated): no gait or air changes until the engine clears it.
+			this.mixer.update(dt);
+			this.applyLean(dt, 0);
+			this.carryPose(dt, holding);
+			return;
 		}
 		this.updateAir(dt, speed);
 		const next = gaitState(this.state, speed, holding, this.speeds);
@@ -323,10 +334,30 @@ export class RealisticAnimations {
 		hips.quaternion.premultiply(this.qLean);
 	}
 
+	/** Hold a posture clip (e.g. 'Sit'), crossfading from whatever plays; null returns to the
+	 * idle gait. A model without the clip ignores it. */
+	posture(clip: string | null): void {
+		if (clip) {
+			const action = this.actions.get(clip);
+			if (!action || this.posed === action || this.riding) return;
+			if (this.emote) this.stopEmote();
+			this.air = '';
+			action.reset();
+			action.setLoop(THREE.LoopRepeat, Infinity);
+			this.crossfade(action, POSTURE_FADE, false);
+			this.posed = action;
+		} else if (this.posed) {
+			this.posed = null;
+			this.state = 'idle';
+			const idle = this.gaitAction('idle');
+			if (idle) this.crossfade(idle.reset(), POSTURE_FADE, false);
+		}
+	}
+
 	playEmote(name: EmoteName): void {
 		const spec = EMOTE_CLIP[name];
 		const action = this.actions.get(spec.clip);
-		if (!action || this.riding || this.air) return;
+		if (!action || this.riding || this.air || this.posed) return;
 		this.stopEmote();
 		this.base?.fadeOut(EMOTE_FADE);
 		action.reset();

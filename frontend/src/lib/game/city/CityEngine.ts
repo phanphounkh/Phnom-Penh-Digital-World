@@ -96,6 +96,19 @@ export interface CityController {
 	setHolding(holding: boolean): void;
 	/** Walk along waypoints (world x/z) like a player would; any movement key cancels. */
 	walkTo(points: [number, number][], onDone?: (arrived: boolean) => void): void;
+	/** Floor heights that differ from the terrain (enterable buildings, porches, steps): return a
+	 * height for (x, z), or null for the terrain. null removes the provider. */
+	setGround(provider: ((x: number, z: number) => number | null) | null): void;
+	/** Indoor view: the camera stays under `ceiling` (world y) and within `maxDistance` of the
+	 * avatar, and the sun on the avatar softens. null = outdoors. */
+	setInterior(view: { ceiling: number; maxDistance: number } | null): void;
+	/** Sit on a seat: the avatar turns and lowers itself onto (x, z) facing `yaw`; any movement
+	 * key (or stand()) gets it up again at `standAt`. */
+	sit(seat: { x: number; z: number; yaw: number }, standAt: [number, number]): boolean;
+	stand(): void;
+	readonly seated: boolean;
+	/** Something static changed near the player (a building appeared): re-render shadows. */
+	invalidateShadows(): void;
 	readonly walking: boolean;
 	/** Runs every frame after the player has moved (dt in seconds). */
 	onFrame(callback: (dt: number) => void): () => void;
@@ -289,6 +302,16 @@ export async function createCity(
 	let speed = 0;
 	let holding = false;
 	const hop = grounded();
+	// Enterable buildings: floor heights, the indoor camera and seats.
+	let groundProvider: ((x: number, z: number) => number | null) | null = null;
+	const groundAt = (x: number, z: number) => groundProvider?.(x, z) ?? terrain.height(x, z);
+	let footY = NaN; // the avatar's floor height, eased over steps
+	let interior: { ceiling: number; maxDistance: number } | null = null;
+	let indoor = 0; // 0 outdoors … 1 indoors (eased)
+	let viewDistance = NaN;
+	let viewPitch = NaN;
+	type SeatMove = { x: number; z: number; yaw: number; stand: [number, number]; phase: 'down' | 'sat' | 'up'; t: number; fromX: number; fromZ: number; fromYaw: number };
+	let seat: SeatMove | null = null;
 	// Riding (Phase 5).
 	const network = new RoadNetwork();
 	let riding: RidingVehicle | null = null;
@@ -440,6 +463,9 @@ export async function createCity(
 			Object.assign(hop, grounded());
 			return stepRiding(dt);
 		}
+		indoor += ((interior ? 1 : 0) - indoor) * (1 - Math.exp(-dt * 3));
+		lighting.setIndoor(indoor, renderer.shadowMap.enabled);
+		if (seat) return stepSeated(dt);
 		const forward = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
 		const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
 		const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
@@ -490,7 +516,7 @@ export async function createCity(
 			routeStuck = travel < speed * dt * 0.25 ? routeStuck + dt : 0;
 			if (routeStuck > 1.5) endRoute(false);
 		}
-		const ground = terrain.height(px, pz);
+		const ground = easeFoot(dt, groundAt(px, pz));
 		player.position.set(px, ground + lift, pz);
 		player.rotation.y = yaw;
 		shadowBlob.position.set(px, ground + 0.09, pz);
@@ -503,21 +529,83 @@ export async function createCity(
 		updateWorld();
 	}
 
-	/** Camera: orbit, pulled in when a building stands between it and the player. */
-	function placeCamera(dt: number, head: number, distance: number) {
+	/** The avatar's floor height: steps up and down (porch, threshold) ease in over a few frames
+	 * instead of popping; bigger jumps (teleport) snap. */
+	function easeFoot(dt: number, ground: number): number {
+		footY = Number.isNaN(footY) || Math.abs(ground - footY) > 0.6 ? ground : footY + (ground - footY) * (1 - Math.exp(-dt * 16));
+		return footY;
+	}
+
+	const SIT_TIME = 0.75;
+	const smooth = (t: number) => t * t * (3 - 2 * t);
+
+	/** Sitting down, seated, standing up: the avatar's root moves between the spot in front of
+	 * the seat and the seat while the Sit pose crossfades in or out. */
+	function stepSeated(dt: number) {
+		const s = seat!;
+		const moving = ['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].some((k) => keys.has(k));
+		if (s.phase === 'sat' && (moving || hop.queued > 0)) beginStand();
+		s.t = Math.min(1, s.t + dt / SIT_TIME);
+		if (s.phase === 'down') {
+			// Turn round first, then lower back onto the seat.
+			let d = s.yaw - s.fromYaw;
+			d = Math.atan2(Math.sin(d), Math.cos(d));
+			yaw = s.fromYaw + d * smooth(Math.min(1, s.t / 0.55));
+			const k = smooth(THREE.MathUtils.clamp((s.t - 0.2) / 0.8, 0, 1));
+			px = s.fromX + (s.x - s.fromX) * k;
+			pz = s.fromZ + (s.z - s.fromZ) * k;
+			if (s.t >= 1) s.phase = 'sat';
+		} else if (s.phase === 'up') {
+			const k = smooth(s.t);
+			px = s.x + (s.stand[0] - s.x) * k;
+			pz = s.z + (s.stand[1] - s.z) * k;
+			if (s.t >= 1) seat = null;
+		}
+		hop.queued = 0;
+		speed = 0;
+		const ground = easeFoot(dt, groundAt(px, pz));
+		player.position.set(px, ground, pz);
+		player.rotation.y = yaw;
+		shadowBlob.position.set(px, ground + 0.09, pz);
+		shadowBlob.scale.setScalar(1);
+		character.animations.update(dt, 0, holding, false, null, 0, 1);
+		placeCamera(dt, ground + EYE - (seat?.phase === 'sat' ? 0.4 : 0), camDistance);
+		updateWorld();
+	}
+
+	function beginStand() {
+		if (!seat || seat.phase === 'up') return;
+		character.animations.posture?.(null);
+		seat.phase = 'up';
+		seat.t = 0;
+		seat.x = px;
+		seat.z = pz;
+	}
+
+	/** Camera: orbit, pulled in when a building stands between it and the player. Indoors it
+	 * stays close and under the ceiling. */
+	function placeCamera(dt: number, head: number, requested: number) {
+		const limit = interior ? Math.min(requested, interior.maxDistance) : requested;
+		const pitchLimit = interior ? Math.min(camPitch, 0.32) : camPitch;
+		const ease = 1 - Math.exp(-dt * 4);
+		viewDistance = Number.isNaN(viewDistance) ? limit : viewDistance + (limit - viewDistance) * ease;
+		viewPitch = Number.isNaN(viewPitch) ? pitchLimit : viewPitch + (pitchLimit - viewPitch) * ease;
+		const distance = viewDistance;
 		desired.set(
-			px + Math.sin(camYaw) * Math.cos(camPitch) * distance,
-			head + Math.sin(camPitch) * distance,
-			pz + Math.cos(camYaw) * Math.cos(camPitch) * distance
+			px + Math.sin(camYaw) * Math.cos(viewPitch) * distance,
+			head + Math.sin(viewPitch) * distance,
+			pz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
 		);
 		const f = rayFraction(collision, px, head, pz, desired.x, desired.y, desired.z);
 		if (f < 1) {
 			const k = Math.max(0.18, f - 0.4 / distance);
 			desired.set(px + (desired.x - px) * k, head + (desired.y - head) * k, pz + (desired.z - pz) * k);
 		}
-		desired.y = Math.max(desired.y, terrain.height(desired.x, desired.z) + 0.8);
+		desired.y = Math.max(desired.y, groundAt(desired.x, desired.z) + 0.8);
+		if (interior) desired.y = Math.min(desired.y, interior.ceiling - 0.3);
 		camera.position.lerp(desired, 1 - Math.exp(-dt * (f < 1 ? 20 : 8)));
-		camera.position.y = Math.max(camera.position.y, terrain.height(camera.position.x, camera.position.z) + 0.6);
+		camera.position.y = Math.max(camera.position.y, groundAt(camera.position.x, camera.position.z) + 0.6);
+		if (interior) camera.position.y = Math.min(camera.position.y, interior.ceiling - 0.25);
 		cameraTarget.set(px, head, pz);
 		camera.lookAt(cameraTarget);
 	}
@@ -777,6 +865,29 @@ export async function createCity(
 		get walking() {
 			return route.length > 0;
 		},
+		setGround(provider) {
+			groundProvider = provider;
+		},
+		setInterior(view) {
+			interior = view;
+		},
+		sit(s, standAt) {
+			if (riding || seat) return false;
+			if (route.length) endRoute(false);
+			seat = { x: s.x, z: s.z, yaw: s.yaw, stand: standAt, phase: 'down', t: 0, fromX: px, fromZ: pz, fromYaw: yaw };
+			character.emotes.stop();
+			character.animations.posture?.('Sit');
+			return true;
+		},
+		stand() {
+			beginStand();
+		},
+		get seated() {
+			return !!seat;
+		},
+		invalidateShadows() {
+			renderer.shadowMap.needsUpdate = true;
+		},
 		onFrame(callback) {
 			frameCallbacks.add(callback);
 			return () => frameCallbacks.delete(callback);
@@ -792,6 +903,8 @@ export async function createCity(
 		setRiding(next, x, z, newYaw) {
 			const token = ++rideToken;
 			if (route.length) endRoute(false);
+			if (seat) character.animations.posture?.(null);
+			seat = null;
 			endAuto(false);
 			rider?.detach(scene);
 			rider = null;
@@ -864,6 +977,9 @@ export async function createCity(
 			ride.speed = 0;
 			if (far) {
 				endAuto(false);
+				if (seat) character.animations.posture?.(null);
+				seat = null;
+				footY = NaN;
 				const g = terrain.height(px, pz);
 				camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
 				chunks.update(px, pz);
@@ -916,6 +1032,9 @@ export async function createCity(
 			}
 			speed = 0;
 			Object.assign(hop, grounded());
+			if (seat) character.animations.posture?.(null);
+			seat = null;
+			footY = NaN;
 			const g = terrain.height(px, pz);
 			camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
 		},

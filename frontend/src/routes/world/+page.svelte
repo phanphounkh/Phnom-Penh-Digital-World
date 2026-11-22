@@ -20,6 +20,7 @@
 	import { MODES, type TravelMode } from '$lib/game/vehicles/specs';
 	import { market, money, shopping, type Cart, type Product, type Shop } from '$lib/api/market';
 	import type { Interaction, Storefronts } from '$lib/game/shop/Storefronts';
+	import type { BuildingInteraction, Buildings } from '$lib/game/buildings/Buildings';
 	import type { WorldSession } from '$lib/game/net/WorldSession.svelte';
 	import type { EmoteName } from '$lib/game/net/protocol';
 	import { geo } from '$lib/api/endpoints';
@@ -58,6 +59,8 @@
 	let lastReroute = 0;
 	// Shopping (Phase 4)
 	let shops: Storefronts | null = null;
+	let houses: Buildings | null = null;
+	let housePrompt = $state<BuildingInteraction | null>(null);
 	let shopList = $state<Shop[]>([]);
 	let prompt = $state<Interaction | null>(null);
 	let held = $state<Product | null>(null);
@@ -135,6 +138,11 @@
 					onInteraction: (i) => (prompt = i)
 				});
 				(globalThis as { __ppwShops?: unknown }).__ppwShops = shops;
+				const { Buildings } = await import('$lib/game/buildings/Buildings');
+				if (disposed) return;
+				houses = new Buildings(created, (i) => (housePrompt = i));
+				net.remotes.groundAt = (x, z) => houses?.floorAt(x, z) ?? null; // others stand on the floor too
+				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
 				let parkCheck = 0;
 				created.onFrame((dt) => {
 					const me = created.localState();
@@ -146,8 +154,10 @@
 					}
 					if (created.riding) {
 						if (prompt) prompt = null;
+						if (housePrompt) housePrompt = null;
 						return; // no shopping from the saddle
 					}
+					houses?.update(dt, me.x, me.z, me.yaw);
 					shops?.update(me.x, me.z, me.yaw);
 					const here = shops?.shopAt(me.x, me.z) ?? null;
 					if (here?.id !== insideShop?.id) insideShop = here;
@@ -172,7 +182,10 @@
 			if (e.key.toLowerCase() === 'm') panel = panel === 'places' ? '' : 'places';
 			if (e.key.toLowerCase() === 'v') panel = panel === 'garage' ? '' : 'garage';
 			if (e.key.toLowerCase() === 'f' && !panel) rideOrPark();
-			if (e.key.toLowerCase() === 'e' && !panel) void interact();
+			if (e.key.toLowerCase() === 'e' && !panel) {
+				if (housePrompt) houses?.interact();
+				else void interact();
+			}
 			if (e.key.toLowerCase() === 'c') panel = panel === 'cart' ? '' : 'cart';
 			if (e.key.toLowerCase() === 'p') panel = panel === 'people' ? '' : 'people';
 			if (e.key === 'Enter') {
@@ -195,6 +208,8 @@
 			net = null;
 			shops?.dispose();
 			shops = null;
+			houses?.dispose();
+			houses = null;
 			city?.dispose();
 			city = null;
 		};
@@ -578,7 +593,13 @@
 			</div>
 		{/if}
 
-		{#if prompt || held}
+		{#if housePrompt}
+			<div class="world-action absolute bottom-48 left-1/2 -translate-x-1/2" data-testid="house-prompt" data-kind={housePrompt.kind}>
+				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur" onclick={() => houses?.interact()}>
+					Press <kbd class="mx-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">E</kbd> to {housePrompt.label}
+				</button>
+			</div>
+		{:else if prompt || held}
 			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
 				{#if held}
 					<div class="flex items-center gap-3 rounded-2xl bg-paper px-3 py-2 text-ink shadow-xl" data-testid="held-product">
@@ -749,7 +770,7 @@
 					<dt class="font-mono font-semibold">P</dt><dd>People: friends, messages, blocking</dd>
 					<dt class="font-mono font-semibold">Enter</dt><dd>Chat (Tab: nearby ↔ world)</dd>
 					<dt class="font-mono font-semibold">1 – 4</dt><dd>Wave · Sampeah · Cheer · Dance</dd>
-					<dt class="font-mono font-semibold">E</dt><dd>In a shop: pick up, put in the cart, pay at the counter</dd>
+					<dt class="font-mono font-semibold">E</dt><dd>In a shop: pick up, put in the cart, pay at the counter · at a house: open or close the door, sit down, stand up</dd>
 					<dt class="font-mono font-semibold">C</dt><dd>Cart and demo checkout</dd>
 					<dt class="font-mono font-semibold">V</dt><dd>My vehicles: get a bicycle or motorbike, find it, bring it</dd>
 					<dt class="font-mono font-semibold">F</dt><dd>Ride your vehicle when next to it · park it (at the kerb, a car park or an alley)</dd>

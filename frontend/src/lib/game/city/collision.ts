@@ -14,11 +14,15 @@ export interface Wall {
 	bz: number;
 	/** Height of the obstacle in metres (0 = blocks walking only, e.g. water). */
 	h: number;
+	/** Bottom of the obstacle: above head height (a lintel over a doorway) it blocks only the
+	 * camera, never walking. */
+	base: number;
 	poly: number;
 }
 
 interface Footprint {
 	ring: XZ[];
+	overhead: boolean;
 	minX: number;
 	minZ: number;
 	maxX: number;
@@ -28,6 +32,8 @@ interface Footprint {
 const CELL = 12;
 /** Rays below this height pass through doorways (matches the rendered opening). */
 const DOORWAY_HEIGHT = 2.9;
+/** Walls starting this high (or higher) are overhead: the player walks under them. */
+const OVERHEAD = 1.9;
 
 class ChunkColliders {
 	grid = new Map<number, Wall[]>();
@@ -54,13 +60,13 @@ export class CollisionWorld {
 	/** True if (x, z) lies on a doorway (within 6 cm of its segment). */
 	inDoor(x: number, z: number): boolean {
 		for (const d of this.doors) {
-			const [cx, cz] = closestOnSegment(x, z, { ax: d.ax, az: d.az, bx: d.bx, bz: d.bz, h: 0, poly: 0 });
+			const [cx, cz] = closestOnSegment(x, z, { ax: d.ax, az: d.az, bx: d.bx, bz: d.bz, h: 0, base: 0, poly: 0 });
 			if ((cx - x) * (cx - x) + (cz - z) * (cz - z) < 0.0036) return true;
 		}
 		return false;
 	}
 
-	addRing(owner: string, ring: XZ[], height: number): void {
+	addRing(owner: string, ring: XZ[], height: number, base = 0): void {
 		if (ring.length < 3) return;
 		let chunk = this.chunks.get(owner);
 		if (!chunk) this.chunks.set(owner, (chunk = new ChunkColliders()));
@@ -74,11 +80,11 @@ export class CollisionWorld {
 			minZ = Math.min(minZ, z);
 			maxZ = Math.max(maxZ, z);
 		}
-		const poly = chunk.polys.push({ ring, minX, minZ, maxX, maxZ }) - 1;
+		const poly = chunk.polys.push({ ring, overhead: base >= OVERHEAD, minX, minZ, maxX, maxZ }) - 1;
 		for (let i = 0; i < ring.length; i++) {
 			const [ax, az] = ring[i];
 			const [bx, bz] = ring[(i + 1) % ring.length];
-			const wall: Wall = { ax, az, bx, bz, h: height, poly };
+			const wall: Wall = { ax, az, bx, bz, h: height, base, poly };
 			const c0x = Math.floor(Math.min(ax, bx) / CELL);
 			const c1x = Math.floor(Math.max(ax, bx) / CELL);
 			const c0z = Math.floor(Math.min(az, bz) / CELL);
@@ -131,7 +137,7 @@ export class CollisionWorld {
 	containing(x: number, z: number): XZ[] | null {
 		for (const chunk of this.chunks.values())
 			for (const p of chunk.polys) {
-				if (x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
+				if (p.overhead || x < p.minX || x > p.maxX || z < p.minZ || z > p.maxZ) continue;
 				if (pointInRing(x, z, p.ring)) return p.ring;
 			}
 		return null;
@@ -179,6 +185,7 @@ export function moveCircle(
 		for (let iteration = 0; iteration < 3; iteration++) {
 			let pushed = false;
 			for (const w of world.query(x, z, radius + 0.1, scratch)) {
+				if (w.base >= OVERHEAD) continue; // a lintel: walk under it
 				const [cx, cz] = closestOnSegment(x, z, w);
 				let nx = x - cx,
 					nz = z - cz;
@@ -222,7 +229,7 @@ export function escapeFootprint(
 	for (let i = 0; i < ring.length; i++) {
 		const [ax, az] = ring[i];
 		const [bx, bz] = ring[(i + 1) % ring.length];
-		const [cx, cz] = closestOnSegment(x, z, { ax, az, bx, bz, h: 0, poly: 0 });
+		const [cx, cz] = closestOnSegment(x, z, { ax, az, bx, bz, h: 0, base: 0, poly: 0 });
 		const d = Math.hypot(cx - x, cz - z);
 		if (d < best.d) {
 			const len = d || 1;
@@ -261,7 +268,7 @@ export function rayFraction(
 		const u = ((w.ax - ax) * dz - (w.az - az) * dx) / denom;
 		if (t <= 0 || t >= best || u < 0 || u > 1) continue;
 		const y = ay + (by - ay) * t;
-		if (y >= w.h) continue;
+		if (y >= w.h || y < w.base) continue;
 		if (world.doors.length && y < DOORWAY_HEIGHT && world.inDoor(ax + dx * t, az + dz * t)) continue;
 		best = t;
 	}

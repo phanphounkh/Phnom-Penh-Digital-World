@@ -141,6 +141,35 @@ using each building's height, pulls the camera in front of buildings that would 
 Performance mode turns off shadows, lowers the pixel ratio to 0.75 and shrinks the streaming
 radius to 300 m. It switches on automatically after about 3 s of frames slower than 24 fps.
 
+### Enterable buildings (`lib/game/buildings/`)
+
+Hand-built buildings that you can walk into, placed on open land (`placements.ts`). The first is
+the riverside house, 25 m north-west of the Riverside spawn. Each building is a GLB plus a JSON
+spec from `tools/blender/generate_house.py` (`spec.ts` types it).
+
+- **Loading:** `Buildings` (created by the world page) fetches the spec, GLB and lightmap when the
+  player comes within 160 m, and frees them beyond 230 m.
+- **Collision:** wall rectangles. The doorway is a real gap between two of them. The lintel above
+  it is a wall with a base height, which blocks the camera but not walking. Furniture footprints
+  block walking only. The door leaf is its own collision owner and is rebuilt every frame while it
+  swings, so a closed door is solid and an open one is not.
+- **Door:** E near the doorway and facing it shows "Press E to Open Door" or "Press E to Close
+  Door". The leaf swings in 0.9 s. It won't close on a player standing in its path. The state
+  (`{ open, changedAt }`, newest wins) is local today and ready to be synced between players.
+- **Floor:** `CityController.setGround` lifts the avatar onto the floor, porch and step, and step
+  heights are eased.
+- **Indoor camera:** inside the room, with hysteresis at the doorway, `setInterior` keeps the
+  camera within 3.2 m of the avatar and under the ceiling, and lowers its pitch.
+- **Seats:** E in front of a seat walks to its stand-up spot, then `sit()` turns the avatar,
+  lowers it onto the seat and holds the `Sit` clip (`RealisticAnimations.posture`). E or any
+  movement key stands it up again.
+- **Rendering:** the interior is unlit and multiplied by lightmaps baked in Blender Cycles. The
+  day map has the bulb, the floor lamp and sun and sky through the windows; the night map has the
+  lamps only. The shader blends the two by the city's night factor, so the interior costs no
+  runtime lights and 15 draw calls for the whole house (plain-coloured parts are vertex colours on
+  one material). The exterior, door and glass use PBR materials and take the city's sun, sky and
+  shadows. Indoors, the sky fill turns into a warm lamp tone so the avatar matches the room.
+
 ## Multiplayer protocol (`/api/v1/world/ws`)
 
 JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.py`).

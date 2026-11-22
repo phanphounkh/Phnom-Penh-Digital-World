@@ -39,6 +39,8 @@ export interface Gait {
 	update(dt: number, speed: number, holding?: boolean, picking?: boolean, targets?: null, travel?: number, direction?: number): void;
 	/** Vertical state from the engine (jumping/falling); rigs without air clips ignore it. */
 	airborne?(flying: boolean, vy: number): void;
+	/** Hold a pose such as 'Sit' (null: back to the gait); rigs without it ignore it. */
+	posture?(clip: string | null): void;
 	dispose(): void;
 }
 

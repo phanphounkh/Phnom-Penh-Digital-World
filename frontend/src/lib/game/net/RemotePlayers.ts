@@ -132,7 +132,7 @@ export class RemotePlayers {
 			rideToken: 0, avatarToken: 0, yaw: card.yaw, wheel: 0, lean: 0, steer: 0
 		};
 		remote.interp.push({ t: performance.now(), x: card.x, z: card.z, yaw: card.yaw, s: 0 });
-		group.position.set(card.x, this.terrain.height(card.x, card.z), card.z);
+		group.position.set(card.x, this.ground(card.x, card.z), card.z);
 		this.scene.add(group);
 		this.players.set(card.id, remote);
 		this.dress(remote);
@@ -228,6 +228,13 @@ export class RemotePlayers {
 		remote.bubble = { sprite, until: performance.now() + BUBBLE_MS };
 	}
 
+	/** Floors that differ from the terrain (enterable buildings): a height, or null. */
+	groundAt: ((x: number, z: number) => number | null) | null = null;
+
+	private ground(x: number, z: number): number {
+		return this.groundAt?.(x, z) ?? this.terrain.height(x, z);
+	}
+
 	update(dt: number, viewer: THREE.Vector3): void {
 		const now = performance.now();
 		for (const remote of this.players.values()) {
@@ -236,7 +243,7 @@ export class RemotePlayers {
 			const travel = Math.hypot(snap.x - remote.x, snap.z - remote.z);
 			remote.x = snap.x;
 			remote.z = snap.z;
-			remote.group.position.set(snap.x, this.terrain.height(snap.x, snap.z), snap.z);
+			remote.group.position.set(snap.x, this.ground(snap.x, snap.z), snap.z);
 			if (remote.vehicle && remote.rider) {
 				// Riding: wheels from the distance covered, steering and lean from the turn rate.
 				const kind = remote.vehicle.kind;

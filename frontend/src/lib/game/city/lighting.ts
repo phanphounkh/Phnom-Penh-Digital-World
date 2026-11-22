@@ -47,6 +47,11 @@ const DAY_GROUND = new THREE.Color('#8c806a');
 const NIGHT_GROUND = new THREE.Color('#3a3128');
 const MOON_DIR = new THREE.Vector3(0.35, 0.8, 0.45).normalize();
 
+/** Indoors: a warm fill like the house's lamps (ceiling bulb, floor lamp) and its tiled floor. */
+const INDOOR_FILL = 1.7;
+const INDOOR_SKY = new THREE.Color('#ffe2bd');
+const INDOOR_GROUND = new THREE.Color('#9c7a5c');
+
 export class DayNight {
 	mode: TimeMode = 'live';
 	night = 0;
@@ -63,6 +68,32 @@ export class DayNight {
 	private envKey = '';
 	/** Sky environment lighting (Quality); off in Performance mode. */
 	environment = true;
+	/** The sun's (or moon's) and the sky fill's settings from the time of day, before `indoor`. */
+	private sunIntensity = 3.1;
+	private hemiIntensity = 1;
+	private hemiSky = new THREE.Color();
+	private hemiGround = new THREE.Color();
+	private indoor = 0;
+	private indoorShadows = true;
+
+	/** Indoors (0 … 1, eased by the engine): the avatar and other lit objects take the room's
+	 * warm lamp light instead of the sun and sky. Cheap: call every frame; no new lights. */
+	setIndoor(k: number, shadows: boolean): void {
+		if (Math.abs(k - this.indoor) < 1e-4 && shadows === this.indoorShadows) return;
+		this.indoor = k;
+		this.indoorShadows = shadows;
+		this.applyIndoor();
+	}
+
+	private applyIndoor(): void {
+		const { sun, hemi } = this.refs;
+		const k = this.indoor;
+		// With shadows the roof already shades the sun; without them, soften it more.
+		sun.intensity = this.sunIntensity * (1 - k * (this.indoorShadows ? 0.25 : 0.6));
+		hemi.intensity = THREE.MathUtils.lerp(this.hemiIntensity, INDOOR_FILL, k);
+		hemi.color.copy(this.hemiSky).lerp(INDOOR_SKY, k);
+		hemi.groundColor.copy(this.hemiGround).lerp(INDOOR_GROUND, k);
+	}
 
 	constructor(private refs: LightingRefs, private lat: number, private lon: number) {}
 
@@ -129,18 +160,19 @@ export class DayNight {
 			this.lightDir.set(dx, Math.max(dy, 0.06), dz).normalize();
 			const warmth = THREE.MathUtils.clamp(pos.elevation / 25, 0, 1);
 			sun.color.copy(LOW_SUN).lerp(DAY_SUN, warmth);
-			sun.intensity = 3.2 * THREE.MathUtils.clamp(Math.sin((pos.elevation + 3) * THREE.MathUtils.DEG2RAD) * 2.2, 0, 1);
+			this.sunIntensity = 3.2 * THREE.MathUtils.clamp(Math.sin((pos.elevation + 3) * THREE.MathUtils.DEG2RAD) * 2.2, 0, 1);
 		} else {
 			this.lightDir.copy(MOON_DIR);
 			sun.color.copy(MOON);
-			sun.intensity = 0.7 * this.night;
+			this.sunIntensity = 0.7 * this.night;
 		}
 		// Keep nights playable: a city sky glow plus moonlight, never pitch black. The sky
 		// environment map now carries part of the daylight fill, so the hemisphere is weaker.
 		const dusk = THREE.MathUtils.clamp(1 - Math.abs(pos.elevation - 4) / 12, 0, 1) * day;
-		hemi.intensity = this.environment ? 0.75 + 0.25 * day : 0.9 + 0.6 * day; // no env map: the old fill
-		hemi.color.copy(NIGHT_SKY).lerp(DAY_SKY, day).lerp(DUSK_SKY, dusk * 0.6);
-		hemi.groundColor.copy(NIGHT_GROUND).lerp(DAY_GROUND, day).lerp(DUSK_GROUND, dusk * 0.5);
+		this.hemiIntensity = this.environment ? 0.75 + 0.25 * day : 0.9 + 0.6 * day; // no env map: the old fill
+		this.hemiSky.copy(NIGHT_SKY).lerp(DAY_SKY, day).lerp(DUSK_SKY, dusk * 0.6);
+		this.hemiGround.copy(NIGHT_GROUND).lerp(DAY_GROUND, day).lerp(DUSK_GROUND, dusk * 0.5);
+		this.applyIndoor();
 
 		sky.material.uniforms.sunPosition.value.set(dx, dy, dz);
 		sky.visible = this.night < 0.97;

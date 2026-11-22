@@ -180,6 +180,26 @@ describe('RealisticAnimations', () => {
 		expect(a.gait).toBe('idle');
 	});
 
+	it('holds a posture (Sit) over everything else and returns to idle', () => {
+		const root = skeleton();
+		const a = new RealisticAnimations(root, clips(), SPEEDS);
+		run(a, 20, 0);
+		a.posture('Sit');
+		run(a, 60, 0);
+		expect(a.gait).toBe('sit');
+		expect(head(root)).toBeCloseTo(marker('Sit'));
+		a.playEmote('wave'); // no emotes while seated
+		expect(a.playing).toBeNull();
+		run(a, 10, 3); // speed is ignored while seated
+		expect(a.gait).toBe('sit');
+		a.posture(null);
+		run(a, 60, 0);
+		expect(a.gait).toBe('idle');
+		expect(head(root)).toBeCloseTo(marker('Idle'));
+		a.posture('NoSuchClip'); // missing clips are ignored
+		expect(a.gait).toBe('idle');
+	});
+
 	it('leans into turns about the feet, and forward when speeding up', () => {
 		const holder = new THREE.Group();
 		const root = skeleton();
