@@ -15,11 +15,13 @@ import { addSurfaceDetail, type SurfaceKind } from './surfaces';
 
 /** Doorways cut into the facades at once (walk-in shops and enterable buildings, the nearest
  * ones) and the shops' opening height (m). */
-export const MAX_DOORS = 32;
+export const MAX_DOORS = 36;
 /** Of those, the walk-in shops get the nearest SHOP_DOORS and the enterable buildings up to
- * BUILDING_DOORS (each system keeps its own count, so neither crowds out the other). */
+ * BUILDING_DOORS: their front doors, and the windows of the one the player is at (each system
+ * keeps its own count, so neither crowds out the other). */
 export const SHOP_DOORS = 16;
 export const BUILDING_DOORS = 16;
+export const BUILDING_WINDOWS = 4;
 export const DOOR_HEIGHT = 2.9;
 
 /** A doorway in an OSM facade: centre and along-wall unit (world), base y, half width, height
@@ -32,6 +34,9 @@ export interface Doorway {
 	y: number;
 	halfWidth: number;
 	height?: number;
+	/** A window: cut from `y` (its sill) up; a door's cut also reaches a little below its base
+	 * (where the ground dips under the facade). */
+	window?: boolean;
 }
 
 const BAY = 128;
@@ -243,7 +248,8 @@ export class CityMaterials {
 		for (let i = 0; i < n; i++) {
 			const d = all[i];
 			this.doorA.value[i].set(d.x, d.z, d.ux, d.uz);
-			this.doorB.value[i].set(d.y, d.halfWidth, d.height ?? DOOR_HEIGHT);
+			const below = d.window ? 0 : 0.5;
+			this.doorB.value[i].set(d.y - below, d.halfWidth, (d.height ?? DOOR_HEIGHT) + below);
 		}
 		this.doorCount.value = n;
 	}
@@ -289,7 +295,7 @@ for (int i = 0; i < ${MAX_DOORS}; i++) {
 	vec2 ppwD = vPpwWorld.xz - uDoorA[i].xy;
 	float ppwAlong = dot(ppwD, uDoorA[i].zw);
 	float ppwAcross = dot(ppwD, vec2(-uDoorA[i].w, uDoorA[i].z));
-	if (abs(ppwAlong) < uDoorB[i].y && abs(ppwAcross) < 0.3 && vPpwWorld.y < uDoorB[i].x + uDoorB[i].z) discard;
+	if (abs(ppwAlong) < uDoorB[i].y && abs(ppwAcross) < 0.3 && vPpwWorld.y > uDoorB[i].x && vPpwWorld.y < uDoorB[i].x + uDoorB[i].z) discard;
 }`
 				)
 				.replace(

@@ -341,7 +341,7 @@ describe('floor plans: rooms behind the entrance room, joined by doors', () => {
 			const [sx, sz] = l.switches[0];
 			expect(roomAt(spec, sx, sz, l.level ?? 0)?.id).toBe(l.id);
 		}
-		const inner = spec.doors.slice(1);
+		const inner = spec.doors.slice(1).filter((d) => d.kind !== 'window');
 		expect(inner.length).toBe(spec.rooms.length - (spec.levels ? 2 : 1)); // one less than rooms, per storey
 		for (const d of inner) {
 			expect(root.getObjectByName(d.node)).toBeTruthy();
@@ -570,5 +570,98 @@ describe('a home with an upper floor, in the game', () => {
 		walk(head, foot);
 		expect(b.storeyOn).toBe(0);
 		expect(b.floorAt(...frame.toWorld(foot))!).toBeCloseTo(ground, 3);
+	});
+});
+
+describe('windows: open them and climb through', () => {
+	it('ground-floor windows where the street front is straight, each with a clear spot inside', () => {
+		const plan = planFor(10, 9, 7);
+		const { spec, root } = buildInterior('house', plan, 4, { value: 0 });
+		const windows = spec.doors.filter((d) => d.kind === 'window');
+		expect(windows).toHaveLength(2);
+		const front = spec.interior.max[1];
+		for (const wn of windows) {
+			expect(root.getObjectByName(wn.node)).toBeTruthy();
+			expect(wn.sill).toBeGreaterThan(0.5);
+			expect(wn.level).toBe(0);
+			// Where one lands climbing in: free of furniture.
+			const landing: XZ = [wn.center[0], front - 0.75];
+			expect(spec.blockers.every((ring) => !inRect(ring, landing, 0.35))).toBe(true);
+		}
+		// A front that is not straight away from the door: no windows to open there.
+		const crooked = buildInterior('house', { ...plan, front: [plan.doorX - 0.6, plan.doorX + 0.6] }, 4, { value: 0 }).spec;
+		expect(crooked.doors.filter((d) => d.kind === 'window')).toHaveLength(0);
+	});
+});
+
+describe('climbing in through a window, in the game', () => {
+	const ring = rect(0, 0, 10, 9);
+	const payload = {
+		key: '0_0',
+		ix: 0,
+		iz: 0,
+		size: 500,
+		roads: [{ id: 1, name: 'Street', name_en: null, name_km: null, cls: 'residential', w: 8, oneway: false, bridge: false, layer: 0, pts: [[-60, 11], [60, 11]] }],
+		buildings: [{ id: 557, name: null, name_km: null, kind: 'house', h: 6, min_h: 0, hs: 'osm', colour: null, polys: [[ring]] }],
+		areas: [],
+		landmarks: [],
+		features: []
+	} as unknown as ChunkPayload;
+
+	it('opens a window from the street, climbs in (Space), and climbs back out', () => {
+		const climbs: { points: [number, number][]; lift: number }[] = [];
+		let jump: (() => boolean) | null = null;
+		const doorSets = new Map<string, Doorway[]>();
+		const host: BuildingHost = {
+			scene: new THREE.Scene(),
+			collision: new CollisionWorld(),
+			terrain: FLAT,
+			materials: { night: { value: 0 }, setDoorSet: (o, d) => doorSets.set(o, d) },
+			seated: false,
+			setGround: () => {},
+			setInterior: () => {},
+			sit: () => true,
+			stand: () => {},
+			walkTo: (_p, done) => done?.(true),
+			invalidateShadows: () => {},
+			climb: (points, lift) => (climbs.push({ points, lift }), true),
+			setJumpOverride: (fn) => (jump = fn)
+		};
+		const b = new Buildings(host, () => {}, [], undefined, { payloads: () => [payload], list: [{ id: 557, type: 'house' }] });
+		b.update(0.016, 0, 20, 0);
+		const { spec, frame } = b.list[0];
+		const wn = spec.doors.find((d) => d.kind === 'window')!;
+		const [cx, cz] = wn.center;
+		const front = spec.interior.max[1];
+		/** Stand at a local point facing the window; the prompt then. */
+		const at = (lx: number, lz: number) => {
+			const [x, z] = frame.toWorld([lx, lz]);
+			const [tx, tz] = frame.toWorld([cx, cz]);
+			b.update(1 / 30, x, z, Math.atan2(tx - x, tz - z));
+			return b.interaction;
+		};
+		// From the street: the window's cut-out is in the facade, and E opens it.
+		expect(at(cx, cz + 1.0)).toMatchObject({ kind: 'door', door: wn.id, label: 'Open Window' });
+		expect(doorSets.get('buildings')!.some((d) => d.window)).toBe(true);
+		expect(jump!()).toBe(false); // shut: a jump is a jump
+		b.interact();
+		for (let t = 0; t < SWING_TIME + 0.2; t += 1 / 30) at(cx, cz + 1.0);
+		expect(b.interaction).toMatchObject({ kind: 'door', label: 'Close Window', hint: 'Space to climb through' });
+		// Space: over the sill to a free spot inside.
+		expect(jump!()).toBe(true);
+		const [mid, inside] = climbs[0].points.map((p) => frame.toLocal(p[0], p[1]));
+		expect(mid[0]).toBeCloseTo(cx);
+		expect(inside[1]).toBeLessThan(front);
+		expect(climbs[0].lift).toBeGreaterThan(wn.sill!);
+		// And from inside, back out to the street (where the casement swings it cannot be closed:
+		// climbing is what E offers).
+		expect(at(inside[0], inside[1])).toMatchObject({ kind: 'climb', label: 'Climb Through Window' });
+		expect(jump!()).toBe(true);
+		const outside = frame.toLocal(...climbs[1].points[1]);
+		expect(outside[1]).toBeGreaterThan(cz);
+		// Facing away from it, no climb.
+		const [x, z] = frame.toWorld([cx, cz + 1.0]);
+		b.update(1 / 30, x, z, Math.atan2(0, 1) + frame.yaw);
+		expect(jump!()).toBe(false);
 	});
 });

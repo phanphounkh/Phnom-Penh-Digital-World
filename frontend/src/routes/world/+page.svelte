@@ -608,10 +608,15 @@
 			</div>
 		{/if}
 		{#if housePrompt}
-			<div class="world-action absolute bottom-48 left-1/2 -translate-x-1/2" data-testid="house-prompt" data-kind={housePrompt.kind}>
+			<div class="world-action absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5" data-testid="house-prompt" data-kind={housePrompt.kind}>
 				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur" onclick={() => houses?.interact()}>
 					Press <kbd class="mx-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">E</kbd> to {housePrompt.label}
 				</button>
+				{#if housePrompt.kind === 'door' && housePrompt.hint}
+					<button class="rounded-full bg-river-950/70 px-3 py-1 text-xs font-semibold shadow backdrop-blur" data-testid="house-hint" onclick={() => houses?.climbThrough()}>
+						<kbd class="mr-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">Space</kbd>{housePrompt.hint.replace(/^Space /, '')}
+					</button>
+				{/if}
 			</div>
 		{:else if prompt || held}
 			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>

@@ -518,6 +518,9 @@ export function upperRooms(ground: FloorPlan): FloorPlan {
 
 /** A flight of stairs in the entrance room: its plan, the way it climbs, and the landings kept
  * clear at its foot (below) and at its head (above). */
+/** An opening in a wall: [from, to] along it, [bottom, top] above the floor. */
+type Opening = [number, number, number, number];
+
 interface Flight {
 	rect: Rect;
 	axis: 'x' | 'z';
@@ -554,9 +557,28 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	const rise = storey / steps,
 		run = steps * STAIR.tread;
 
-	/** Doorways and inner doors' swings, kept clear of furniture (and stairs). */
+	/** Casement windows that open on the ground floor's street front, where the real facade is
+	 * straight (so their cut-out in it lines up): one each side of the door, filling a home's
+	 * window or in the middle of a shopfront. Climbed through from the street or from inside. */
+	const top = Math.min(H - 0.35, 2.4);
+	const regions: [number, number][] =
+		type === 'house'
+			? [[Math.max(-w / 2 + 0.4, g0 - 0.5 - 1.6), g0 - 0.5], [g1 + 0.5, Math.min(w / 2 - 0.4, g1 + 0.5 + 1.6)]]
+			: [[-w / 2 + 0.4, g0 - 0.35], [g1 + 0.35, w / 2 - 0.4]];
+	const sill = type === 'house' ? 1.0 : 0.7;
+	const windowTop = type === 'house' ? Math.min(top, 2.2) : top;
+	const windows = regions
+		.map(([ra, rb], k) => {
+			const ww = Math.min(type === 'house' ? 1.2 : 1.0, rb - ra);
+			const c = (ra + rb) / 2;
+			return { id: `window-${k}`, region: k, a: c - ww / 2, b: c + ww / 2, x: c };
+		})
+		.filter((wn) => wn.b - wn.a >= 0.8 && wn.a >= plan.front[0] - 0.05 && wn.b <= plan.front[1] + 0.05);
+
+	/** Doorways and inner doors' swings (and where one lands inside a window), kept clear of
+	 * furniture (and stairs). */
 	const zones = (fp: FloorPlan, entranceDoor: boolean): Rect[] => {
-		const out: Rect[] = entranceDoor ? [[dx - 0.65, dx + 0.65, d / 2 - 1.4, d / 2]] : [];
+		const out: Rect[] = entranceDoor ? [[dx - 0.65, dx + 0.65, d / 2 - 1.4, d / 2], ...windows.map((wn): Rect => [wn.x - 0.5, wn.x + 0.5, d / 2 - 1.15, d / 2])] : [];
 		const half = INNER_DOOR.width / 2;
 		for (const dr of fp.doors) {
 			out.push([dr.x - half - 0.08, dr.x + half + 0.08, dr.z + T / 2, dr.z + T / 2 + 1.1]);
@@ -698,15 +720,19 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 
 	// ── The shell of a storey: floor, walls with doorways, wainscot, ceiling, windows, stairs ──
 	const div = (len: number) => Math.max(1, Math.round(len / 0.5));
-	/** Openings in a room's back (z0) or front (z1) wall: [xa, xb, top]. */
-	const openings = (room: RoomPlan, side: 'back' | 'front'): [number, number, number][] => {
-		const out: [number, number, number][] = [];
-		for (const dr of doors) if ((side === 'back' && dr.front === room.id) || (side === 'front' && dr.back === room.id)) out.push([dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, INNER_DOOR.height]);
-		if (side === 'front' && room === entrance && L === 0) out.push([g0, g1, DOOR_H]);
+	/** Openings in a room's back (z0) or front (z1) wall: [xa, xb, bottom, top] (doors from the
+	 * floor; windows from their sill). */
+	const openings = (room: RoomPlan, side: 'back' | 'front'): Opening[] => {
+		const out: Opening[] = [];
+		for (const dr of doors) if ((side === 'back' && dr.front === room.id) || (side === 'front' && dr.back === room.id)) out.push([dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, 0, INNER_DOOR.height]);
+		if (side === 'front' && room === entrance && L === 0) {
+			out.push([g0, g1, 0, DOOR_H]);
+			for (const wn of windows) out.push([wn.a, wn.b, sill, windowTop]);
+		}
 		return out.sort((p, q) => p[0] - q[0]);
 	};
 	/** Spans of [a0, a1] outside the openings. */
-	const spans = (a0: number, a1: number, open: [number, number, number][]) => {
+	const spans = (a0: number, a1: number, open: Opening[]) => {
 		const out: [number, number][] = [];
 		let a = a0;
 		for (const [oa, ob] of open) {
@@ -767,9 +793,19 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 					facing > 0
 						? b.quad([a, y0, z], [c, y0, z], [c, y1, z], [a, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)))
 						: b.quad([c, y0, z], [a, y0, z], [a, y1, z], [c, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)));
-				for (const [a, c] of spans(x0, x1, open)) quad(a, c, 0, H);
-				for (const [a, c, top] of open) quad(a, c, top, H);
-				for (const [a, c] of spans(x0, x1, open)) b.box(a, c, 0, st.bandH, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
+				const band = (a: number, c: number, y1: number) => b.box(a, c, 0, y1, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
+				for (const [a, c] of spans(x0, x1, open)) {
+					quad(a, c, 0, H);
+					band(a, c, st.bandH);
+				}
+				for (const [a, c, bottom, top] of open) {
+					// Under a window: wall (and wainscot) up to its sill.
+					if (bottom > 0) {
+						quad(a, c, 0, bottom);
+						band(a, c, Math.min(st.bandH, bottom));
+					}
+					quad(a, c, top, H);
+				}
 			}
 			b.quad([x0, 0, z1], [x0, 0, z0], [x0, H, z0], [x0, H, z1], wall, 'wall', null, div(z1 - z0), nv);
 			b.quad([x1, 0, z0], [x1, 0, z1], [x1, H, z1], [x1, H, z0], wall, 'wall', null, div(z1 - z0), nv);
@@ -1128,7 +1164,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// Counter by the door with a register, on the side away from the door.
 		const side = dx > 0 ? -1 : 1;
 		const ccx = side * (W / 2 - 0.9);
-		const ccz = z1 - 1.2;
+		// (Further in if a window's landing spot is in the way.)
+		const ccz = [z1 - 1.2, z1 - 1.75].find((z) => free(room, [ccx - 0.82, ccx + 0.82, z - 0.32, z + 0.32])) ?? z1 - 1.2;
 		if (free(room, [ccx - 0.82, ccx + 0.82, ccz - 0.32, ccz + 0.32])) {
 			b.box(ccx - 0.8, ccx + 0.8, 0, 0.95, ccz - 0.3, ccz + 0.3, hex('#c45a2d'));
 			b.box(ccx - 0.82, ccx + 0.82, 0.95, 0.99, ccz - 0.32, ccz + 0.32, hex('#efe7d6'));
@@ -1272,7 +1309,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// wide one along the counter (where people queue, and the way to the kitchen).
 		let n = 0;
 		const cz = z0 + 0.95;
-		for (let z = z1 - 1.4; z > cz + 2.1; z -= 2.3)
+		// (The first row stands back from the windows, where one lands climbing in.)
+		for (let z = z1 - (windows.length ? 2.25 : 1.4); z > cz + 2.1; z -= 2.3)
 			for (let x = x0 + 0.95; x < x1 - 0.85; x += 2.2) {
 				if (Math.abs(x - dx) < 1.0 && z > z1 - 2.6) continue;
 				if (!free(room, [x - 0.38, x + 0.38, z - 1.0, z + 1.0])) continue;
@@ -1415,15 +1453,24 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	b.box(g0 - 0.08, g0, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
 	b.box(g1, g1 + 0.08, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
 	b.box(g0 - 0.08, g1 + 0.08, DOOR_H, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
-	// Windows on the street front: shopfronts (shop, café), one either side of the door (home).
-	const top = Math.min(H - 0.35, 2.4);
-	if (type !== 'house') {
-		pane(-w / 2 + 0.4, g0 - 0.35, 0.7, top);
-		pane(g1 + 0.35, w / 2 - 0.4, 0.7, top);
-	} else {
-		pane(Math.max(-w / 2 + 0.4, g0 - 0.5 - 1.6), g0 - 0.5, 1.0, Math.min(top, 2.2));
-		pane(g1 + 0.5, Math.min(w / 2 - 0.4, g1 + 0.5 + 1.6), 1.0, Math.min(top, 2.2));
-	}
+	// Windows on the street front: a casement that opens in each (in the middle of a
+	// shopfront, the rest painted glass), or painted glass where the facade is not straight.
+	regions.forEach(([ra, rb], k) => {
+		const wn = windows.find((x) => x.region === k);
+		if (!wn) return pane(ra, rb, sill, windowTop);
+		pane(ra, wn.a - 0.06, sill, windowTop);
+		pane(wn.b + 0.06, rb, sill, windowTop);
+		// The reveal through the wall to the facade (jambs, head, sill), a sill board, a frame.
+		const [ga, gb, y0, y1] = [wn.a, wn.b, sill, windowTop];
+		b.quad([ga, y0, fz], [ga, y0, d / 2], [ga, y1, d / 2], [ga, y1, fz], entranceWall, 'wall'); // faces +X
+		b.quad([gb, y0, d / 2], [gb, y0, fz], [gb, y1, fz], [gb, y1, d / 2], entranceWall, 'wall'); // faces -X
+		b.quad([ga, y1, d / 2], [gb, y1, d / 2], [gb, y1, fz], [ga, y1, fz], entranceWall, 'wall'); // faces down
+		b.quad([ga, y0, fz], [gb, y0, fz], [gb, y0, d / 2], [ga, y0, d / 2], entranceWall, 'wall'); // faces up
+		b.box(ga - 0.06, gb + 0.06, y0 - 0.04, y0, d / 2 - 0.14, d / 2, trim);
+		b.box(ga - 0.06, ga, y0, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
+		b.box(gb, gb + 0.06, y0, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
+		b.box(ga - 0.06, gb + 0.06, y1, y1 + 0.06, d / 2 - 0.02, d / 2, trim);
+	});
 	const switches0 = furnish();
 	const storeys: { level: number; doors: InnerDoor[]; light: LightContext }[] = [{ level: 0, doors, light: ctx }];
 	storeyMeshes('', FLOOR_LIFT, switches0);
@@ -1512,6 +1559,26 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			});
 			doorSpecs.push({ id: dr.id, label: dr.label, node, hinge: [hx, dr.z], width: innerW, thickness: 0.04, height: INNER_DOOR.height, openYaw: Math.PI / 2, center: [dr.x, dr.z], outward: [0, 1], level });
 		}
+	// The windows' casements, hinged on their left jamb like the doors, swinging in.
+	for (const wn of windows) {
+		const hx = wn.a + 0.02,
+			hz = d / 2 + plan.wall / 2;
+		const lw = wn.b - wn.a - 0.04,
+			lh = windowTop - sill - 0.02;
+		const node = `Window_${wn.id}`;
+		leafNode(node, hx, hz, 0, (lb) => {
+			const frame = hex(type === 'cafe' ? '#3e2a1e' : type === 'shop' ? '#9aa3a8' : '#6e4a2c');
+			const y = sill + 0.01;
+			lb.box(0, lw, y, y + 0.07, -0.02, 0.02, frame);
+			lb.box(0, lw, y + lh - 0.07, y + lh, -0.02, 0.02, frame);
+			lb.box(0, 0.06, y + 0.07, y + lh - 0.07, -0.02, 0.02, frame);
+			lb.box(lw - 0.06, lw, y + 0.07, y + lh - 0.07, -0.02, 0.02, frame);
+			lb.box(0.06, lw - 0.06, y + 0.07, y + lh - 0.07, -0.008, 0.008, hex('#cfe2ea'), [0.7, 0.3]);
+			lb.box(lw - 0.14, lw - 0.1, y + lh / 2 - 0.08, y + lh / 2 + 0.08, -0.05, 0.05, hex('#c8a24a'));
+		});
+		doorSpecs.push({ id: wn.id, label: 'Window', node, hinge: [hx, hz], width: lw, thickness: 0.04, height: lh, openYaw: Math.PI / 2, center: [wn.x, hz], outward: [0, 1], level: 0, kind: 'window', sill });
+	}
+
 	// The sign: on the facade, centred over the door, kept within the room's width.
 	const pal = SIGN_NAMES[type];
 	const sw = Math.min(1.8, w - 0.4);
@@ -1540,7 +1607,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 				walls.push(rect(p.at - T / 2, p.at + T / 2, p.from, p.to));
 				continue;
 			}
-			const gaps = ds.filter((dr) => Math.abs(dr.z - p.at) < 1e-6).map((dr): [number, number, number] => [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, 0]);
+			const gaps = ds.filter((dr) => Math.abs(dr.z - p.at) < 1e-6).map((dr): Opening => [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, 0, INNER_DOOR.height]);
 			for (const [a, c] of spans(p.from, p.to, gaps.sort((m, n) => m[0] - n[0]))) walls.push(rect(a, c, p.at - T / 2, p.at + T / 2));
 			for (const [a, c] of gaps) lintels.push({ ring: rect(a, c, p.at - T / 2, p.at + T / 2), base: lift + INNER_DOOR.height });
 		}

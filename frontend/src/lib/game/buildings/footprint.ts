@@ -45,6 +45,9 @@ export interface Plan {
 	/** Door centre on the entrance wall (local X), its width. */
 	doorX: number;
 	doorWidth: number;
+	/** The stretch of the entrance wall (local X, round the door) along which the real facade is
+	 * straight and on the room's front line: windows can be opened there. */
+	front: [number, number];
 	/** The door on the facade, world: centre and along-wall unit (for the facade cut-out and the
 	 * collision gap). */
 	facade: { x: number; z: number; ux: number; uz: number };
@@ -370,6 +373,16 @@ export function planInterior(b: BuildingInput, around: Surroundings): { ok: true
 					rz = cz + s.nz * (s.half - depth / 2) + s.tz * slide;
 				// Local X (rotation.y frame) is (cos yaw, -sin yaw) = (nz, -nx); the door's local X:
 				const doorX = (ix - (rx + s.nx * depth / 2)) * s.nz + (iz - (rz + s.nz * depth / 2)) * -s.nx;
+				// Along the front line (local X), how far each way the facade stays straight.
+				const onFront = (lx: number) => {
+					const px = rx + s.nx * (depth / 2 + wall) + s.nz * lx,
+						pz = rz + s.nz * (depth / 2 + wall) - s.nx * lx;
+					return ringDistance(px, pz, b.ring) <= 0.12;
+				};
+				let lo = doorX,
+					hi = doorX;
+				while (lo - 0.25 >= -width / 2 && onFront(lo - 0.25)) lo -= 0.25;
+				while (hi + 0.25 <= width / 2 && onFront(hi + 0.25)) hi += 0.25;
 				best = {
 					x: rx,
 					z: rz,
@@ -381,6 +394,7 @@ export function planInterior(b: BuildingInput, around: Surroundings): { ok: true
 					height: b.h,
 					doorX,
 					doorWidth: L.door,
+					front: [lo, hi],
 					facade: { x: fx, z: fz, ux: s.tx, uz: s.tz }
 				};
 			}

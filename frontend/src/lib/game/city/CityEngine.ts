@@ -110,6 +110,13 @@ export interface CityController {
 	sit(seat: { x: number; z: number; yaw: number }, standAt: [number, number]): boolean;
 	stand(): void;
 	readonly seated: boolean;
+	/** Climb through an opening (a window): from here over `points[0]` to `points[1]`, rising
+	 * `lift` metres at the top, taking `time` seconds, without collision. False if the avatar is
+	 * busy (riding, seated, climbing). */
+	climb(points: [number, number][], lift: number, time: number, onDone?: (done: boolean) => void): boolean;
+	readonly climbing: boolean;
+	/** Called when jump is pressed: returning true takes the jump (a window to climb through). */
+	setJumpOverride(fn: (() => boolean) | null): void;
 	/** Something static changed near the player (a building appeared): re-render shadows. */
 	invalidateShadows(): void;
 	/** The loaded chunks' data (buildings, roads…), e.g. to find buildings to open. */
@@ -319,6 +326,13 @@ export async function createCity(
 	let viewPitch = NaN;
 	type SeatMove = { x: number; z: number; yaw: number; stand: [number, number]; phase: 'down' | 'sat' | 'up'; t: number; fromX: number; fromZ: number; fromYaw: number };
 	let seat: SeatMove | null = null;
+	/** Climbing through a window (see controller.climb). */
+	let climb: { from: [number, number]; mid: [number, number]; to: [number, number]; lift: number; t: number; time: number; done?: (done: boolean) => void } | null = null;
+	let jumpOverride: (() => boolean) | null = null;
+	/** Jump pressed: a window to climb through takes it, else a jump. */
+	const jump = () => {
+		if (!jumpOverride?.()) hop.queued = JUMP_BUFFER;
+	};
 	// Riding (Phase 5).
 	const network = new RoadNetwork();
 	let riding: RidingVehicle | null = null;
@@ -376,7 +390,7 @@ export async function createCity(
 		const k = e.key.toLowerCase();
 		if (k === ' ') {
 			e.preventDefault(); // no page scroll, no click on a focused HUD button
-			if (!e.repeat) hop.queued = JUMP_BUFFER;
+			if (!e.repeat) jump();
 			return;
 		}
 		if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(k)) {
@@ -473,6 +487,7 @@ export async function createCity(
 		indoor += ((interior ? 1 : 0) - indoor) * (1 - Math.exp(-dt * 3));
 		indoorLamp += ((interior?.lamp ?? 1) - indoorLamp) * (1 - Math.exp(-dt * 6));
 		lighting.setIndoor(indoor, renderer.shadowMap.enabled, indoorLamp);
+		if (climb) return stepClimb(dt);
 		if (seat) return stepSeated(dt);
 		const forward = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
 		const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
@@ -579,6 +594,37 @@ export async function createCity(
 		character.animations.update(dt, 0, holding, false, null, 0, 1);
 		placeCamera(dt, ground + EYE - (seat?.phase === 'sat' ? 0.4 : 0), camDistance);
 		updateWorld();
+	}
+
+	/** Through a window: up to the sill and over it, down on the other side (an arc, no
+	 * collision: the walls are what is being climbed through). */
+	function stepClimb(dt: number) {
+		const c = climb!;
+		c.t = Math.min(1, c.t + dt / c.time);
+		const k = smooth(c.t);
+		const [ax, az] = k < 0.5 ? c.from : c.mid;
+		const [bx, bz] = k < 0.5 ? c.mid : c.to;
+		const u = k < 0.5 ? k * 2 : (k - 0.5) * 2;
+		px = ax + (bx - ax) * u;
+		pz = az + (bz - az) * u;
+		yaw = Math.atan2(c.to[0] - c.from[0], c.to[1] - c.from[1]);
+		const lift = c.lift * Math.sin(Math.PI * c.t);
+		hop.queued = 0;
+		speed = 0;
+		const ground = easeFoot(dt, groundAt(px, pz));
+		player.position.set(px, ground + lift, pz);
+		player.rotation.y = yaw;
+		shadowBlob.position.set(px, ground + 0.09, pz);
+		shadowBlob.scale.setScalar(1 - Math.min(lift, 1) * 0.35);
+		character.animations.airborne?.(c.t < 0.9, c.t < 0.5 ? 1 : -1);
+		character.animations.update(dt, 0, holding, false, null, 0, 1);
+		placeCamera(dt, ground + EYE + lift * 0.4, camDistance);
+		updateWorld();
+		if (c.t >= 1) {
+			climb = null;
+			character.animations.airborne?.(false, 0);
+			c.done?.(true);
+		}
 	}
 
 	function beginStand() {
@@ -928,6 +974,19 @@ export async function createCity(
 		stand() {
 			beginStand();
 		},
+		climb(points, lift, time, onDone) {
+			if (riding || seat || climb || points.length < 2) return false;
+			if (route.length) endRoute(false);
+			character.emotes.stop();
+			climb = { from: [px, pz], mid: points[0], to: points[1], lift, t: 0, time, done: onDone };
+			return true;
+		},
+		get climbing() {
+			return !!climb;
+		},
+		setJumpOverride(fn) {
+			jumpOverride = fn;
+		},
 		get seated() {
 			return !!seat;
 		},
@@ -1012,6 +1071,11 @@ export async function createCity(
 			return autoRide || route.length > 0;
 		},
 		setPosition(x, z, newYaw) {
+			if (climb) {
+				const done = climb.done;
+				climb = null;
+				done?.(false);
+			}
 			const far = Math.hypot(x - px, z - pz) > 30;
 			if (far && route.length) endRoute(false);
 			px = x;
@@ -1071,6 +1135,7 @@ export async function createCity(
 			if (p) keys.clear();
 		},
 		async teleport(x, z, headingDeg) {
+			climb = null;
 			await chunks.preload(x, z, 220);
 			({ x: px, z: pz } = escapeFootprint(collision, x, z, RADIUS));
 			if (headingDeg !== undefined) {
@@ -1087,7 +1152,7 @@ export async function createCity(
 		},
 		setKey(key, down) {
 			if (key === ' ') {
-				if (down) hop.queued = JUMP_BUFFER;
+				if (down) jump();
 				return;
 			}
 			if (down) keys.add(key);

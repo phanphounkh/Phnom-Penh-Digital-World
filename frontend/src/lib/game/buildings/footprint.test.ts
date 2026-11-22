@@ -51,6 +51,25 @@ describe('planInterior: which buildings can be entered, and where', () => {
 		expect(p.width).toBeCloseTo(10 - 2 * LIMITS.wall, 1);
 		expect(p.depth).toBeCloseTo(8 - 2 * LIMITS.wall, 1);
 		expect(p.ceiling).toBeCloseTo(3.0);
+		// The facade is straight all along the front: windows can go either side of the door.
+		expect(p.front[0]).toBeLessThan(p.doorX - 3);
+		expect(p.front[1]).toBeGreaterThan(p.doorX + 3);
+	});
+
+	it('measures how far the facade stays straight either side of the door', () => {
+		// The front wall steps back 0.6 m for x > 2. The room shrinks to fit, so the door goes on
+		// the stepped-back part (the rest of the front is too far from the room): the straight
+		// stretch is that part only, never across the step.
+		const stepped: XZ[] = [[-5, -4], [5, -4], [5, 3.4], [2, 3.4], [2, 4], [-5, 4]];
+		const r = planInterior({ ring: stepped, h: 6 }, { roads: [road(10)], neighbours: [] });
+		expect(r.ok).toBe(true);
+		if (!r.ok) return;
+		expect(Math.cos(r.plan.yaw)).toBeCloseTo(1, 3); // yaw 0: local X is world X
+		const worldX = (lx: number) => r.plan.x + lx;
+		expect(r.plan.facade.z).toBeCloseTo(3.4, 1);
+		expect(worldX(r.plan.front[0])).toBeGreaterThanOrEqual(2 - 0.1);
+		expect(worldX(r.plan.front[1])).toBeLessThanOrEqual(5);
+		expect(r.plan.front[0] <= r.plan.doorX && r.plan.doorX <= r.plan.front[1]).toBe(true);
 	});
 
 	it('works the same for a rotated building: the door sits on its wall and faces the road', () => {

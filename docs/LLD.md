@@ -235,6 +235,20 @@ name if it has one.
     stairwell (a railing round it) and front windows; the back rooms are bedrooms and a
     bathroom. Shops and cafés get their family home upstairs.
   - Only the first upper floor is built, even in taller buildings.
+- **Windows:** on the ground floor's street front, wherever the real facade is straight
+  (`Plan.front`, measured by the planner), a casement opens in each window: a home's own windows,
+  or the middle of a shopfront.
+  - The casement is a door of kind `window`, hinged from its sill and swinging in: E opens and
+    closes it ("Open Window").
+  - The wall has a real opening there, with a reveal through to the facade and a sill board.
+    The facade gets a cut-out, but only on the building the player is at (4 window slots of the
+    shader's 36; doors keep theirs), so the street shows them up close and painted windows from
+    afar.
+  - Space at an open window the player faces climbs through it, in or out (the engine's `climb`
+    move): over the sill in a 1.1 s arc, without collision, to a spot kept clear of furniture
+    inside or to the pavement. The prompt shows "Space to climb through". Standing where the
+    casement swings, it cannot be closed, so "Climb Through Window" (E) is offered instead.
+    Anywhere else, Space is a jump.
 - **Storeys in play** (`Buildings`):
   - The player is on one storey of the building they are in, and only that storey's walls,
     furniture and doors are solid: the collision is swapped when they change storey. The swap

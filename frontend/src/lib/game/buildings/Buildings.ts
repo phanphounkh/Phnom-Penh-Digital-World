@@ -18,7 +18,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import type { ChunkPayload } from '$lib/api/types';
 import type { CollisionWorld } from '$lib/game/city/collision';
-import { BUILDING_DOORS, type Doorway } from '$lib/game/city/materials';
+import { BUILDING_DOORS, BUILDING_WINDOWS, type Doorway } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
 import type { XZ as FXZ } from './footprint';
 import { interiorName, interiorType, report, scan, type Candidate, type InteriorType } from './osm';
@@ -77,6 +77,11 @@ export interface BuildingHost {
 	stand(): void;
 	walkTo(points: [number, number][], onDone?: (arrived: boolean) => void): void;
 	invalidateShadows(): void;
+	/** Climbing through windows (optional: tests): the move, whether it is under way, and the
+	 * jump key's hook. */
+	climb?(points: [number, number][], lift: number, time: number, onDone?: (done: boolean) => void): boolean;
+	readonly climbing?: boolean;
+	setJumpOverride?(fn: (() => boolean) | null): void;
 }
 
 /** Where OpenStreetMap buildings to enter come from. */
@@ -92,7 +97,8 @@ export interface OsmSource {
 }
 
 export type BuildingInteraction =
-	| { kind: 'door'; label: string; building: string; door: string }
+	| { kind: 'door'; label: string; building: string; door: string; hint?: string }
+	| { kind: 'climb'; label: string; building: string; door: string }
 	| { kind: 'light'; label: string; building: string; light: string }
 	| { kind: 'toggle'; label: string; building: string; toggle: string }
 	| { kind: 'inspect'; label: string; building: string; item: string }
@@ -141,7 +147,7 @@ interface Loaded {
 	/** An upper storey's nodes: drawn only with the player in the building. */
 	upstairs: THREE.Object3D[];
 	/** Generated interiors: the doorway in the OSM facade (world). */
-	facade: { doorway: Doorway; gap: { ax: number; az: number; bx: number; bz: number; top: number } } | null;
+	facade: { doorway: Doorway; gap: { ax: number; az: number; bx: number; bz: number; top: number }; windows: Doorway[] } | null;
 }
 
 /** The lights levels of a building's materials: channels 0–3, and 4–7 (generated buildings with
@@ -168,6 +174,11 @@ export class Buildings {
 	/** The storey the player is on, in the building `storeyIn` (0 anywhere else). */
 	private storey = 0;
 	private storeyIn: string | null = null;
+	/** The building whose windows are cut into its facade (the one the player is at). */
+	private windowsAt: string | null = null;
+	/** An open window the player faces, near enough to climb through (and where they are,
+	 * locally). */
+	private windowAhead: { building: string; door: string; local: XZ } | null = null;
 	private disposed = false;
 	private walkingToSeat = false;
 	private lastLocal: [number, number] | null = null;
@@ -188,6 +199,22 @@ export class Buildings {
 	) {
 		host.setGround((x, z) => this.floorAt(x, z));
 		host.setCeiling?.((x, y, z) => this.ceilingAt(x, y, z));
+		host.setJumpOverride?.(() => this.climbThrough());
+	}
+
+	/** Jump pressed at an open window the player faces: climb through it (in or out). */
+	climbThrough(): boolean {
+		const w = this.windowAhead;
+		if (!w || !this.host.climb || this.host.seated || this.host.climbing || this.walkingToSeat) return false;
+		const b = this.loaded.get(w.building);
+		const door = b?.doors.find((d) => d.door.spec.id === w.door)?.door;
+		if (!b || !door || door.t < 0.95) return false;
+		const [cx, cz] = door.spec.center;
+		const front = b.spec.interior.max[1]; // the room's front face; the window sits mid-wall
+		const wall = (cz - front) * 2;
+		const to: XZ = w.local[1] > cz ? [cx, front - 0.75] : [cx, front + wall + 0.75];
+		this.closeInspection();
+		return this.host.climb([b.frame.toWorld([cx, cz]), b.frame.toWorld(to)], (door.spec.sill ?? 0.9) + 0.3, 1.1);
 	}
 
 	/** Eligibility of the OSM buildings around (x, z): totals, reasons and the eligible ones
@@ -388,6 +415,11 @@ export class Buildings {
 		}
 		this.updateInside(px, pz);
 		this.updateStorey(px, pz);
+		const at = this.windowBuilding(px, pz);
+		if (at !== this.windowsAt) {
+			this.windowsAt = at;
+			this.refreshDoorways();
+		}
 		if (this.seatedOn && !this.host.seated && !this.walkingToSeat) this.seatedOn = null;
 		if (this.inspecting && Math.hypot(this.inspecting.x - px, this.inspecting.z - pz) > REACH.item + 0.9) this.closeInspection();
 		this.pick(px, pz, yaw);
@@ -397,7 +429,10 @@ export class Buildings {
 	private cull(b: Loaded, px: number, pz: number): void {
 		const d = Math.hypot(b.frame.x - px, b.frame.z - pz);
 		// (A generated interior is seen from the street only through its front door.)
-		const seen = this.inside === b.placement.id || (b.facade ? (b.doors[0]?.door.t ?? 0) > 0 && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
+		// (A generated interior is seen from the street only through its front door or an open
+		// window.)
+		const through = b.doors.some((x, i) => (i === 0 || x.door.spec.kind === 'window') && x.door.t > 0);
+		const seen = this.inside === b.placement.id || (b.facade ? through && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
 		for (const n of b.inside) if (n.visible !== seen) n.visible = seen;
 		const up = this.inside === b.placement.id;
 		for (const n of b.upstairs) if (n.visible !== up) n.visible = up;
@@ -431,7 +466,9 @@ export class Buildings {
 		if (!i) return this.closeInspection();
 		const b = this.loaded.get(i.building);
 		if (!b) return;
-		if (i.kind === 'door') {
+		if (i.kind === 'climb') {
+			this.climbThrough();
+		} else if (i.kind === 'door') {
 			b.doors.find((d) => d.door.spec.id === i.door)?.door.toggle();
 		} else if (i.kind === 'light') {
 			b.lights.find((l) => l.spec.id === i.light)?.state.toggle();
@@ -555,6 +592,7 @@ export class Buildings {
 	private pick(px: number, pz: number, worldYaw: number): void {
 		let found: BuildingInteraction | null = null;
 		let best = Infinity;
+		let ahead: Buildings['windowAhead'] = null;
 		for (const b of this.loaded.values()) {
 			const id = b.placement.id;
 			if (this.host.seated && this.seatedOn?.building === id) {
@@ -588,6 +626,11 @@ export class Buildings {
 			for (const { door } of b.doors) {
 				if (!onStorey(door.spec)) continue;
 				const [cx, cz] = door.spec.center;
+				// An open window close in front of the player: Space climbs through it.
+				if (door.spec.kind === 'window' && door.t >= 0.95 && door.distance(lx, lz) < 1.4) {
+					const dist = Math.hypot(cx - lx, cz - lz);
+					if (dist < 1e-3 || ((cx - lx) * fx + (cz - lz) * fz) / dist > 0.5) ahead = { building: id, door: door.spec.id, local: [lx, lz] };
+				}
 				if (door.open && door.blocksClosing(lx, lz, PLAYER_RADIUS)) continue;
 				offer({ kind: 'door', label: door.label, building: id, door: door.spec.id }, door.distance(lx, lz), DOOR_REACH, cx, cz, 0.9, 0.1);
 			}
@@ -622,6 +665,12 @@ export class Buildings {
 				if (onStorey(seat) && near(seat.stand[0], seat.stand[1]))
 					offer({ kind: 'sit', label: 'Sit Down', building: id, seat: seat.id }, Math.hypot(seat.stand[0] - lx, seat.stand[1] - lz), REACH.seat, seat.x, seat.z, 0.75, 0.0);
 		}
+		this.windowAhead = this.host.climbing ? null : ahead;
+		const w = this.windowAhead;
+		const f = found as BuildingInteraction | null;
+		if (w && f?.kind === 'door' && f.building === w.building && f.door === w.door) found = { ...f, hint: 'Space to climb through' };
+		// (Standing where the casement swings, it cannot be closed: climbing is what is offered.)
+		else if (w && !f) found = { kind: 'climb', label: 'Climb Through Window', building: w.building, door: w.door };
 		if (!sameInteraction(found, this.current)) {
 			this.current = found;
 			this.onInteraction?.(found);
@@ -726,7 +775,15 @@ export class Buildings {
 			// The opening runs from the street up to the top of the door (the floor is raised).
 			const height = spec.floor + (spec.doors[0]?.height ?? 2.2);
 			const top = frame.ground + height;
+			// The windows' cut-outs: on the facade line (the window sits mid-wall), from the sill.
+			const windows = spec.doors
+				.filter((dr) => dr.kind === 'window')
+				.map((dr): Doorway => {
+					const [wx, wz] = frame.toWorld([dr.center[0], dr.center[1] + p.procedural!.plan.wall / 2]);
+					return { x: wx, z: wz, ux: facade.ux, uz: facade.uz, y: frame.ground + spec.floor + (dr.sill ?? 0.9), halfWidth: dr.width / 2 + 0.02, height: dr.height + 0.02, window: true };
+				});
 			b.facade = {
+				windows,
 				doorway: { x: facade.x, z: facade.z, ux: facade.ux, uz: facade.uz, y: frame.ground, halfWidth: half, height },
 				gap: { ax: facade.x - facade.ux * half, az: facade.z - facade.uz * half, bx: facade.x + facade.ux * half, bz: facade.z + facade.uz * half, top }
 			};
@@ -741,8 +798,29 @@ export class Buildings {
 	/** Cut the doorways of generated interiors into the OSM facades and the collision walls. */
 	private refreshDoorways(): void {
 		const open = [...this.loaded.values()].filter((b) => b.facade);
-		this.host.materials?.setDoorSet?.('buildings', open.map((b) => b.facade!.doorway));
+		// Every front door, and the windows of the building the player is at (no walking gap:
+		// one climbs through a window).
+		const windows = (this.windowsAt ? this.loaded.get(this.windowsAt)?.facade?.windows : undefined) ?? [];
+		this.host.materials?.setDoorSet?.('buildings', [...open.map((b) => b.facade!.doorway), ...windows.slice(0, BUILDING_WINDOWS)]);
 		this.host.collision.setDoors('buildings', open.map((b) => b.facade!.gap));
+	}
+
+	/** The building whose windows are open to the street: the one the player is in, else the
+	 * nearest with windows within 15 m of its front. */
+	private windowBuilding(px: number, pz: number): string | null {
+		const inside = this.inside ? this.loaded.get(this.inside) : undefined;
+		if (inside?.facade?.windows.length) return inside.placement.id;
+		let best: string | null = null;
+		let bestD = 15;
+		for (const b of this.loaded.values()) {
+			if (!b.facade?.windows.length) continue;
+			const d = Math.hypot(b.facade.doorway.x - px, b.facade.doorway.z - pz);
+			if (d < bestD) {
+				best = b.placement.id;
+				bestD = d;
+			}
+		}
+		return best;
 	}
 
 	/** A storey's walls, lintels and furniture (the ground floor's are the spec's own). */
@@ -809,6 +887,7 @@ export class Buildings {
 		for (const id of [...this.loaded.keys()]) this.unload(id);
 		this.host.setGround(null);
 		this.host.setCeiling?.(null);
+		this.host.setJumpOverride?.(null);
 		this.host.setInterior(null);
 	}
 }

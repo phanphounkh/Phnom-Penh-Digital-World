@@ -26,6 +26,10 @@ export interface DoorSpec {
 	outward: XZ;
 	/** The storey it is on (0 = ground floor; see BuildingSpec.levels). */
 	level?: number;
+	/** A casement window rather than a door: its leaf hangs from `sill` (above the floor) and
+	 * one can climb through it when it is open. */
+	kind?: 'door' | 'window';
+	sill?: number;
 }
 
 export interface SeatSpec {
