@@ -226,6 +226,25 @@ name if it has one.
     a narrow shophouse puts them one behind the other, each through the one before.
   - Shops get a storeroom from 8 m deep, cafés a kitchen from 9 m.
   - Every room is reachable from the entrance (tested for many sizes).
+- **Upper floors:** a building tall enough for two storeys (about 7 m) gets stairs and an upper
+  floor, if a straight flight fits in the entrance room. The flight has 14 steep steps, 2.8 m
+  long, against the back wall or a side wall.
+  - The flight is kept clear of doorways, of a café's counter and a shop's fridge, and of the
+    way to every inner door. A 1 m landing at each end must be reachable from the room.
+  - The upper floor stands on the same walls. Its front room is a family room with the
+    stairwell (a railing round it) and front windows; the back rooms are bedrooms and a
+    bathroom. Shops and cafés get their family home upstairs.
+  - Only the first upper floor is built, even in taller buildings.
+- **Storeys in play** (`Buildings`):
+  - The player is on one storey of the building they are in, and only that storey's walls,
+    furniture and doors are solid: the collision is swapped when they change storey. The swap
+    happens half way up the stairs, where walls across the stairwell's ends keep anyone from
+    walking under the stairs or falling down them.
+  - The floor height is the storey's, or the slope of the stairs. The ceiling (indoor camera)
+    is the storey's, or the upper one's over the stairs.
+  - Prompts, room lights and the light on the avatar follow the storey. The upper storey is
+    drawn only while the player is inside.
+  - Lights have eight channels (two vec4 uniforms).
 - **Furniture:** each kind of room has its own templates set against its walls and kept clear of
   doorways and door swings:
   - living room: sofa, TV, altar;

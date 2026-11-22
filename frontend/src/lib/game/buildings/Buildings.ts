@@ -26,7 +26,7 @@ import { buildInterior } from './procedural';
 import { DOOR_REACH, Door, Switch } from './door';
 import { PLACEMENTS } from './placements';
 import { findPath } from './nav';
-import { Frame, bounds, floorAt, isInside, rectDistance, roomAt, type BuildingPlacement, type BuildingSpec, type ItemSpec, type LightSpec, type SeatSpec, type ToggleSpec } from './spec';
+import { Frame, bounds, floorAt, isInside, levelCeiling, levelFloor, rectDistance, roomAt, stairAt, type BuildingPlacement, type BuildingSpec, type ItemSpec, type LightSpec, type SeatSpec, type ToggleSpec, type XZ } from './spec';
 import { TvPicture } from './tv';
 
 /** Load within this distance (m) of the building, unload beyond the second. */
@@ -134,12 +134,22 @@ interface Loaded {
 	appliances: Appliance[];
 	fans: { node: THREE.Object3D; rpm: number }[];
 	/** Shader uniforms shared by every interior material of this building. */
-	uniforms: { uLampsOn: { value: THREE.Vector4 } } | null;
+	uniforms: LampUniforms | null;
 	owner: string;
 	/** Nodes drawn only when the interior can be seen (culling). */
 	inside: THREE.Object3D[];
+	/** An upper storey's nodes: drawn only with the player in the building. */
+	upstairs: THREE.Object3D[];
 	/** Generated interiors: the doorway in the OSM facade (world). */
 	facade: { doorway: Doorway; gap: { ax: number; az: number; bx: number; bz: number; top: number } } | null;
+}
+
+/** The lights levels of a building's materials: channels 0–3, and 4–7 (generated buildings with
+ * an upper floor). */
+type LampUniforms = { uLampsOn: { value: THREE.Vector4 }; uLampsOn2?: { value: THREE.Vector4 } };
+function setLamp(u: LampUniforms, channel: number, level: number): void {
+	if (channel < 4) u.uLampsOn.value.setComponent(channel, level);
+	else u.uLampsOn2?.value.setComponent(channel - 4, level);
 }
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -154,6 +164,10 @@ export class Buildings {
 	private current: BuildingInteraction | null = null;
 	private inside: string | null = null;
 	private insideLamp = -1;
+	private insideCeiling = NaN;
+	/** The storey the player is on, in the building `storeyIn` (0 anywhere else). */
+	private storey = 0;
+	private storeyIn: string | null = null;
 	private disposed = false;
 	private walkingToSeat = false;
 	private lastLocal: [number, number] | null = null;
@@ -240,6 +254,11 @@ export class Buildings {
 		return this.inside;
 	}
 
+	/** The storey the player is on in the building they are inside (0: the ground floor). */
+	get storeyOn(): number {
+		return this.storey;
+	}
+
 	get inspection(): Inspection | null {
 		if (!this.inspecting) return null;
 		const { building, item, title, text } = this.inspecting;
@@ -267,17 +286,73 @@ export class Buildings {
 			const fp = bounds(b.spec.footprint);
 			if (lx < fp.minX || lx > fp.maxX || lz < fp.minZ || lz > fp.maxZ) continue;
 			if (y > b.frame.ground + (b.spec.roofTop ?? b.spec.wallTop)) continue;
-			return b.frame.ground + b.spec.interior.ceiling;
+			return b.frame.ground + this.ceilingHere(b, lx, lz);
 		}
 		return null;
 	}
 
+	/** The storey the player is on in `b` (0 unless they are in it). */
+	private storeyOf(b: Loaded): number {
+		return this.storeyIn === b.placement.id ? this.storey : 0;
+	}
+
+	/** The ceiling over a local point for the player (above the stairs: the upper storey's). */
+	private ceilingHere(b: Loaded, lx: number, lz: number): number {
+		const on = stairAt(b.spec, lx, lz);
+		return levelCeiling(b.spec, on ? on.stair.to : this.storeyOf(b));
+	}
+
 	floorAt(x: number, z: number): number | null {
 		for (const b of this.loaded.values()) {
+			if (b.spec.levels && this.storeyIn === b.placement.id) {
+				// In a building with storeys: the player's storey, or the stairs' slope.
+				const [lx, lz] = b.frame.toLocal(x, z);
+				const fp = bounds(b.spec.footprint);
+				if (lx < fp.minX || lx > fp.maxX || lz < fp.minZ || lz > fp.maxZ) continue;
+				const on = stairAt(b.spec, lx, lz);
+				if (on) {
+					const [f0, f1] = [levelFloor(b.spec, on.stair.from), levelFloor(b.spec, on.stair.to)];
+					return b.frame.ground + f0 + (f1 - f0) * Math.max(0, Math.min(1, on.t));
+				}
+				return b.frame.ground + levelFloor(b.spec, this.storey);
+			}
 			const h = floorAt(b.spec, b.frame, x, z);
 			if (h !== null) return h;
 		}
 		return null;
+	}
+
+	/** On the stairs past half way, the player is on the storey they lead to (its walls and
+	 * furniture become the solid ones); off them, they stay where they are. */
+	private updateStorey(px: number, pz: number): void {
+		const b = this.inside ? this.loaded.get(this.inside) : undefined;
+		if (!b?.spec.levels) {
+			if (this.storeyIn) this.setStorey(null, 0);
+			return;
+		}
+		if (this.storeyIn !== b.placement.id) this.setStorey(b, 0);
+		const [lx, lz] = b.frame.toLocal(px, pz);
+		const on = stairAt(b.spec, lx, lz);
+		if (!on) return;
+		const want = on.t >= 0.5 ? on.stair.to : on.stair.from;
+		if (want !== this.storey) this.setStorey(b, want);
+	}
+
+	private setStorey(b: Loaded | null, storey: number): void {
+		const before = this.storeyIn ? this.loaded.get(this.storeyIn) : undefined;
+		this.storeyIn = b?.placement.id ?? null;
+		this.storey = storey;
+		if (before && before !== b) this.recollide(before);
+		if (b) this.recollide(b);
+		this.current = null;
+	}
+
+	/** Swap a building's collision for the storey the player is on. */
+	private recollide(b: Loaded): void {
+		const c = this.host.collision;
+		c.removeOwner(b.owner);
+		for (const d of b.doors) c.removeOwner(d.owner);
+		this.collide(b);
 	}
 
 	/** Per frame, after the player moved. */
@@ -312,6 +387,7 @@ export class Buildings {
 			this.cull(b, px, pz);
 		}
 		this.updateInside(px, pz);
+		this.updateStorey(px, pz);
 		if (this.seatedOn && !this.host.seated && !this.walkingToSeat) this.seatedOn = null;
 		if (this.inspecting && Math.hypot(this.inspecting.x - px, this.inspecting.z - pz) > REACH.item + 0.9) this.closeInspection();
 		this.pick(px, pz, yaw);
@@ -323,6 +399,8 @@ export class Buildings {
 		// (A generated interior is seen from the street only through its front door.)
 		const seen = this.inside === b.placement.id || (b.facade ? (b.doors[0]?.door.t ?? 0) > 0 && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
 		for (const n of b.inside) if (n.visible !== seen) n.visible = seen;
+		const up = this.inside === b.placement.id;
+		for (const n of b.upstairs) if (n.visible !== up) n.visible = up;
 	}
 
 	private animate(b: Loaded, dt: number): void {
@@ -338,7 +416,7 @@ export class Buildings {
 			const target = l.state.on ? 1 : 0;
 			if (l.level === target) continue;
 			l.level = l.level < target ? Math.min(target, l.level + k) : Math.max(target, l.level - k);
-			if (b.uniforms) b.uniforms.uLampsOn.value.setComponent(l.spec.channel, l.level);
+			if (b.uniforms) setLamp(b.uniforms, l.spec.channel, l.level);
 			for (const g of l.glow) g.material.color.copy(g.lit).multiplyScalar(0.25 + 0.75 * l.level);
 		}
 		for (const a of b.appliances) {
@@ -419,9 +497,12 @@ export class Buildings {
 		// Walk to the spot beside or in front of the seat like a player would, around furniture,
 		// walls and open doors (a straight line could run into a table corner), then sit down.
 		const fp = bounds(b.spec.footprint);
+		const storey = this.storeyOf(b);
+		const { walls, blockers } = this.solids(b, storey);
+		const leaves = b.doors.filter((d) => (d.door.spec.level ?? 0) === storey).map((d) => d.door.leafRing());
 		const path = this.lastLocal
 			? findPath(
-					{ bounds: [fp.minX, fp.maxX, fp.minZ, fp.maxZ], obstacles: [...b.spec.walls, ...b.spec.blockers, ...b.doors.map((d) => d.door.leafRing())], radius: PLAYER_RADIUS + 0.03 },
+					{ bounds: [fp.minX, fp.maxX, fp.minZ, fp.maxZ], obstacles: [...walls, ...blockers, ...leaves], radius: PLAYER_RADIUS + 0.03 },
 					this.lastLocal,
 					seat.stand
 				)
@@ -455,16 +536,20 @@ export class Buildings {
 		const id = inside?.placement.id ?? null;
 		// The room's lamps light the avatar too (a dark room at night stays dark).
 		let lamp = 0;
+		let ceiling = NaN;
 		if (inside) {
 			const [lx, lz] = inside.frame.toLocal(px, pz);
-			const room = roomAt(inside.spec, lx, lz);
-			const group = inside.lights.find((l) => l.spec.channel === (room?.light ?? 0));
+			const storey = this.storeyOf(inside);
+			const room = roomAt(inside.spec, lx, lz, storey);
+			const group = inside.lights.find((l) => l.spec.channel === (room?.light ?? (storey > 0 ? -1 : 0)));
 			lamp = group?.state.on ? 1 : 0;
+			ceiling = inside.frame.ground + this.ceilingHere(inside, lx, lz);
 		}
-		if (id === this.inside && lamp === this.insideLamp) return;
+		if (id === this.inside && lamp === this.insideLamp && (ceiling === this.insideCeiling || (Number.isNaN(ceiling) && Number.isNaN(this.insideCeiling)))) return;
 		this.inside = id;
 		this.insideLamp = lamp;
-		this.host.setInterior(inside ? { ceiling: inside.frame.ground + inside.spec.interior.ceiling, maxDistance: INDOOR_DISTANCE, lamp } : null);
+		this.insideCeiling = ceiling;
+		this.host.setInterior(inside ? { ceiling, maxDistance: INDOOR_DISTANCE, lamp } : null);
 	}
 
 	private pick(px: number, pz: number, worldYaw: number): void {
@@ -498,27 +583,30 @@ export class Buildings {
 					found = i;
 				}
 			};
+			const storey = this.storeyOf(b);
+			const onStorey = (thing: { level?: number }) => (thing.level ?? 0) === storey;
 			for (const { door } of b.doors) {
+				if (!onStorey(door.spec)) continue;
 				const [cx, cz] = door.spec.center;
 				if (door.open && door.blocksClosing(lx, lz, PLAYER_RADIUS)) continue;
 				offer({ kind: 'door', label: door.label, building: id, door: door.spec.id }, door.distance(lx, lz), DOOR_REACH, cx, cz, 0.9, 0.1);
 			}
 			if (!isInside(b.spec, b.frame, px, pz, 0.1)) continue;
 			// Only what is in the player's room (a stove behind a partition is not in reach).
-			const here = b.spec.rooms.length > 1 ? roomAt(b.spec, lx, lz) : null;
+			const here = b.spec.rooms.length > 1 ? roomAt(b.spec, lx, lz, storey) : null;
 			const near = (x: number, z: number) => {
 				if (!here) return true;
-				const there = roomAt(b.spec, x, z);
+				const there = roomAt(b.spec, x, z, storey);
 				return !there || there === here;
 			};
 			for (const l of b.lights)
 				for (const [sx, sz] of l.spec.switches)
-					if (near(sx, sz)) offer({ kind: 'light', label: l.state.on ? 'Turn Lights Off' : 'Turn Lights On', building: id, light: l.spec.id }, Math.hypot(sx - lx, sz - lz), REACH.switch, sx, sz, 0.4, 0.3);
+					if (onStorey(l.spec) && near(sx, sz)) offer({ kind: 'light', label: l.state.on ? 'Turn Lights Off' : 'Turn Lights On', building: id, light: l.spec.id }, Math.hypot(sx - lx, sz - lz), REACH.switch, sx, sz, 0.4, 0.3);
 			for (const a of b.appliances)
-				if (near(a.spec.x, a.spec.z))
+				if (onStorey(a.spec) && near(a.spec.x, a.spec.z))
 					offer({ kind: 'toggle', label: `Turn ${a.state.on ? 'Off' : 'On'} ${a.spec.label}`, building: id, toggle: a.spec.id }, Math.hypot(a.spec.x - lx, a.spec.z - lz), REACH.toggle, a.spec.x, a.spec.z, 0.5, 0.3);
 			for (const item of b.spec.items) {
-				if (!near(item.x, item.z)) continue;
+				if (!onStorey(item) || !near(item.x, item.z)) continue;
 				const open = this.inspecting?.item === item.id;
 				// Looking at something counts a little extra (a picture above a sofa is offered once
 				// the player steps back from the seat).
@@ -527,11 +615,11 @@ export class Buildings {
 			}
 			for (const t of b.spec.tables) {
 				const [x0, x1, z0, z1] = t.rect;
-				if (!near((x0 + x1) / 2, (z0 + z1) / 2)) continue;
+				if (!onStorey(t) || !near((x0 + x1) / 2, (z0 + z1) / 2)) continue;
 				offer({ kind: 'table', label: `Sit at the ${t.label}`, building: id, table: t.id }, rectDistance(t.rect, lx, lz), REACH.table, (x0 + x1) / 2, (z0 + z1) / 2, 0.9, 0.2);
 			}
 			for (const seat of b.spec.seats)
-				if (near(seat.stand[0], seat.stand[1]))
+				if (onStorey(seat) && near(seat.stand[0], seat.stand[1]))
 					offer({ kind: 'sit', label: 'Sit Down', building: id, seat: seat.id }, Math.hypot(seat.stand[0] - lx, seat.stand[1] - lz), REACH.seat, seat.x, seat.z, 0.75, 0.0);
 		}
 		if (!sameInteraction(found, this.current)) {
@@ -587,7 +675,7 @@ export class Buildings {
 		spec: BuildingSpec,
 		root: THREE.Object3D,
 		maps?: { day: THREE.Texture; lamps: THREE.Texture },
-		ownUniforms?: { uLampsOn: { value: THREE.Vector4 } }
+		ownUniforms?: LampUniforms
 	): void {
 		const frame = new Frame(p.x, p.z, p.yaw, this.host.terrain.height(p.x, p.z));
 		const group = root as THREE.Group;
@@ -602,7 +690,7 @@ export class Buildings {
 			return { spec: l, state: new Switch(on), level: on ? 1 : 0, glow: [] };
 		});
 		const uniforms = maps ? prepareMaterials(group, spec, maps, lights, this.host.materials?.night ?? { value: 0 }) : (ownUniforms ?? null);
-		if (ownUniforms) ownUniforms.uLampsOn.value.set(lights[0]?.level ?? 1, lights[1]?.level ?? 0, lights[2]?.level ?? 0, lights[3]?.level ?? 0);
+		if (ownUniforms) for (const l of lights) setLamp(ownUniforms, l.spec.channel, l.level);
 		const appliances: Appliance[] = spec.toggles.map((t) => {
 			const node = group.getObjectByName(t.node) ?? null;
 			const a: Appliance = { spec: t, state: new Switch(false), node, tv: null, screen: null };
@@ -628,7 +716,8 @@ export class Buildings {
 			fans: spec.fans.map((f) => ({ node: group.getObjectByName(f.node), rpm: f.rpm })).filter((f): f is { node: THREE.Object3D; rpm: number } => !!f.node),
 			uniforms,
 			owner,
-			inside: group.children.filter((n) => n.name === 'Interior' || n.name === 'Extras' || n.name === 'Glass' || n.name === 'TVScreen' || n.name === 'StoveFlame' || n.name.startsWith('Fan_') || n.name.startsWith('Inner_')),
+			inside: group.children.filter((n) => n.name.startsWith('Interior') || n.name.startsWith('Extras') || n.name === 'Glass' || n.name === 'TVScreen' || n.name === 'StoveFlame' || n.name.startsWith('Fan_') || n.name.startsWith('Inner_')),
+			upstairs: group.children.filter((n) => n.name.endsWith('_1') || n.name.startsWith('Inner_up-')),
 			facade: null
 		};
 		if (p.procedural) {
@@ -656,14 +745,22 @@ export class Buildings {
 		this.host.collision.setDoors('buildings', open.map((b) => b.facade!.gap));
 	}
 
+	/** A storey's walls, lintels and furniture (the ground floor's are the spec's own). */
+	private solids(b: Loaded, storey: number): { walls: XZ[][]; lintels: { ring: XZ[]; base: number }[]; blockers: XZ[][] } {
+		const level = storey > 0 ? b.spec.levels?.[storey - 1] : undefined;
+		return level ?? b.spec;
+	}
+
 	private collide(b: Loaded): void {
 		const { spec, frame, owner } = b;
 		// Walls stop the camera up to the ridge, so it never ends up inside the roof.
 		const top = frame.ground + (spec.roofTop ?? spec.wallTop);
 		const c = this.host.collision;
-		for (const wall of spec.walls) c.addRing(owner, frame.ring(wall), top);
-		for (const lintel of spec.lintels) c.addRing(owner, frame.ring(lintel.ring), top, frame.ground + lintel.base);
-		for (const ring of spec.blockers) c.addRing(owner, frame.ring(ring), 0);
+		// Only the player's storey is solid (the others are above or below them).
+		const { walls, lintels, blockers } = this.solids(b, this.storeyOf(b));
+		for (const wall of walls) c.addRing(owner, frame.ring(wall), top);
+		for (const lintel of lintels) c.addRing(owner, frame.ring(lintel.ring), top, frame.ground + lintel.base);
+		for (const ring of blockers) c.addRing(owner, frame.ring(ring), 0);
 		for (const [x, z, r] of spec.posts) {
 			const [wx, wz] = frame.toWorld([x, z]);
 			c.addCircle(owner, wx, wz, r);
@@ -671,11 +768,14 @@ export class Buildings {
 		for (const d of b.doors) this.doorCollision(b, d);
 	}
 
-	/** A door leaf blocks walking (and the camera, up to the door's height) where it is now. */
+	/** A door leaf blocks walking (and the camera, up to the door's height) where it is now, on
+	 * the player's storey. */
 	private doorCollision(b: Loaded, d: Loaded['doors'][number]): void {
 		const c = this.host.collision;
 		c.removeOwner(d.owner);
-		c.addRing(d.owner, b.frame.ring(d.door.leafRing()), b.frame.ground + b.spec.floor + d.door.spec.height);
+		const level = d.door.spec.level ?? 0;
+		if (level !== this.storeyOf(b)) return;
+		c.addRing(d.owner, b.frame.ring(d.door.leafRing()), b.frame.ground + levelFloor(b.spec, level) + d.door.spec.height);
 	}
 
 	private unload(id: string): void {
@@ -687,6 +787,10 @@ export class Buildings {
 		if (this.inside === id) {
 			this.inside = null;
 			this.host.setInterior(null);
+		}
+		if (this.storeyIn === id) {
+			this.storeyIn = null;
+			this.storey = 0;
 		}
 		if (this.inspecting?.building === id) this.closeInspection();
 		if (b.facade) this.refreshDoorways();

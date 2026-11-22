@@ -9,13 +9,13 @@ import { SWING_TIME } from './door';
 import { planInterior, type Plan, type XZ } from './footprint';
 import { findPath } from './nav';
 import { PARTITION, buildInterior, planRooms } from './procedural';
-import { Frame, roomAt } from './spec';
+import { Frame, roomAt, type BuildingSpec } from './spec';
 
 const R = 0.35;
 const rect = (cx: number, cz: number, w: number, d: number): XZ[] => [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]];
 
-function planFor(w: number, d: number): Plan {
-	const r = planInterior({ ring: rect(0, 0, w, d), h: 7 }, { roads: [{ pts: [[-60, d / 2 + 6], [60, d / 2 + 6]], w: 8 }], neighbours: [] });
+function planFor(w: number, d: number, h = 7): Plan {
+	const r = planInterior({ ring: rect(0, 0, w, d), h }, { roads: [{ pts: [[-60, d / 2 + 6], [60, d / 2 + 6]], w: 8 }], neighbours: [] });
 	if (!r.ok) throw new Error(r.reason);
 	return r.plan;
 }
@@ -41,10 +41,15 @@ describe('generated interiors', () => {
 				const [x0, z0] = spec.interior.min;
 				const [x1, z1] = spec.interior.max;
 				for (const ring of spec.blockers) for (const [x, z] of ring) expect(x >= x0 - 1e-6 && x <= x1 + 1e-6 && z >= z0 - 1e-6 && z <= z1 + 1e-6).toBe(true);
-				// From just inside the door, every seat's stand-up spot can be walked to.
-				const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...spec.walls, ...spec.blockers], radius: R };
-				const from: XZ = [plan.doorX, z1 - 0.5];
-				for (const s of spec.seats) expect(findPath(area, from, s.stand), `${type} ${s.id} from ${from} to ${s.stand} plan ${plan.width},${plan.depth},${plan.doorX}`).not.toBeNull();
+				// From just inside the door (or, upstairs, the head of the stairs), every seat's
+				// stand-up spot can be walked to.
+				for (const s of spec.seats) {
+					const level = s.level ?? 0;
+					const { walls, blockers } = level ? spec.levels![level - 1] : spec;
+					const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...walls, ...blockers], radius: R };
+					const from: XZ = level ? stairHead(spec) : [plan.doorX, z1 - 0.5];
+					expect(findPath(area, from, s.stand), `${type} ${s.id} from ${from} to ${s.stand} plan ${plan.width},${plan.depth},${plan.doorX}`).not.toBeNull();
+				}
 				for (const t of spec.tables) for (const id of t.seats) expect(spec.seats.some((s) => s.id === id)).toBe(true);
 				// Each kind has its things.
 				if (type === 'cafe') {
@@ -304,20 +309,22 @@ describe('floor plans: rooms behind the entrance room, joined by doors', () => {
 
 	it('every room can be walked into from the entrance, round the furniture', () => {
 		for (const type of ['house', 'shop', 'cafe'] as const)
-			for (const [w, d] of [[5, 9], [8, 12], [13, 9], [4.5, 12.5]]) {
-				const plan = planFor(w, d);
+			for (const [w, d, h] of [[5, 9, 7], [8, 12, 7], [13, 9, 7], [4.5, 12.5, 7], [10, 12.5, 10], [5, 12.5, 10]]) {
+				const plan = planFor(w, d, h);
 				const { spec } = buildInterior(type, plan, 3, { value: 0 });
 				const [x0, z0] = spec.interior.min;
 				const [x1, z1] = spec.interior.max;
-				const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...spec.walls, ...spec.blockers], radius: 0.38 };
-				const from: XZ = [plan.doorX, z1 - 0.5];
 				for (const room of spec.rooms) {
+					const level = room.level ?? 0;
+					const { walls, blockers } = level ? spec.levels![level - 1] : spec;
+					const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...walls, ...blockers], radius: 0.38 };
+					const from: XZ = level ? stairHead(spec) : [plan.doorX, z1 - 0.5];
 					const [rx0, rx1, rz0, rz1] = room.rects[0];
 					// The free spot nearest the middle of the room.
 					const spots: XZ[] = [];
 					for (let x = rx0 + 0.45; x <= rx1 - 0.45; x += 0.25) for (let z = rz0 + 0.45; z <= rz1 - 0.45; z += 0.25) spots.push([x, z]);
 					spots.sort((a, b) => Math.hypot(a[0] - (rx0 + rx1) / 2, a[1] - (rz0 + rz1) / 2) - Math.hypot(b[0] - (rx0 + rx1) / 2, b[1] - (rz0 + rz1) / 2));
-					const spot = spots.find((p) => spec.blockers.every((ring) => !inRect(ring, p, 0.4)));
+					const spot = spots.find((p) => blockers.every((ring) => !inRect(ring, p, 0.4)) && !(spec.stairs ?? []).some((st) => inRect(ringOf(st.rect), p, 0.4)));
 					expect(spot, `${type} ${w}x${d} ${room.id}: some free floor`).toBeTruthy();
 					expect(findPath(area, from, spot!), `${type} ${w}x${d} ${room.id}`).not.toBeNull();
 				}
@@ -332,10 +339,10 @@ describe('floor plans: rooms behind the entrance room, joined by doors', () => {
 		for (const l of spec.lights) {
 			expect(l.switches).toHaveLength(1);
 			const [sx, sz] = l.switches[0];
-			expect(roomAt(spec, sx, sz)?.id).toBe(l.id);
+			expect(roomAt(spec, sx, sz, l.level ?? 0)?.id).toBe(l.id);
 		}
 		const inner = spec.doors.slice(1);
-		expect(inner.length).toBe(spec.rooms.length - 1);
+		expect(inner.length).toBe(spec.rooms.length - (spec.levels ? 2 : 1)); // one less than rooms, per storey
 		for (const d of inner) {
 			expect(root.getObjectByName(d.node)).toBeTruthy();
 			const [cx, cz] = d.center;
@@ -344,6 +351,15 @@ describe('floor plans: rooms behind the entrance room, joined by doors', () => {
 		}
 	});
 });
+
+/** Just past the top of a building's stairs (upstairs). */
+function stairHead(spec: BuildingSpec): XZ {
+	const { rect: [x0, x1, z0, z1], axis, dir } = spec.stairs![0];
+	if (axis === 'x') return [dir > 0 ? x1 + 0.45 : x0 - 0.45, (z0 + z1) / 2];
+	return [(x0 + x1) / 2, dir > 0 ? z1 + 0.45 : z0 - 0.45];
+}
+
+const ringOf = ([x0, x1, z0, z1]: [number, number, number, number]): XZ[] => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
 
 /** Within `margin` of a rectangle given as a ring. */
 function inRect(ring: XZ[], [x, z]: XZ, margin: number): boolean {
@@ -418,5 +434,141 @@ describe('a home with rooms, in the game', () => {
 		const after = b.list[0].lights;
 		expect(after.bedroom).toBe(!before.bedroom);
 		for (const id of Object.keys(before)) if (id !== 'bedroom') expect(after[id]).toBe(before[id]);
+	});
+});
+
+describe('stairs to an upper floor', () => {
+	it('a building tall enough gets stairs and a furnished upper floor; a low one does not', () => {
+		const low = buildInterior('house', planFor(10, 12.5, 6), 1, { value: 0 }).spec;
+		expect(low.stairs).toBeUndefined();
+		expect(low.levels).toBeUndefined();
+		const { spec, root } = buildInterior('house', planFor(10, 12.5, 10), 1, { value: 0 });
+		expect(spec.stairs).toHaveLength(1);
+		expect(spec.levels).toHaveLength(1);
+		const up = spec.rooms.filter((r) => r.level === 1);
+		expect(up.map((r) => r.id)).toContain('up-family');
+		expect(up.length).toBeGreaterThan(1);
+		expect(spec.seats.some((s) => s.level === 1)).toBe(true);
+		expect(root.getObjectByName('Interior_1')).toBeTruthy();
+		// Every upstairs room has its own lights, switched inside it.
+		for (const l of spec.lights.filter((x) => x.level === 1)) {
+			expect(l.switches).toHaveLength(1);
+			expect(roomAt(spec, l.switches[0][0], l.switches[0][1], 1)?.id).toBe(l.id);
+		}
+		// Channels are all different (eight at most).
+		const channels = spec.lights.map((l) => l.channel);
+		expect(new Set(channels).size).toBe(channels.length);
+		expect(Math.max(...channels)).toBeLessThan(8);
+	});
+
+	it('the stairs are in the entrance room, clear of the furniture on both floors, with landings', () => {
+		for (const type of ['house', 'shop', 'cafe'] as const)
+			for (const [w, d] of [[5, 12.5], [8, 12.5], [12.5, 12.5], [6, 9]]) {
+				const { spec } = buildInterior(type, planFor(w, d, 10), 2, { value: 0 });
+				if (!spec.stairs) continue;
+				const at = `${type} ${w}x${d}`;
+				const { rect: [x0, x1, z0, z1], axis, dir } = spec.stairs[0];
+				const [rx0, rx1, rz0, rz1] = spec.rooms[0].rects[0];
+				expect(x0 >= rx0 - 1e-9 && x1 <= rx1 + 1e-9 && z0 >= rz0 - 1e-9 && z1 <= rz1 + 1e-9, at).toBe(true);
+				// The foot (below) and the head (above) each have a landing kept clear.
+				const lo: [number, number, number, number] = axis === 'x' ? [x0 - 0.8, x0, z0, z1] : [x0, x1, z0 - 0.8, z0];
+				const hi: [number, number, number, number] = axis === 'x' ? [x1, x1 + 0.8, z0, z1] : [x0, x1, z1, z1 + 0.8];
+				const [foot, head] = dir > 0 ? [lo, hi] : [hi, lo];
+				const overlap = (ring: XZ[], r: [number, number, number, number]) => {
+					const xs = ring.map((p) => p[0]),
+						zs = ring.map((p) => p[1]);
+					return Math.min(...xs) < r[1] - 1e-6 && Math.max(...xs) > r[0] + 1e-6 && Math.min(...zs) < r[3] - 1e-6 && Math.max(...zs) > r[2] + 1e-6;
+				};
+				for (const ring of spec.blockers) expect(overlap(ring, [x0, x1, z0, z1]) || overlap(ring, foot), at).toBe(false);
+				for (const ring of spec.levels![0].blockers) expect(overlap(ring, [x0, x1, z0, z1]) || overlap(ring, head), at).toBe(false);
+			}
+	});
+});
+
+describe('a home with an upper floor, in the game', () => {
+	// A 10 x 13 m, three-storey building on a street.
+	const ring = rect(0, 0, 10, 13);
+	const payload = {
+		key: '0_0',
+		ix: 0,
+		iz: 0,
+		size: 500,
+		roads: [{ id: 1, name: 'Street', name_en: null, name_km: null, cls: 'residential', w: 8, oneway: false, bridge: false, layer: 0, pts: [[-60, 13], [60, 13]] }],
+		buildings: [{ id: 556, name: null, name_km: null, kind: 'house', h: 10, min_h: 0, hs: 'osm', colour: null, polys: [[ring]] }],
+		areas: [],
+		landmarks: [],
+		features: []
+	} as unknown as ChunkPayload;
+
+	it('walking up the stairs takes the player to the upper floor, and back down', () => {
+		const collision = new CollisionWorld();
+		collision.addRing('chunk', ring, 10);
+		let ceiling = NaN;
+		const host: BuildingHost = {
+			scene: new THREE.Scene(),
+			collision,
+			terrain: FLAT,
+			materials: { night: { value: 0 } },
+			seated: false,
+			setGround: () => {},
+			setInterior: (v) => (ceiling = v?.ceiling ?? NaN),
+			sit: () => true,
+			stand: () => {},
+			walkTo: (_p, done) => done?.(true),
+			invalidateShadows: () => {}
+		};
+		const b = new Buildings(host, () => {}, [], undefined, { payloads: () => [payload], list: [{ id: 556, type: 'house' }] });
+		b.update(0.016, 0, 20, 0);
+		const { spec, frame } = b.list[0];
+		expect(spec.stairs).toBeTruthy();
+		const { rect: [x0, x1, z0, z1], axis, dir } = spec.stairs![0];
+		const mid = axis === 'x' ? (z0 + z1) / 2 : (x0 + x1) / 2;
+		const along = (a: number): XZ => (axis === 'x' ? [a, mid] : [mid, a]);
+		const [lo, hi] = axis === 'x' ? [x0, x1] : [z0, z1];
+		const foot = along(dir > 0 ? lo - 0.5 : hi + 0.5),
+			head = along(dir > 0 ? hi + 0.5 : lo - 0.5);
+		/** Walk in small steps like the player (collision, then the buildings' frame update). */
+		const walk = (from: XZ, to: XZ) => {
+			let [x, z] = frame.toWorld(from);
+			const [tx, tz] = frame.toWorld(to);
+			for (let i = 0; i < 600; i++) {
+				const dx = tx - x,
+					dz = tz - z,
+					l = Math.hypot(dx, dz);
+				if (l < 0.05) break;
+				({ x, z } = moveCircle(host.collision, x, z, (dx / l) * Math.min(l, 0.05), (dz / l) * Math.min(l, 0.05), R));
+				b.update(1 / 60, x, z, Math.atan2(dx, dz));
+			}
+			return [x, z] as XZ;
+		};
+		// Into the house and to the foot of the stairs.
+		const [ex, ez] = spec.doors[0].center;
+		b.interact; // (the door: open it as a player would)
+		const at = frame.toWorld([ex, ez + 1.0]);
+		b.update(0.016, at[0], at[1], Math.PI);
+		const door = b.interaction;
+		expect(door).toMatchObject({ kind: 'door' });
+		b.interact();
+		for (let t = 0; t < SWING_TIME + 0.2; t += 1 / 30) b.update(1 / 30, at[0], at[1], Math.PI);
+		walk([ex, ez + 1.0], [ex, ez - 1.5]);
+		walk([ex, ez - 1.5], foot);
+		expect(b.storeyOn).toBe(0);
+		const ground = b.floorAt(...frame.toWorld(foot))!;
+		// Up: the floor rises with the steps; past half way the player is upstairs.
+		const top = walk(foot, head);
+		expect(b.storeyOn).toBe(1);
+		expect(b.floorAt(...top)!).toBeCloseTo(ground + spec.levels![0].floor - spec.floor, 3);
+		expect(ceiling).toBeCloseTo(spec.levels![0].ceiling, 3);
+		// Upstairs, the family room's switch is offered by the head of the stairs, not a ground
+		// floor one.
+		const sw = spec.lights.find((l) => l.id === 'up-family')!.switches[0];
+		const near = frame.toWorld([head[0] + (sw[0] - head[0]) * 0.5, head[1] + (sw[1] - head[1]) * 0.5]);
+		const [swx, swz] = frame.toWorld([sw[0], sw[1]]);
+		b.update(0.016, near[0], near[1], Math.atan2(swx - near[0], swz - near[1]));
+		expect(b.interaction).toMatchObject({ kind: 'light', light: 'up-family' });
+		// Back down.
+		walk(head, foot);
+		expect(b.storeyOn).toBe(0);
+		expect(b.floorAt(...frame.toWorld(foot))!).toBeCloseTo(ground, 3);
 	});
 });

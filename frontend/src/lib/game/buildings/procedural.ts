@@ -123,6 +123,30 @@ class MeshBuilder {
 		}
 	}
 
+	/** A straight bar from p0 to p1 (a handrail on a slope): `w` wide, `h` high, square ends. */
+	beam(p0: V3, p1: V3, w: number, h: number, color: V3): void {
+		const [dx, , dz] = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+		const l = Math.hypot(dx, dz) || 1;
+		const side: V3 = [(-dz / l) * (w / 2), 0, (dx / l) * (w / 2)];
+		const at = (p: V3, s: number, u: number): V3 => [p[0] + side[0] * s, p[1] + (u * h) / 2, p[2] + side[2] * s];
+		/** A face, wound to face `out`. */
+		const face = (a: V3, b: V3, c: V3, d: V3, out: V3) => {
+			const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+				e2 = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+			const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+			if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] >= 0) this.quad(a, b, c, d, color);
+			else this.quad(a, d, c, b, color);
+		};
+		const up: V3 = [0, 1, 0],
+			down: V3 = [0, -1, 0],
+			right = side,
+			left: V3 = [-side[0], 0, -side[2]];
+		face(at(p0, -1, 1), at(p0, 1, 1), at(p1, 1, 1), at(p1, -1, 1), up);
+		face(at(p0, -1, -1), at(p1, -1, -1), at(p1, 1, -1), at(p0, 1, -1), down);
+		face(at(p0, 1, -1), at(p1, 1, -1), at(p1, 1, 1), at(p0, 1, 1), right);
+		face(at(p0, -1, -1), at(p0, -1, 1), at(p1, -1, 1), at(p1, -1, -1), left);
+	}
+
 	geometry({ light, channel }: { light: Float32Array; channel: Float32Array }): THREE.BufferGeometry {
 		const g = new THREE.BufferGeometry();
 		g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
@@ -138,14 +162,14 @@ class MeshBuilder {
 
 // ── Floor plans ─────────────────────────────────────────────────────────────────────────────
 
-export type RoomKind = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'sales' | 'store' | 'dining' | 'galley';
+export type RoomKind = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'sales' | 'store' | 'dining' | 'galley' | 'family';
 
 export interface RoomPlan {
 	id: string;
 	kind: RoomKind;
 	name: string;
 	rect: Rect;
-	/** Its lights' channel (0–3: the interior shader switches four groups). */
+	/** Its lights' channel (0–7: the interior shader switches eight groups, four per storey). */
 	channel: number;
 }
 
@@ -182,7 +206,8 @@ const ROOM_NAMES: Record<RoomKind, string> = {
 	sales: 'Shop',
 	store: 'Storeroom',
 	dining: 'Café',
-	galley: 'Kitchen'
+	galley: 'Kitchen',
+	family: 'Family Room'
 };
 
 /**
@@ -192,7 +217,7 @@ const ROOM_NAMES: Record<RoomKind, string> = {
  * shophouse. Shops get a storeroom and cafés a kitchen at the back once deep enough. Every room
  * is reachable through doors from the entrance room.
  */
-export function planRooms(type: InteriorType, W: number, D: number, doorX: number): FloorPlan {
+export function planRooms(type: InteriorType, W: number, D: number, doorX: number, upper = false): FloorPlan {
 	const T = PARTITION;
 	const [x0, x1, z0, z1] = [-W / 2, W / 2, -D / 2, D / 2];
 	const rooms: RoomPlan[] = [];
@@ -213,7 +238,9 @@ export function planRooms(type: InteriorType, W: number, D: number, doorX: numbe
 		}
 		// The living room takes the front half (a narrow shophouse's a little less: its other
 		// rooms are one behind the other).
-		const zc = z1 - (W >= 7.2 ? clamp(D * 0.5, 3.6, 6) : clamp(D * 0.35, 3.6, 5));
+		// With an upper floor, a shophouse's bedrooms are upstairs and its living room is deep
+		// enough for the stairs.
+		const zc = z1 - (W >= 7.2 ? clamp(D * 0.5, upper ? 4.9 : 3.6, 6) : upper ? clamp(D * 0.45, 5.0, 5.4) : clamp(D * 0.35, 3.6, 5));
 		room('living', [x0, x1, zc + T / 2, z1]);
 		partitions.push({ axis: 'x', at: zc, from: x0, to: x1 });
 		const back = zc - T / 2;
@@ -225,14 +252,15 @@ export function planRooms(type: InteriorType, W: number, D: number, doorX: numbe
 				const last = i === parts.length - 1;
 				const xb = last ? x1 : xa + width;
 				room(kind, [xa, xb, z0, back]);
-				door(kind, 'living', at(xa, xb, (xa + xb) / 2), zc);
+				// The doors towards the middle of the house (the living room's side walls stay free).
+				door(kind, 'living', at(xa, xb, 0), zc);
 				if (!last) partitions.push({ axis: 'z', at: xb + T / 2, from: z0, to: back });
 				xa = xb + T;
 			});
 		} else {
 			// Narrow (a shophouse): one room behind the other, doors on alternate sides.
 			const B = back - z0;
-			const seq: [RoomKind, number][] = B >= 7.3 ? [['bedroom', 2.9], ['kitchen', 0], ['bathroom', 1.7]] : B >= 4.5 ? [['kitchen', 0], ['bathroom', 1.7]] : [['kitchen', 0]];
+			const seq: [RoomKind, number][] = B >= 7.3 && !upper ? [['bedroom', 2.9], ['kitchen', 0], ['bathroom', 1.7]] : B >= 4.5 ? [['kitchen', 0], ['bathroom', 1.7]] : [['kitchen', 0]];
 			const rest = B - seq.reduce((s, [, depth]) => s + depth, 0) - T * (seq.length - 1);
 			let top = back,
 				line = zc,
@@ -372,11 +400,13 @@ function interiorMaterial(uniforms: Record<string, { value: unknown }>): THREE.M
 			.replace('#include <common>', '#include <common>\nattribute vec2 light;\nattribute float channel;\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;')
 			.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPpwLight = light;\nvPpwChannel = channel;');
 		shader.fragmentShader = shader.fragmentShader
-			.replace('#include <common>', '#include <common>\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;\nuniform vec4 uLampsOn;\nuniform float uNight;\nuniform float uGain;\nuniform vec3 uLampColor;')
+			.replace('#include <common>', '#include <common>\nvarying vec2 vPpwLight;\nflat varying float vPpwChannel;\nuniform vec4 uLampsOn;\nuniform vec4 uLampsOn2;\nuniform float uNight;\nuniform float uGain;\nuniform vec3 uLampColor;')
 			.replace(
 				'#include <color_fragment>',
 				`#include <color_fragment>
-float ppwOn = vPpwChannel < 0.5 ? uLampsOn.x : vPpwChannel < 1.5 ? uLampsOn.y : vPpwChannel < 2.5 ? uLampsOn.z : uLampsOn.w;
+vec4 ppwSet = vPpwChannel < 3.5 ? uLampsOn : uLampsOn2;
+float ppwCh = mod(vPpwChannel, 4.0);
+float ppwOn = ppwCh < 0.5 ? ppwSet.x : ppwCh < 1.5 ? ppwSet.y : ppwCh < 2.5 ? ppwSet.z : ppwSet.w;
 diffuseColor.rgb *= ( vPpwLight.x * ( 1.0 - 0.9 * uNight ) + vPpwLight.y * ppwOn * uLampColor ) * uGain;`
 			);
 	};
@@ -387,7 +417,8 @@ diffuseColor.rgb *= ( vPpwLight.x * ( 1.0 - 0.9 * uNight ) + vPpwLight.y * ppwOn
 export interface ProceduralBuilding {
 	spec: BuildingSpec;
 	root: THREE.Group;
-	uniforms: { uLampsOn: { value: THREE.Vector4 } };
+	/** Lights levels of channels 0–3 and 4–7 (set by Buildings). */
+	uniforms: { uLampsOn: { value: THREE.Vector4 }; uLampsOn2: { value: THREE.Vector4 } };
 }
 
 /** Surfaces per kind of room: walls, a wainscot (or skirting, or tiles) and its height, the floor. */
@@ -399,7 +430,8 @@ const STYLE: Record<RoomKind, { wall: string; band: string; bandH: number; floor
 	sales: { wall: '#f3f3ee', band: '#c9d7d2', bandH: 0.12, floor: ['#e4e2dc', '#cfcdc6'], pattern: 0.5, ceiling: '#ffffff' },
 	store: { wall: '#e6e4de', band: '#9a978f', bandH: 0.12, floor: ['#b9b6ae', '#b1aea6'], pattern: 1.0, ceiling: '#f4f4f2' },
 	dining: { wall: '#efe2cc', band: '#5b3a28', bandH: 1.0, floor: ['#8a5a38', '#7a4c2e'], pattern: 'planks', ceiling: '#f6efe2' },
-	galley: { wall: '#f2efe6', band: '#e0d6c2', bandH: 1.25, floor: ['#cfc8bb', '#b3ab9c'], pattern: 0.3, ceiling: '#fbf8f0' }
+	galley: { wall: '#f2efe6', band: '#e0d6c2', bandH: 1.25, floor: ['#cfc8bb', '#b3ab9c'], pattern: 0.3, ceiling: '#fbf8f0' },
+	family: { wall: '#f0e6d6', band: '#c9b89a', bandH: 0.9, floor: ['#9c6b43', '#8a5c38'], pattern: 'planks', ceiling: '#fbf8f0' }
 };
 
 const SIGN_NAMES = { cafe: 'Café', shop: 'Mini-mart', house: 'House' } as const;
@@ -447,12 +479,65 @@ interface Mount {
 	rect: Rect;
 }
 
-/** Build the interior of a planned building. */
+/** Upper floors: the floor slab between storeys (m); a flight of stairs' width, tread and the
+ * landing kept clear at each end. */
+export const SLAB = 0.3;
+export const STAIR = { width: 0.95, tread: 0.2, landing: 1.0 };
+
+/** The parts of `r` outside `hole`. */
+function minus(r: Rect, hole: Rect | null): Rect[] {
+	if (!hole || !overlaps(r, hole)) return [r];
+	const [x0, x1, z0, z1] = r;
+	const [hx0, hx1, hz0, hz1] = [Math.max(x0, hole[0]), Math.min(x1, hole[1]), Math.max(z0, hole[2]), Math.min(z1, hole[3])];
+	const out: Rect[] = [];
+	if (hz0 > z0) out.push([x0, x1, z0, hz0]);
+	if (hz1 < z1) out.push([x0, x1, hz1, z1]);
+	if (hx0 > x0) out.push([x0, hx0, hz0, hz1]);
+	if (hx1 < x1) out.push([hx1, x1, hz0, hz1]);
+	return out.filter(([a, b, c, e]) => b - a > 1e-6 && e - c > 1e-6);
+}
+
+/** The upper floor: the same rooms (the walls stand on those below) as a family room at the
+ * front, where the stairs come up, and bedrooms and a bathroom behind. */
+export function upperRooms(ground: FloorPlan): FloorPlan {
+	const offset = ground.rooms.length;
+	const ids = new Map<string, string>();
+	let bedrooms = 0;
+	const rooms = ground.rooms.map((r, i): RoomPlan => {
+		const kind: RoomKind = i === 0 ? 'family' : r.kind === 'bathroom' ? 'bathroom' : 'bedroom';
+		const id = kind === 'bedroom' ? `up-bedroom${++bedrooms > 1 ? bedrooms : ''}` : `up-${kind}`;
+		ids.set(r.id, id);
+		return { id, kind, name: ROOM_NAMES[kind], rect: r.rect, channel: offset + i };
+	});
+	const doors = ground.doors.map((d) => {
+		const back = ids.get(d.back)!;
+		return { ...d, id: back, label: `${ROOM_NAMES[rooms.find((r) => r.id === back)!.kind]} Door`, front: ids.get(d.front)!, back };
+	});
+	return { rooms, partitions: ground.partitions, doors };
+}
+
+/** A flight of stairs in the entrance room: its plan, the way it climbs, and the landings kept
+ * clear at its foot (below) and at its head (above). */
+interface Flight {
+	rect: Rect;
+	axis: 'x' | 'z';
+	dir: 1 | -1;
+	foot: Rect;
+	head: Rect;
+	/** The landings' open sides (the room side; the other is against the wall). */
+	footWay: Rect;
+	headWay: Rect;
+}
+
+/** Build the interior of a planned building: the ground floor and, in a building tall enough,
+ * an upper floor reached by stairs. */
 export function buildInterior(type: InteriorType, plan: Plan, seed: number, night: { value: number }, name?: string | null): ProceduralBuilding {
 	const r = rng(seed);
-	// Uniforms shared by all materials of this building (the lights levels are set by Buildings).
+	// Uniforms shared by all materials of this building (the lights levels are set by Buildings):
+	// eight light channels (two storeys of up to four rooms).
 	const uniforms = {
 		uLampsOn: { value: new THREE.Vector4(1, 0, 0, 0) },
+		uLampsOn2: { value: new THREE.Vector4(0, 0, 0, 0) },
 		uNight: night,
 		uGain: { value: PROCEDURAL_GAIN },
 		uLampColor: { value: new THREE.Vector3(1.25, 1.0, 0.75) }
@@ -462,27 +547,100 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		H = plan.ceiling,
 		dx = plan.doorX,
 		T = PARTITION;
-	const layout = planRooms(type, w, d, dx);
-	const { rooms, partitions, doors } = layout;
-	const entrance = rooms[0];
-	const ctx: LightContext = { rooms, entrance: entrance.id, D: d, ceiling: H, lamps: [], blockers: [] };
-	const b = new MeshBuilder();
+	const g0 = dx - plan.doorWidth / 2,
+		g1 = dx + plan.doorWidth / 2;
+	const storey = H + SLAB;
+	const steps = Math.max(12, Math.round(storey / 0.235)); // steep, as in a shophouse
+	const rise = storey / steps,
+		run = steps * STAIR.tread;
+
+	/** Doorways and inner doors' swings, kept clear of furniture (and stairs). */
+	const zones = (fp: FloorPlan, entranceDoor: boolean): Rect[] => {
+		const out: Rect[] = entranceDoor ? [[dx - 0.65, dx + 0.65, d / 2 - 1.4, d / 2]] : [];
+		const half = INNER_DOOR.width / 2;
+		for (const dr of fp.doors) {
+			out.push([dr.x - half - 0.08, dr.x + half + 0.08, dr.z + T / 2, dr.z + T / 2 + 1.1]);
+			out.push([dr.x - half - 0.13, dr.x + half + 0.13, dr.z - T / 2 - 1.15, dr.z - T / 2]);
+		}
+		return out;
+	};
+	/** Stairs along the entrance room's back wall or a side wall, as far from the front door as
+	 * they fit with both landings clear, or null. */
+	const placeStairs = (ground: FloorPlan, upper: FloorPlan): Flight | null => {
+		const [x0, x1, z0, z1] = ground.rooms[0].rect;
+		// Keep the room's own fixture free too: a café's counter, a shop's drinks fridge.
+		const reserved: Rect[] = [];
+		if (type === 'cafe') reserved.push([x1 - 0.5 - Math.min(x1 - x0 - 1.6, 3.6), x1 - 0.5, z0, z0 + 1.35]);
+		// (The fridge goes at the back, on the side of the door: the counter is on the other.)
+		if (type === 'shop') reserved.push(dx > 0 ? [x1 - 1.5, x1, z0, z0 + 0.85] : [x0, x0 + 1.5, z0, z0 + 0.85]);
+		// And a wide way up to each inner door (stairs beside a counter could wall one off).
+		const aisles: Rect[] = type === 'house' ? [] : ground.doors.map((dr) => [dr.x - 0.75, dr.x + 0.75, dr.z + T / 2, dr.z + T / 2 + 2.3]);
+		const below = [...zones(ground, true), ...reserved, ...aisles],
+			above = zones(upper, false);
+		const within = (q: Rect) => q[0] >= x0 - 1e-6 && q[1] <= x1 + 1e-6 && q[2] >= z0 - 1e-6 && q[3] <= z1 + 1e-6;
+		const ok = (q: Rect, clearOf: Rect[]) => within(q) && !clearOf.some((c) => overlaps(q, c));
+		const [SW, LD] = [STAIR.width, STAIR.landing];
+		const options: Flight[] = [];
+		/** The strip beside a landing on the room side, to walk onto it from. */
+		const way = (q: Rect, axis: 'x' | 'z', onLeft: boolean): Rect => (axis === 'x' ? [q[0], q[1], q[3], q[3] + LD] : onLeft ? [q[1], q[1] + LD, q[2], q[3]] : [q[0] - LD, q[0], q[2], q[3]]);
+		for (let a = x0 + LD; a + run + LD <= x1 + 1e-6; a += 0.1)
+			for (const dir of [1, -1] as const) {
+				const lo: Rect = [a - LD, a, z0, z0 + SW],
+					hi: Rect = [a + run, a + run + LD, z0, z0 + SW];
+				const [foot, head] = dir > 0 ? [lo, hi] : [hi, lo];
+				options.push({ rect: [a, a + run, z0, z0 + SW], axis: 'x', dir, foot, head, footWay: way(foot, 'x', false), headWay: way(head, 'x', false) });
+			}
+		for (const [wa, wb] of [[x0, x0 + SW], [x1 - SW, x1]])
+			for (let a = z0 + LD; a + run + LD <= z1 + 1e-6; a += 0.1)
+				for (const dir of [1, -1] as const) {
+					const lo: Rect = [wa, wb, a - LD, a],
+						hi: Rect = [wa, wb, a + run, a + run + LD];
+					const [foot, head] = dir > 0 ? [lo, hi] : [hi, lo];
+					const onLeft = wa === x0;
+					options.push({ rect: [wa, wb, a, a + run], axis: 'z', dir, foot, head, footWay: way(foot, 'z', onLeft), headWay: way(head, 'z', onLeft) });
+				}
+		const far = (f: Flight) => Math.hypot((f.rect[0] + f.rect[1]) / 2 - dx, (f.rect[2] + f.rect[3]) / 2 - d / 2);
+		options.sort((p, q) => far(q) - far(p));
+		return options.find((f) => ok(f.rect, below) && ok(f.foot, below) && ok(f.footWay, below) && ok(f.rect, above) && ok(f.head, above) && ok(f.headWay, above)) ?? null;
+	};
+	// An upper floor in a building tall enough for it, if stairs fit in the entrance room.
+	let ground = planRooms(type, w, d, dx, false);
+	let upper: FloorPlan | null = null;
+	let flight: Flight | null = null;
+	// (A shop or café keeps its upper floor only if the stairs leave room for business below.)
+	const roomy = (fp: FloorPlan) => {
+		const [x0, x1, z0, z1] = fp.rooms[0].rect;
+		return type === 'house' || (x1 - x0) * (z1 - z0) >= (type === 'cafe' ? 40 : 30);
+	};
+	if (plan.height >= FLOOR_LIFT + storey + H + 0.6 && roomy(planRooms(type, w, d, dx, true))) {
+		const withUpper = planRooms(type, w, d, dx, true);
+		const up = upperRooms(withUpper);
+		flight = placeStairs(withUpper, up);
+		if (flight) {
+			ground = withUpper;
+			upper = up;
+		}
+	}
+
 	const seats: SeatSpec[] = [];
 	const tables: TableSpec[] = [];
 	const items: ItemSpec[] = [];
 	const toggles: ToggleSpec[] = [];
-	const extra = new THREE.Group();
+	const root = new THREE.Group();
+	// The storey being built: its plan, mesh builder, lighting, the parts kept clear, and the
+	// stairwell in its floor (above) or its ceiling (below).
+	let L = 0;
+	let rooms = ground.rooms;
+	let doors = ground.doors;
+	let entrance = rooms[0];
+	let current = entrance;
+	let b = new MeshBuilder();
+	let ctx: LightContext = { rooms, entrance: entrance.id, D: d, ceiling: H, lamps: [], blockers: [] };
+	let clear: Rect[] = zones(ground, true);
+	let extra = new THREE.Group();
+	if (flight) clear.push(flight.rect, flight.foot, flight.footWay);
 	const lit = (mb: MeshBuilder) => new THREE.Mesh(mb.geometry(lightUp(mb, ctx)), interiorMaterial(uniforms));
 	const block = (x0: number, x1: number, z0: number, z1: number) => ctx.blockers.push([Math.min(x0, x1), Math.max(x0, x1), Math.min(z0, z1), Math.max(z0, z1)]);
-	const g0 = dx - plan.doorWidth / 2,
-		g1 = dx + plan.doorWidth / 2;
-
-	// Keep doorways (and an inner door's swing) clear of furniture.
-	const clear: Rect[] = [[dx - 0.65, dx + 0.65, d / 2 - 1.4, d / 2]];
-	for (const dr of doors) {
-		clear.push([dr.x - 0.55, dr.x + 0.55, dr.z + T / 2, dr.z + T / 2 + 1.1]);
-		clear.push([dr.x - 0.6, dr.x + 0.6, dr.z - T / 2 - 1.15, dr.z - T / 2]);
-	}
 	/** Inside `room`, clear of doorways and of furniture already placed. */
 	const free = (room: RoomPlan, rc: Rect, margin = 0.02) => {
 		const [x0, x1, z0, z1] = room.rect;
@@ -536,14 +694,15 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		mesh.name = node;
 		extra.add(mesh);
 	};
+	const trim = hex(type === 'cafe' ? '#3e2a1e' : '#f7f5f0');
 
-	// ── The shell of every room: floor, walls with doorways, wainscot, ceiling ────────────────
+	// ── The shell of a storey: floor, walls with doorways, wainscot, ceiling, windows, stairs ──
 	const div = (len: number) => Math.max(1, Math.round(len / 0.5));
 	/** Openings in a room's back (z0) or front (z1) wall: [xa, xb, top]. */
 	const openings = (room: RoomPlan, side: 'back' | 'front'): [number, number, number][] => {
 		const out: [number, number, number][] = [];
 		for (const dr of doors) if ((side === 'back' && dr.front === room.id) || (side === 'front' && dr.back === room.id)) out.push([dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, INNER_DOOR.height]);
-		if (side === 'front' && room === entrance) out.push([g0, g1, DOOR_H]);
+		if (side === 'front' && room === entrance && L === 0) out.push([g0, g1, DOOR_H]);
 		return out.sort((p, q) => p[0] - q[0]);
 	};
 	/** Spans of [a0, a1] outside the openings. */
@@ -557,75 +716,6 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		if (a1 > a) out.push([a, a1]);
 		return out;
 	};
-	for (const room of rooms) {
-		const st = STYLE[room.kind];
-		const [x0, x1, z0, z1] = room.rect;
-		const wall = hex(st.wall);
-		// Floor.
-		const floor = (fx0: number, fx1: number, fz0: number, fz1: number, c: V3) => b.quad([fx0, 0, fz1], [fx1, 0, fz1], [fx1, 0, fz0], [fx0, 0, fz0], c, 'floor');
-		if (st.pattern === 'planks') {
-			for (let z = z0, row = 0; z < z1 - 1e-6; z += 0.18, row++) {
-				const zz = Math.min(z1, z + 0.18);
-				for (let x = x0 - (row % 3) * 0.4, k = 0; x < x1; x += 1.2, k++) {
-					const t = 0.85 + 0.25 * r();
-					floor(Math.max(x0, x), Math.min(x1, x + 1.2), z, zz, hex(k % 2 ? st.floor[0] : st.floor[1]).map((v) => v * t) as V3);
-				}
-			}
-		} else {
-			const s = st.pattern;
-			for (let x = x0, i = 0; x < x1 - 1e-6; x += s, i++)
-				for (let z = z0, k = 0; z < z1 - 1e-6; z += s, k++) floor(x, Math.min(x1, x + s), z, Math.min(z1, z + s), hex((i + k) % 2 ? st.floor[0] : st.floor[1]));
-		}
-		// Walls, facing into the room; the back and front walls with their doorways.
-		const nv = div(H);
-		for (const [side, z, facing] of [['back', z0, 1], ['front', z1, -1]] as const) {
-			const open = openings(room, side);
-			const quad = (a: number, c: number, y0: number, y1: number) =>
-				facing > 0
-					? b.quad([a, y0, z], [c, y0, z], [c, y1, z], [a, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)))
-					: b.quad([c, y0, z], [a, y0, z], [a, y1, z], [c, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)));
-			for (const [a, c] of spans(x0, x1, open)) quad(a, c, 0, H);
-			for (const [a, c, top] of open) quad(a, c, top, H);
-			// Wainscot or tiles, and the door frames.
-			for (const [a, c] of spans(x0, x1, open)) b.box(a, c, 0, st.bandH, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
-		}
-		b.quad([x0, 0, z1], [x0, 0, z0], [x0, H, z0], [x0, H, z1], wall, 'wall', null, div(z1 - z0), nv);
-		b.quad([x1, 0, z0], [x1, 0, z1], [x1, H, z1], [x1, H, z0], wall, 'wall', null, div(z1 - z0), nv);
-		b.box(x0, x0 + 0.012, 0, st.bandH, z0, z1, hex(st.band));
-		b.box(x1 - 0.012, x1, 0, st.bandH, z0, z1, hex(st.band));
-		b.quad([x0, H, z0], [x1, H, z0], [x1, H, z1], [x0, H, z1], hex(st.ceiling), 'ceiling', null, div(x1 - x0), div(z1 - z0));
-	}
-	// The entrance: the reveal through the outside wall to the facade, a sill and a frame.
-	const fz = d / 2 + plan.wall;
-	const entranceWall = hex(STYLE[entrance.kind].wall);
-	b.quad([g0, 0, fz], [g0, 0, d / 2], [g0, DOOR_H, d / 2], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces +X
-	b.quad([g1, 0, d / 2], [g1, 0, fz], [g1, DOOR_H, fz], [g1, DOOR_H, d / 2], entranceWall, 'wall'); // faces -X
-	b.quad([g0, DOOR_H, d / 2], [g1, DOOR_H, d / 2], [g1, DOOR_H, fz], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces down
-	b.quad([g0, 0.002, fz], [g1, 0.002, fz], [g1, 0.002, d / 2], [g0, 0.002, d / 2], hex('#9a948a'), 'floor');
-	b.quad([g0, -FLOOR_LIFT, fz], [g1, -FLOOR_LIFT, fz], [g1, 0.002, fz], [g0, 0.002, fz], hex('#8a847a'), 'wall'); // the sill's front, down to the street
-	const trim = hex(type === 'cafe' ? '#3e2a1e' : '#f7f5f0');
-	b.box(g0 - 0.08, g0, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
-	b.box(g1, g1 + 0.08, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
-	b.box(g0 - 0.08, g1 + 0.08, DOOR_H, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
-	// Inner doorways: through the partition (jambs, head, threshold) and a frame on both faces.
-	for (const dr of doors) {
-		const [ga, gb] = [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2];
-		const [zf, zb] = [dr.z + T / 2, dr.z - T / 2];
-		const h = INNER_DOOR.height;
-		const c = hex(STYLE[roomOf(rooms, dr.x, zf + 0.1).kind].wall);
-		b.quad([ga, 0, zf], [ga, 0, zb], [ga, h, zb], [ga, h, zf], c, 'wall');
-		b.quad([gb, 0, zb], [gb, 0, zf], [gb, h, zf], [gb, h, zb], c, 'wall');
-		b.quad([ga, h, zb], [gb, h, zb], [gb, h, zf], [ga, h, zf], c, 'wall');
-		b.quad([ga, 0.002, zf], [gb, 0.002, zf], [gb, 0.002, zb], [ga, 0.002, zb], hex('#8a7a66'), 'floor');
-		const frame = hex('#e9e2d4');
-		for (const [fa, fb] of [[zf, zf + 0.015], [zb - 0.015, zb]]) {
-			b.box(ga - 0.06, ga, 0, h + 0.06, fa, fb, frame);
-			b.box(gb, gb + 0.06, 0, h + 0.06, fa, fb, frame);
-			b.box(ga - 0.06, gb + 0.06, h, h + 0.06, fa, fb, frame);
-		}
-	}
-
-	// ── Windows on the street front: shopfronts (shop, café), windows either side (home) ─────
 	/** A pane seen from inside: the street, the buildings across it and the sky, in daylight
 	 * (glowing by day only, dark at night). `a`, `c`: its bottom corners, `y0`..`y1`: its height. */
 	const view = (a: XZ, c: XZ, y0: number, y1: number) => {
@@ -647,20 +737,136 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		b.box(x0, x1, y0 - 0.08, y0, d / 2 - 0.08, d / 2, trim);
 		for (let x = x0; x <= x1 + 1e-6; x += (x1 - x0) / Math.max(1, Math.round((x1 - x0) / 1.2))) b.box(x - 0.03, x + 0.03, y0, y1, d / 2 - 0.05, d / 2, trim);
 	};
-	const top = Math.min(H - 0.35, 2.4);
-	if (type !== 'house') {
-		pane(-w / 2 + 0.4, g0 - 0.35, 0.7, top);
-		pane(g1 + 0.35, w / 2 - 0.4, 0.7, top);
-	} else {
-		// A window on each side of the door if there is room (no more than 1.6 m wide).
-		const left: [number, number] = [Math.max(-w / 2 + 0.4, g0 - 0.5 - 1.6), g0 - 0.5];
-		const right: [number, number] = [g1 + 0.5, Math.min(w / 2 - 0.4, g1 + 0.5 + 1.6)];
-		pane(left[0], left[1], 1.0, Math.min(top, 2.2));
-		pane(right[0], right[1], 1.0, Math.min(top, 2.2));
+	function shell(floorHole: Rect | null, ceilingHole: Rect | null) {
+		for (const room of rooms) {
+			const st = STYLE[room.kind];
+			const [x0, x1, z0, z1] = room.rect;
+			const wall = hex(st.wall);
+			// Floor (around a stairwell).
+			const floor = (fx0: number, fx1: number, fz0: number, fz1: number, c: V3) => b.quad([fx0, 0, fz1], [fx1, 0, fz1], [fx1, 0, fz0], [fx0, 0, fz0], c, 'floor');
+			for (const [px0, px1, pz0, pz1] of minus(room.rect, floorHole)) {
+				if (st.pattern === 'planks') {
+					for (let z = pz0, row = 0; z < pz1 - 1e-6; z += 0.18, row++) {
+						const zz = Math.min(pz1, z + 0.18);
+						for (let x = px0 - (row % 3) * 0.4, k = 0; x < px1; x += 1.2, k++) {
+							const t = 0.85 + 0.25 * r();
+							floor(Math.max(px0, x), Math.min(px1, x + 1.2), z, zz, hex(k % 2 ? st.floor[0] : st.floor[1]).map((v) => v * t) as V3);
+						}
+					}
+				} else {
+					const s = st.pattern;
+					for (let x = px0, i = 0; x < px1 - 1e-6; x += s, i++)
+						for (let z = pz0, k = 0; z < pz1 - 1e-6; z += s, k++) floor(x, Math.min(px1, x + s), z, Math.min(pz1, z + s), hex((i + k) % 2 ? st.floor[0] : st.floor[1]));
+				}
+			}
+			// Walls, facing into the room; the back and front walls with their doorways.
+			const nv = div(H);
+			for (const [side, z, facing] of [['back', z0, 1], ['front', z1, -1]] as const) {
+				const open = openings(room, side);
+				const quad = (a: number, c: number, y0: number, y1: number) =>
+					facing > 0
+						? b.quad([a, y0, z], [c, y0, z], [c, y1, z], [a, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)))
+						: b.quad([c, y0, z], [a, y0, z], [a, y1, z], [c, y1, z], wall, 'wall', null, div(c - a), Math.max(1, Math.round((y1 - y0) / 0.5)));
+				for (const [a, c] of spans(x0, x1, open)) quad(a, c, 0, H);
+				for (const [a, c, top] of open) quad(a, c, top, H);
+				for (const [a, c] of spans(x0, x1, open)) b.box(a, c, 0, st.bandH, facing > 0 ? z : z - 0.012, facing > 0 ? z + 0.012 : z, hex(st.band));
+			}
+			b.quad([x0, 0, z1], [x0, 0, z0], [x0, H, z0], [x0, H, z1], wall, 'wall', null, div(z1 - z0), nv);
+			b.quad([x1, 0, z0], [x1, 0, z1], [x1, H, z1], [x1, H, z0], wall, 'wall', null, div(z1 - z0), nv);
+			b.box(x0, x0 + 0.012, 0, st.bandH, z0, z1, hex(st.band));
+			b.box(x1 - 0.012, x1, 0, st.bandH, z0, z1, hex(st.band));
+			// Ceiling (around a stairwell).
+			for (const [cx0, cx1, cz0, cz1] of minus(room.rect, ceilingHole)) b.quad([cx0, H, cz0], [cx1, H, cz0], [cx1, H, cz1], [cx0, H, cz1], hex(st.ceiling), 'ceiling', null, div(cx1 - cx0), div(cz1 - cz0));
+		}
+		// Inner doorways: through the partition (jambs, head, threshold) and a frame on both faces.
+		for (const dr of doors) {
+			const [ga, gb] = [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2];
+			const [zf, zb] = [dr.z + T / 2, dr.z - T / 2];
+			const h = INNER_DOOR.height;
+			const c = hex(STYLE[roomOf(rooms, dr.x, zf + 0.1).kind].wall);
+			b.quad([ga, 0, zf], [ga, 0, zb], [ga, h, zb], [ga, h, zf], c, 'wall');
+			b.quad([gb, 0, zb], [gb, 0, zf], [gb, h, zf], [gb, h, zb], c, 'wall');
+			b.quad([ga, h, zb], [gb, h, zb], [gb, h, zf], [ga, h, zf], c, 'wall');
+			b.quad([ga, 0.002, zf], [gb, 0.002, zf], [gb, 0.002, zb], [ga, 0.002, zb], hex('#8a7a66'), 'floor');
+			const frame = hex('#e9e2d4');
+			for (const [fa, fb] of [[zf, zf + 0.015], [zb - 0.015, zb]]) {
+				b.box(ga - 0.06, ga, 0, h + 0.06, fa, fb, frame);
+				b.box(gb, gb + 0.06, 0, h + 0.06, fa, fb, frame);
+				b.box(ga - 0.06, gb + 0.06, h, h + 0.06, fa, fb, frame);
+			}
+		}
+		// The stairwell through the ceiling: the slab's edges round it.
+		if (ceilingHole) {
+			const [hx0, hx1, hz0, hz1] = ceilingHole;
+			const slab = hex(STYLE[entrance.kind].wall);
+			b.quad([hx0, H, hz0], [hx1, H, hz0], [hx1, storey, hz0], [hx0, storey, hz0], slab, 'wall');
+			b.quad([hx1, H, hz1], [hx0, H, hz1], [hx0, storey, hz1], [hx1, storey, hz1], slab, 'wall');
+			b.quad([hx0, H, hz1], [hx0, H, hz0], [hx0, storey, hz0], [hx0, storey, hz1], slab, 'wall');
+			b.quad([hx1, H, hz0], [hx1, H, hz1], [hx1, storey, hz1], [hx1, storey, hz0], slab, 'wall');
+		}
+	}
+	/** The steps of the flight (solid, one block per tread) and a handrail on its open side. */
+	function stairs(f: Flight) {
+		const [x0, x1, z0, z1] = f.rect;
+		const tread = (k: number): Rect => {
+			const a = k * STAIR.tread,
+				c = (k + 1) * STAIR.tread;
+			if (f.axis === 'x') return f.dir > 0 ? [x0 + a, x0 + c, z0, z1] : [x1 - c, x1 - a, z0, z1];
+			return f.dir > 0 ? [x0, x1, z0 + a, z0 + c] : [x0, x1, z1 - c, z1 - a];
+		};
+		for (let k = 0; k < steps; k++) {
+			const [a0, a1, c0, c1] = tread(k);
+			b.box(a0, a1, 0, (k + 1) * rise, c0, c1, hex(k % 2 ? '#c9bba3' : '#d3c6ae'));
+			b.box(a0, a1, (k + 1) * rise, (k + 1) * rise + 0.02, c0, c1, hex('#8a6a4a'));
+		}
+		// The open side (away from the wall it runs along): balusters and a sloping rail.
+		const [rx0, rx1, rz0, rz1] = entrance.rect;
+		const openSide = f.axis === 'x' ? (z0 - rz0 < rz1 - z1 ? z1 : z0) : x0 - rx0 < rx1 - x1 ? x1 : x0;
+		// Balusters on every other step up to a rail that follows the slope (0.9 m above the
+		// nose of each step).
+		const inner = f.axis === 'x' ? (openSide === z1 ? -0.02 : 0.02) : openSide === x1 ? -0.02 : 0.02;
+		const point = (k: number, y: number): V3 => {
+			const [a0, a1, c0, c1] = tread(k);
+			return f.axis === 'x' ? [(a0 + a1) / 2, y, openSide + inner] : [openSide + inner, y, (c0 + c1) / 2];
+		};
+		for (let k = 0; k < steps; k += 2) {
+			const [px, , pz] = point(k, 0);
+			const y = (k + 1) * rise;
+			b.box(px - 0.02, px + 0.02, y, y + 0.9, pz - 0.02, pz + 0.02, hex('#5a3824'));
+		}
+		b.beam(point(0, rise + 0.9), point(steps - 1, steps * rise + 0.9), 0.06, 0.05, hex('#6e4a2c'));
+	}
+	/** Upstairs: a railing round the stairwell, open where the stairs arrive. */
+	function railing(f: Flight) {
+		const [x0, x1, z0, z1] = f.rect;
+		const [rx0, rx1, rz0, rz1] = entrance.rect;
+		const wood = hex('#6e4a2c');
+		const rail = (a: XZ, c: XZ) => {
+			const [ax, az] = a,
+				[cx, cz] = c;
+			b.box(Math.min(ax, cx) - 0.03, Math.max(ax, cx) + 0.03, 0.95, 1.0, Math.min(az, cz) - 0.03, Math.max(az, cz) + 0.03, wood);
+			const len = Math.hypot(cx - ax, cz - az);
+			for (let t = 0; t <= len + 1e-6; t += 0.3) {
+				const px = ax + ((cx - ax) * t) / (len || 1),
+					pz = az + ((cz - az) * t) / (len || 1);
+				b.box(px - 0.02, px + 0.02, 0, 0.95, pz - 0.02, pz + 0.02, wood);
+			}
+		};
+		// The long side away from the wall, and the far end from where the stairs arrive.
+		if (f.axis === 'x') {
+			const side = z0 - rz0 < rz1 - z1 ? z1 : z0;
+			rail([x0, side], [x1, side]);
+			const end = f.dir > 0 ? x0 : x1;
+			rail([end, z0], [end, z1]);
+		} else {
+			const side = x0 - rx0 < rx1 - x1 ? x1 : x0;
+			rail([side, z0], [side, z1]);
+			const end = f.dir > 0 ? z0 : z1;
+			rail([x0, end], [x1, end]);
+		}
 	}
 
 	// ── Furniture ──────────────────────────────────────────────────────────────────────────
-	let current = entrance;
 	/** A chair; its stand-up spot is beside it: towards `out` (building frame) if given, else on
 	 * the side towards the middle of its room. */
 	function chair(x: number, z: number, yaw: number, id: string, out?: XZ) {
@@ -930,6 +1136,18 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			block(ccx - 0.82, ccx + 0.82, ccz - 0.32, ccz + 0.32);
 			items.push({ id: 'cards', label: 'Phone Cards', title: 'Phone top-up cards', text: 'Scratch cards for every network, and a QR code to pay by KHQR.', x: ccx, z: ccz, y: 1.1 });
 		}
+		// The drinks fridge on the back wall (glowing glass), first: the shelves give way to it.
+		const fridge = mount(room, 'back', 1.12, 0.74, side > 0 ? 0.15 : 0.85) ?? mount(room, 'back', 1.12, 0.74, 0.5);
+		if (fridge) {
+			b.at(fridge.x, fridge.z, fridge.yaw);
+			b.box(-0.55, 0.55, 0, 2.0, 0, 0.7, hex('#e8eeef'));
+			b.box(-0.5, 0.5, 0.1, 1.9, 0.7, 0.72, hex('#cfe8f2'), [0.6, 1.6]);
+			for (let k = 0; k < 4; k++) for (let j = 0; j < 6; j++) b.cylinder(-0.38 + j * 0.15, 0.6, 0.2 + k * 0.42, 0.44 + k * 0.42, 0.035, hex(['#d23b2f', '#3fa34d', '#f2c230', '#2f7bd2'][k]), 6, [0.5, 1.2]);
+			b.at(0, 0, 0);
+			ctx.blockers.push(fridge.rect);
+			const [ix, iz] = toB(fridge, 0, 0.75);
+			items.push({ id: 'fridge', label: 'Drinks Fridge', title: 'Drinks fridge', text: 'Cold Angkor beer, sugarcane juice, coconut water and soy milk.', x: ix, z: iz, y: 1.2 });
+		}
 		const shelf = (x: number, sz0: number, sz1: number, facing: number) => {
 			const xb = x,
 				xf = x + facing * 0.4;
@@ -961,18 +1179,6 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 				shelf(0.42, sz0 + 0.8, sz1 - 0.4, -1);
 			}
 			if (a) items.push({ id: 'snacks', label: 'Snacks', title: 'Snack shelf', text: 'Prawn crackers, dried mango, Khmer coffee sachets and instant noodles.', x: x0 + 0.4, z: (sz0 + sz1) / 2, y: 1.2 });
-		}
-		// The drinks fridge on the back wall (glowing glass).
-		const fridge = mount(room, 'back', 1.12, 0.74, side > 0 ? 0.15 : 0.85) ?? mount(room, 'back', 1.12, 0.74, 0.5);
-		if (fridge) {
-			b.at(fridge.x, fridge.z, fridge.yaw);
-			b.box(-0.55, 0.55, 0, 2.0, 0, 0.7, hex('#e8eeef'));
-			b.box(-0.5, 0.5, 0.1, 1.9, 0.7, 0.72, hex('#cfe8f2'), [0.6, 1.6]);
-			for (let k = 0; k < 4; k++) for (let j = 0; j < 6; j++) b.cylinder(-0.38 + j * 0.15, 0.6, 0.2 + k * 0.42, 0.44 + k * 0.42, 0.035, hex(['#d23b2f', '#3fa34d', '#f2c230', '#2f7bd2'][k]), 6, [0.5, 1.2]);
-			b.at(0, 0, 0);
-			ctx.blockers.push(fridge.rect);
-			const [ix, iz] = toB(fridge, 0, 0.75);
-			items.push({ id: 'fridge', label: 'Drinks Fridge', title: 'Drinks fridge', text: 'Cold Angkor beer, sugarcane juice, coconut water and soy milk.', x: ix, z: iz, y: 1.2 });
 		}
 		if (!storeBehind) riceSacks(room, side > 0 ? 0.85 : 0.15);
 		for (let x = x0 + 1.0; x < x1 - 0.5; x += 1.6) for (let z = z0 + 1.2; z < z1 - 0.5; z += 2.2) tube(room, x, z);
@@ -1062,10 +1268,11 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			for (let k = 0; k < Math.floor(L / 0.18); k++) b.cylinder(cx0 + 0.1 + k * 0.18, z0 + 0.12, 1.78, 1.86, 0.04, hex(k % 3 ? '#f4f1ea' : '#3e6fa3'), 8);
 			lampAt(room, mbx, cz, 0.6, 0.6, '#c9894a');
 		}
-		// Tables for two in a roomy grid, keeping an aisle from the door to the counter.
+		// Tables for two in a roomy grid, keeping an aisle from the door to the counter and a
+		// wide one along the counter (where people queue, and the way to the kitchen).
 		let n = 0;
 		const cz = z0 + 0.95;
-		for (let z = z1 - 1.4; z > cz + 1.4; z -= 2.3)
+		for (let z = z1 - 1.4; z > cz + 2.1; z -= 2.3)
 			for (let x = x0 + 0.95; x < x1 - 0.85; x += 2.2) {
 				if (Math.abs(x - dx) < 1.0 && z > z1 - 2.6) continue;
 				if (!free(room, [x - 0.38, x + 0.38, z - 1.0, z + 1.0])) continue;
@@ -1123,74 +1330,159 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		tube(room, (x0 + x1) / 2, (z0 + z1) / 2);
 	}
 
-	const kinds = new Set(rooms.map((rm) => rm.kind));
-	for (const room of rooms) {
-		current = room;
-		if (room.kind === 'living') living(room, !kinds.has('kitchen'));
-		else if (room.kind === 'bedroom') bedroom(room);
-		else if (room.kind === 'kitchen') kitchen(room, true);
-		else if (room.kind === 'bathroom') bathroom(room);
-		else if (room.kind === 'sales') sales(room, kinds.has('store'));
-		else if (room.kind === 'store') store(room);
-		else if (room.kind === 'dining') dining(room);
-		else galley(room);
-	}
-	// A single-room home deep enough for it: the bed and a wardrobe at the back.
-	if (type === 'house' && rooms.length === 1 && d > 7) {
-		const [x0, , z0] = entrance.rect;
-		const bz = z0 + 1.05;
-		const bed: Rect = [x0 + 0.38, x0 + 2.02, z0, bz + 1.0];
-		if (free(entrance, bed)) {
-			b.at(x0 + 1.2, bz);
-			b.box(-0.8, 0.8, 0.12, 0.52, -1.0, 1.0, hex('#efe9df'));
-			b.box(-0.82, 0.82, 0.5, 0.55, -0.3, 1.0, hex('#b0262c'));
-			b.box(-0.85, 0.85, 0.12, 1.1, -1.05, -0.98, hex('#5a3824'));
-			b.at(0, 0, 0);
-			ctx.blockers.push(bed);
-			seats.push({ id: 'bed', label: 'bed', x: x0 + 1.2, z: bz + 0.7, yaw: 0, height: 0.52, stand: [x0 + 1.2, bz + 1.35] });
-		}
-	}
-
-	// Light switches: in every room of a home, on the wall beside the way in.
-	const switches = new Map<string, [number, number, number]>();
-	if (type === 'house')
+	/** Furnish the storey being built, and put light switches by the ways into its rooms. */
+	function furnish(): Map<string, [number, number, number]> {
+		const kinds = new Set(rooms.map((rm) => rm.kind));
 		for (const room of rooms) {
-			const [x0, x1, , z1] = room.rect;
-			const way = room === entrance ? g0 : (doors.find((dr) => dr.back === room.id)?.x ?? 0) - INNER_DOOR.width / 2;
-			const gb = room === entrance ? g1 : way + INNER_DOOR.width;
-			const sx = way - 0.3 >= x0 + 0.2 ? way - 0.3 : Math.min(x1 - 0.2, gb + 0.3);
-			switches.set(room.id, [sx, z1 - 0.05, 1.3]);
+			current = room;
+			if (room.kind === 'living') living(room, !kinds.has('kitchen'));
+			else if (room.kind === 'family') {
+				living(room, false);
+				if (rooms.length === 1) bedroom(room);
+			} else if (room.kind === 'bedroom') bedroom(room);
+			else if (room.kind === 'kitchen') kitchen(room, true);
+			else if (room.kind === 'bathroom') bathroom(room);
+			else if (room.kind === 'sales') sales(room, kinds.has('store'));
+			else if (room.kind === 'store') store(room);
+			else if (room.kind === 'dining') dining(room);
+			else galley(room);
 		}
-
-	// ── Meshes: the merged interior, toggled parts, door leaves, switches, the sign ────────────
-	const root = new THREE.Group();
-	const interior = lit(b);
-	interior.name = 'Interior';
-	interior.position.y = FLOOR_LIFT;
-	root.add(interior);
-	if (switches.size) {
-		const sb = new MeshBuilder();
-		for (const [sx, sz] of switches.values()) sb.box(sx - 0.04, sx + 0.04, 1.24, 1.36, sz - 0.012, sz, hex('#f4f4f2'), [0.8, 0.6]);
-		extra.add(lit(sb));
+		// A single-room home deep enough for it: the bed at the back.
+		if (L === 0 && type === 'house' && rooms.length === 1 && d > 7) {
+			const [x0, , z0] = entrance.rect;
+			const bz = z0 + 1.05;
+			const bed: Rect = [x0 + 0.38, x0 + 2.02, z0, bz + 1.0];
+			if (free(entrance, bed)) {
+				b.at(x0 + 1.2, bz);
+				b.box(-0.8, 0.8, 0.12, 0.52, -1.0, 1.0, hex('#efe9df'));
+				b.box(-0.82, 0.82, 0.5, 0.55, -0.3, 1.0, hex('#b0262c'));
+				b.box(-0.85, 0.85, 0.12, 1.1, -1.05, -0.98, hex('#5a3824'));
+				b.at(0, 0, 0);
+				ctx.blockers.push(bed);
+				seats.push({ id: 'bed', label: 'bed', x: x0 + 1.2, z: bz + 0.7, yaw: 0, height: 0.52, stand: [x0 + 1.2, bz + 1.35] });
+			}
+		}
+		// Light switches: in every room of a home (upstairs, every building is one), beside the
+		// way in; the family room's at the head of the stairs.
+		const switches = new Map<string, [number, number, number]>();
+		if (type === 'house' || L > 0)
+			for (const room of rooms) {
+				const [x0, x1, z0, z1] = room.rect;
+				if (L > 0 && room === entrance && flight) {
+					const [hx0, hx1, hz0, hz1] = flight.head;
+					// On the wall the stairs run along, beside their head.
+					const sx = flight.axis === 'x' ? (hx0 + hx1) / 2 : hx0 - x0 < x1 - hx1 ? x0 + 0.05 : x1 - 0.05;
+					const sz = flight.axis === 'x' ? (hz0 - z0 < z1 - hz1 ? z0 + 0.05 : z1 - 0.05) : (hz0 + hz1) / 2;
+					switches.set(room.id, [sx, sz, 1.3]);
+					continue;
+				}
+				const way = room === entrance ? g0 : (doors.find((dr) => dr.back === room.id)?.x ?? 0) - INNER_DOOR.width / 2;
+				const gb = room === entrance ? g1 : way + INNER_DOOR.width;
+				const sx = way - 0.3 >= x0 + 0.2 ? way - 0.3 : Math.min(x1 - 0.2, gb + 0.3);
+				switches.set(room.id, [sx, z1 - 0.05, 1.3]);
+			}
+		return switches;
 	}
-	extra.name = 'Extras';
-	extra.position.y = FLOOR_LIFT;
-	root.add(extra);
-	/** A door leaf on its hinge, lit where it stands, its node's origin on the hinge. */
-	const leafNode = (node: string, hingeX: number, hingeZ: number, draw: (mb: MeshBuilder) => void) => {
+
+	/** The storey's meshes: its merged interior and its small parts (switch plates, toggled
+	 * parts), raised to its floor. */
+	function storeyMeshes(suffix: string, y: number, switches: Map<string, [number, number, number]>) {
+		const interior = lit(b);
+		interior.name = `Interior${suffix}`;
+		interior.position.y = y;
+		root.add(interior);
+		if (switches.size) {
+			const sb = new MeshBuilder();
+			for (const [sx, sz] of switches.values()) sb.box(sx - 0.04, sx + 0.04, 1.24, 1.36, sz - 0.03, sz + 0.03, hex('#f4f4f2'), [0.8, 0.6]);
+			extra.add(lit(sb));
+		}
+		extra.name = `Extras${suffix}`;
+		extra.position.y = y;
+		root.add(extra);
+	}
+
+	// ── The ground floor ───────────────────────────────────────────────────────────────────
+	shell(null, flight?.rect ?? null);
+	if (flight) stairs(flight);
+	// The entrance: the reveal through the outside wall to the facade, a sill and a frame.
+	const fz = d / 2 + plan.wall;
+	const entranceWall = hex(STYLE[entrance.kind].wall);
+	b.quad([g0, 0, fz], [g0, 0, d / 2], [g0, DOOR_H, d / 2], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces +X
+	b.quad([g1, 0, d / 2], [g1, 0, fz], [g1, DOOR_H, fz], [g1, DOOR_H, d / 2], entranceWall, 'wall'); // faces -X
+	b.quad([g0, DOOR_H, d / 2], [g1, DOOR_H, d / 2], [g1, DOOR_H, fz], [g0, DOOR_H, fz], entranceWall, 'wall'); // faces down
+	b.quad([g0, 0.002, fz], [g1, 0.002, fz], [g1, 0.002, d / 2], [g0, 0.002, d / 2], hex('#9a948a'), 'floor');
+	b.quad([g0, -FLOOR_LIFT, fz], [g1, -FLOOR_LIFT, fz], [g1, 0.002, fz], [g0, 0.002, fz], hex('#8a847a'), 'wall'); // the sill's front, down to the street
+	b.box(g0 - 0.08, g0, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
+	b.box(g1, g1 + 0.08, 0, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
+	b.box(g0 - 0.08, g1 + 0.08, DOOR_H, DOOR_H + 0.08, d / 2 - 0.02, d / 2, trim);
+	// Windows on the street front: shopfronts (shop, café), one either side of the door (home).
+	const top = Math.min(H - 0.35, 2.4);
+	if (type !== 'house') {
+		pane(-w / 2 + 0.4, g0 - 0.35, 0.7, top);
+		pane(g1 + 0.35, w / 2 - 0.4, 0.7, top);
+	} else {
+		pane(Math.max(-w / 2 + 0.4, g0 - 0.5 - 1.6), g0 - 0.5, 1.0, Math.min(top, 2.2));
+		pane(g1 + 0.5, Math.min(w / 2 - 0.4, g1 + 0.5 + 1.6), 1.0, Math.min(top, 2.2));
+	}
+	const switches0 = furnish();
+	const storeys: { level: number; doors: InnerDoor[]; light: LightContext }[] = [{ level: 0, doors, light: ctx }];
+	storeyMeshes('', FLOOR_LIFT, switches0);
+	const blockers0 = ctx.blockers;
+	const allSwitches = new Map(switches0);
+
+	// ── The upper floor ────────────────────────────────────────────────────────────────────
+	let blockers1: Rect[] = [];
+	if (upper && flight) {
+		const marks = { seats: seats.length, tables: tables.length, items: items.length, toggles: toggles.length };
+		L = 1;
+		rooms = upper.rooms;
+		doors = upper.doors;
+		entrance = rooms[0];
+		current = entrance;
+		b = new MeshBuilder();
+		ctx = { rooms, entrance: entrance.id, D: d, ceiling: H, lamps: [], blockers: [] };
+		clear = [...zones(upper, false), flight.rect, flight.head, flight.headWay];
+		extra = new THREE.Group();
+		shell(flight.rect, null);
+		railing(flight);
+		// Windows on the street front, evenly along it.
+		const n = Math.max(1, Math.floor((w - 0.8) / 2.4));
+		for (let k = 0; k < n; k++) {
+			const cx = -w / 2 + (w / n) * (k + 0.5);
+			pane(cx - 0.7, cx + 0.7, 1.0, Math.min(top, 2.2));
+		}
+		const switches1 = furnish();
+		// Upstairs things get their own ids and the level they are on.
+		const up = (id: string) => `${id}_up`;
+		for (const s of seats.slice(marks.seats)) Object.assign(s, { id: up(s.id), level: 1 });
+		for (const t of tables.slice(marks.tables)) Object.assign(t, { id: up(t.id), seats: t.seats.map(up), level: 1 });
+		for (const it of items.slice(marks.items)) Object.assign(it, { id: up(it.id), level: 1 });
+		for (const tg of toggles.slice(marks.toggles)) Object.assign(tg, { id: up(tg.id), node: up(tg.node), level: 1 });
+		for (const child of extra.children) if (child.name) child.name = up(child.name);
+		storeyMeshes('_1', FLOOR_LIFT + storey, switches1);
+		blockers1 = ctx.blockers;
+		for (const [k, v] of switches1) allSwitches.set(k, v);
+		storeys.push({ level: 1, doors, light: ctx });
+	}
+
+	// ── Door leaves and the sign ───────────────────────────────────────────────────────────
+	/** A door leaf on its hinge, lit where it stands (by its storey's lamps), its node's origin
+	 * on the hinge. */
+	const leafNode = (node: string, hingeX: number, hingeZ: number, level: number, draw: (mb: MeshBuilder) => void) => {
 		const lb = new MeshBuilder().at(hingeX, hingeZ);
 		draw(lb);
-		const leaf = new THREE.Mesh(lb.geometry(lightUp(lb, ctx)).translate(-hingeX, 0, -hingeZ), interiorMaterial(uniforms));
+		const leaf = new THREE.Mesh(lb.geometry(lightUp(lb, storeys[level].light)).translate(-hingeX, 0, -hingeZ), interiorMaterial(uniforms));
+		const y = FLOOR_LIFT + level * storey;
 		const group = new THREE.Group();
 		group.name = node;
-		group.position.set(hingeX, FLOOR_LIFT, hingeZ);
+		group.position.set(hingeX, y, hingeZ);
 		group.add(leaf);
 		root.add(group);
 	};
 	const hingeX = g0 + 0.02,
 		hingeZ = d / 2 + plan.wall / 2;
 	const leafW = plan.doorWidth - 0.04;
-	leafNode('Door_front', hingeX, hingeZ, (lb) => {
+	leafNode('Door_front', hingeX, hingeZ, 0, (lb) => {
 		if (type === 'house') {
 			lb.box(0, leafW, 0.01, DOOR_H - 0.01, -0.025, 0.025, hex('#6e3f22'));
 			lb.box(leafW - 0.16, leafW - 0.06, 1.0, 1.03, -0.06, 0.06, hex('#c8a24a'));
@@ -1208,17 +1500,18 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		{ id: 'front', label: 'Door', node: 'Door_front', hinge: [hingeX, hingeZ], width: leafW, thickness: 0.05, height: DOOR_H, openYaw: Math.PI / 2, center: [dx, hingeZ], outward: [0, 1] }
 	];
 	const innerW = INNER_DOOR.width - 0.04;
-	for (const dr of doors) {
-		const hx = dr.x - INNER_DOOR.width / 2 + 0.02;
-		const node = `Inner_${dr.id}`;
-		leafNode(node, hx, dr.z, (lb) => {
-			lb.box(0, innerW, 0.01, INNER_DOOR.height - 0.01, -0.02, 0.02, hex('#8a5a36'));
-			lb.box(0.1, innerW - 0.1, 0.2, 0.95, -0.025, 0.025, hex('#7a4c2c'));
-			lb.box(0.1, innerW - 0.1, 1.1, INNER_DOOR.height - 0.15, -0.025, 0.025, hex('#7a4c2c'));
-			lb.box(innerW - 0.14, innerW - 0.06, 0.98, 1.01, -0.05, 0.05, hex('#c8a24a'));
-		});
-		doorSpecs.push({ id: dr.id, label: dr.label, node, hinge: [hx, dr.z], width: innerW, thickness: 0.04, height: INNER_DOOR.height, openYaw: Math.PI / 2, center: [dr.x, dr.z], outward: [0, 1] });
-	}
+	for (const { level, doors: ds } of storeys)
+		for (const dr of ds) {
+			const hx = dr.x - INNER_DOOR.width / 2 + 0.02;
+			const node = `Inner_${dr.id}`;
+			leafNode(node, hx, dr.z, level, (lb) => {
+				lb.box(0, innerW, 0.01, INNER_DOOR.height - 0.01, -0.02, 0.02, hex('#8a5a36'));
+				lb.box(0.1, innerW - 0.1, 0.2, 0.95, -0.025, 0.025, hex('#7a4c2c'));
+				lb.box(0.1, innerW - 0.1, 1.1, INNER_DOOR.height - 0.15, -0.025, 0.025, hex('#7a4c2c'));
+				lb.box(innerW - 0.14, innerW - 0.06, 0.98, 1.01, -0.05, 0.05, hex('#c8a24a'));
+			});
+			doorSpecs.push({ id: dr.id, label: dr.label, node, hinge: [hx, dr.z], width: innerW, thickness: 0.04, height: INNER_DOOR.height, openYaw: Math.PI / 2, center: [dr.x, dr.z], outward: [0, 1], level });
+		}
 	// The sign: on the facade, centred over the door, kept within the room's width.
 	const pal = SIGN_NAMES[type];
 	const sw = Math.min(1.8, w - 0.4);
@@ -1228,49 +1521,72 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		root.add(sign);
 	}
 
-	// ── The spec: rooms and their lights, collision, doors, things to do ─────────────────────
+	// ── The spec: rooms and their lights, collision, doors, stairs, things to do ──────────────
 	const rect = (x0: number, x1: number, z0: number, z1: number): XZ[] => [[x0, z0], [x1, z0], [x1, z1], [x0, z1]];
+	const ring = ([x0, x1, z0, z1]: Rect) => rect(x0, x1, z0, z1);
 	const t = 0.1; // collision walls just behind the outer wall faces
-	const walls: XZ[][] = [
-		rect(-w / 2 - t, w / 2 + t, -d / 2 - t, -d / 2),
-		rect(-w / 2 - t, -w / 2, -d / 2, d / 2),
-		rect(w / 2, w / 2 + t, -d / 2, d / 2),
-		rect(-w / 2 - t, g0, d / 2, d / 2 + t),
-		rect(g1, w / 2 + t, d / 2, d / 2 + t)
-	];
-	const lintels = [{ ring: rect(g0, g1, d / 2, d / 2 + t), base: FLOOR_LIFT + DOOR_H }];
-	for (const p of partitions) {
-		if (p.axis === 'z') {
-			walls.push(rect(p.at - T / 2, p.at + T / 2, p.from, p.to));
-			continue;
+	/** A storey's walls: the outside ones (the entrance only on the ground floor), the
+	 * partitions with their doorways, and lintels over the doorways. */
+	const storeyWalls = (level: number, ds: InnerDoor[]) => {
+		const walls: XZ[][] = [rect(-w / 2 - t, w / 2 + t, -d / 2 - t, -d / 2), rect(-w / 2 - t, -w / 2, -d / 2, d / 2), rect(w / 2, w / 2 + t, -d / 2, d / 2)];
+		const lift = FLOOR_LIFT + level * storey;
+		const lintels: { ring: XZ[]; base: number }[] = [];
+		if (level === 0) {
+			walls.push(rect(-w / 2 - t, g0, d / 2, d / 2 + t), rect(g1, w / 2 + t, d / 2, d / 2 + t));
+			lintels.push({ ring: rect(g0, g1, d / 2, d / 2 + t), base: lift + DOOR_H });
+		} else walls.push(rect(-w / 2 - t, w / 2 + t, d / 2, d / 2 + t));
+		for (const p of ground.partitions) {
+			if (p.axis === 'z') {
+				walls.push(rect(p.at - T / 2, p.at + T / 2, p.from, p.to));
+				continue;
+			}
+			const gaps = ds.filter((dr) => Math.abs(dr.z - p.at) < 1e-6).map((dr): [number, number, number] => [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, 0]);
+			for (const [a, c] of spans(p.from, p.to, gaps.sort((m, n) => m[0] - n[0]))) walls.push(rect(a, c, p.at - T / 2, p.at + T / 2));
+			for (const [a, c] of gaps) lintels.push({ ring: rect(a, c, p.at - T / 2, p.at + T / 2), base: lift + INNER_DOOR.height });
 		}
-		const gaps = doors.filter((dr) => Math.abs(dr.z - p.at) < 1e-6).map((dr): [number, number, number] => [dr.x - INNER_DOOR.width / 2, dr.x + INNER_DOOR.width / 2, 0]);
-		for (const [a, c] of spans(p.from, p.to, gaps.sort((m, n) => m[0] - n[0]))) walls.push(rect(a, c, p.at - T / 2, p.at + T / 2));
-		for (const [a, c] of gaps) lintels.push({ ring: rect(a, c, p.at - T / 2, p.at + T / 2), base: FLOOR_LIFT + INNER_DOOR.height });
-	}
+		// The stairs: below, their sides and the wall under their head (walk on at the foot);
+		// above, the railing round the stairwell (step on at the head).
+		if (flight) {
+			const [x0, x1, z0, z1] = flight.rect;
+			const e = 0.03;
+			const sides: Rect[] = flight.axis === 'x' ? [[x0, x1, z0 - e, z0 + e], [x0, x1, z1 - e, z1 + e]] : [[x0 - e, x0 + e, z0, z1], [x1 - e, x1 + e, z0, z1]];
+			const atHigh = (level === 0) === (flight.dir > 0); // the head end below, the foot end above
+			const end: Rect = flight.axis === 'x' ? (atHigh ? [x1 - e, x1 + e, z0, z1] : [x0 - e, x0 + e, z0, z1]) : atHigh ? [x0, x1, z1 - e, z1 + e] : [x0, x1, z0 - e, z0 + e];
+			walls.push(...sides.map(ring), ring(end));
+		}
+		return { walls, lintels };
+	};
+	const s0 = storeyWalls(0, ground.doors);
+	const roomSpecs = (fp: FloorPlan, level: number) => fp.rooms.map((rm) => ({ id: rm.id, name: fp.rooms.length === 1 && level === 0 ? (name ?? pal) : rm.name, rects: [rm.rect], light: rm.channel, level }));
+	// Rooms behind the front room have no windows: their lights start on.
+	const lightSpecs = (fp: FloorPlan, level: number) => fp.rooms.map((rm, i) => ({ id: rm.id, label: 'Lights', channel: rm.channel, switches: allSwitches.has(rm.id) ? [allSwitches.get(rm.id)!] : [], materials: [], startOn: i > 0, level }));
 	const spec: BuildingSpec = {
 		version: 2,
 		name: name ?? pal,
 		model: '',
 		floor: FLOOR_LIFT,
 		wallTop: FLOOR_LIFT + H,
-		roofTop: Math.max(FLOOR_LIFT + H + 0.4, plan.height), // the OSM building around the room
+		roofTop: Math.max(FLOOR_LIFT + H + 0.4, plan.height), // the OSM building around the rooms
 		footprint: rect(-w / 2 - plan.wall, w / 2 + plan.wall, -d / 2 - plan.wall, d / 2 + plan.wall),
 		interior: { min: [-w / 2, -d / 2], max: [w / 2, d / 2], ceiling: FLOOR_LIFT + H },
-		rooms: rooms.map((rm) => ({ id: rm.id, name: rooms.length === 1 ? (name ?? pal) : rm.name, rects: [rm.rect], light: rm.channel })),
-		// Rooms behind the entrance room have no windows: their lights start on.
-		lights: rooms.map((rm) => ({ id: rm.id, label: 'Lights', channel: rm.channel, switches: switches.has(rm.id) ? [switches.get(rm.id)!] : [], materials: [], startOn: rm !== entrance })),
-		walls,
-		lintels,
+		rooms: [...roomSpecs(ground, 0), ...(upper ? roomSpecs(upper, 1) : [])],
+		lights: [...lightSpecs(ground, 0), ...(upper ? lightSpecs(upper, 1) : [])],
+		walls: s0.walls,
+		lintels: s0.lintels,
 		doors: doorSpecs,
 		steps: [],
 		posts: [],
-		blockers: ctx.blockers.map(([x0, x1, z0, z1]) => rect(x0, x1, z0, z1)),
+		blockers: blockers0.map(ring),
 		seats,
 		tables,
 		items,
 		toggles,
 		fans: []
 	};
+	if (upper && flight) {
+		const s1 = storeyWalls(1, upper.doors);
+		spec.levels = [{ floor: FLOOR_LIFT + storey, ceiling: FLOOR_LIFT + storey + H, walls: s1.walls, lintels: s1.lintels, blockers: blockers1.map(ring) }];
+		spec.stairs = [{ rect: flight.rect, axis: flight.axis, dir: flight.dir, from: 0, to: 1 }];
+	}
 	return { spec, root, uniforms };
 }

@@ -24,6 +24,8 @@ export interface DoorSpec {
 	/** Middle of the doorway (mid-wall) and the direction away from the side it swings into. */
 	center: XZ;
 	outward: XZ;
+	/** The storey it is on (0 = ground floor; see BuildingSpec.levels). */
+	level?: number;
 }
 
 export interface SeatSpec {
@@ -37,6 +39,7 @@ export interface SeatSpec {
 	height: number;
 	/** Where to stand before sitting down and after getting up. */
 	stand: XZ;
+	level?: number;
 }
 
 /** A room: its floor rectangles [x0, x1, z0, z1] and the light group (lightmap channel) it is lit by. */
@@ -45,6 +48,7 @@ export interface RoomSpec {
 	name: string;
 	rects: [number, number, number, number][];
 	light: number;
+	level?: number;
 }
 
 /** A group of lamps switched together: its lightmap channel, wall switches [x, z, y] and the
@@ -57,6 +61,7 @@ export interface LightSpec {
 	materials: string[];
 	/** Switched on from the start even by day (a room without windows). */
 	startOn?: boolean;
+	level?: number;
 }
 
 /** Something to look at closely: E shows its title and text. */
@@ -68,6 +73,7 @@ export interface ItemSpec {
 	x: number;
 	z: number;
 	y: number;
+	level?: number;
 }
 
 /** An appliance that turns on and off: a TV screen or a stove's flames (a GLB node). */
@@ -79,6 +85,7 @@ export interface ToggleSpec {
 	x: number;
 	z: number;
 	y: number;
+	level?: number;
 }
 
 /** A table or desk: E near it sits on the nearest of its chairs. */
@@ -87,6 +94,7 @@ export interface TableSpec {
 	label: string;
 	rect: [number, number, number, number];
 	seats: string[];
+	level?: number;
 }
 
 export interface BuildingSpec {
@@ -121,6 +129,51 @@ export interface BuildingSpec {
 	items: ItemSpec[];
 	toggles: ToggleSpec[];
 	fans: { node: string; rpm: number }[];
+	/** Storeys above the ground floor (levels[0] is level 1): floor and ceiling heights above the
+	 * ground, and their own walls, lintels and furniture (the ground floor's are above). */
+	levels?: LevelSpec[];
+	/** Stairs between storeys. */
+	stairs?: StairSpec[];
+}
+
+export interface LevelSpec {
+	floor: number;
+	ceiling: number;
+	walls: XZ[][];
+	lintels: { ring: XZ[]; base: number }[];
+	blockers: XZ[][];
+}
+
+/** A straight flight of stairs: its plan rectangle [x0, x1, z0, z1], climbing along `axis`
+ * towards larger (dir 1) or smaller (dir -1) coordinates, from level `from` to level `to`. */
+export interface StairSpec {
+	rect: [number, number, number, number];
+	axis: 'x' | 'z';
+	dir: 1 | -1;
+	from: number;
+	to: number;
+}
+
+/** A storey's floor height above the ground (level 0: the ground floor). */
+export function levelFloor(spec: BuildingSpec, level: number): number {
+	return level <= 0 ? spec.floor : (spec.levels?.[level - 1]?.floor ?? spec.floor);
+}
+
+/** A storey's ceiling height above the ground. */
+export function levelCeiling(spec: BuildingSpec, level: number): number {
+	return level <= 0 ? spec.interior.ceiling : (spec.levels?.[level - 1]?.ceiling ?? spec.interior.ceiling);
+}
+
+/** The flight of stairs at a local point and how far up it (0 at the bottom … 1 at the top). */
+export function stairAt(spec: BuildingSpec, lx: number, lz: number): { stair: StairSpec; t: number } | null {
+	for (const stair of spec.stairs ?? []) {
+		const [x0, x1, z0, z1] = stair.rect;
+		if (lx < x0 || lx > x1 || lz < z0 || lz > z1) continue;
+		const [a, lo, hi] = stair.axis === 'x' ? [lx, x0, x1] : [lz, z0, z1];
+		const t = (a - lo) / (hi - lo);
+		return { stair, t: stair.dir > 0 ? t : 1 - t };
+	}
+	return null;
 }
 
 /** Where a building stands in the world. */
@@ -200,8 +253,11 @@ export function floorAt(spec: BuildingSpec, frame: Frame, x: number, z: number):
 }
 
 /** The room at a model-space point, if any. */
-export function roomAt(spec: BuildingSpec, lx: number, lz: number): RoomSpec | null {
-	for (const room of spec.rooms) for (const [x0, x1, z0, z1] of room.rects) if (lx >= x0 && lx <= x1 && lz >= z0 && lz <= z1) return room;
+export function roomAt(spec: BuildingSpec, lx: number, lz: number, level = 0): RoomSpec | null {
+	for (const room of spec.rooms) {
+		if ((room.level ?? 0) !== level) continue;
+		for (const [x0, x1, z0, z1] of room.rects) if (lx >= x0 && lx <= x1 && lz >= z0 && lz <= z1) return room;
+	}
 	return null;
 }
 
