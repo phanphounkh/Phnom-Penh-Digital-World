@@ -20,7 +20,7 @@ import type { ChunkPayload } from '$lib/api/types';
 import type { CollisionWorld } from '$lib/game/city/collision';
 import { BUILDING_DOORS, type Doorway } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
-import { fitRoom, type XZ as FXZ } from './footprint';
+import type { XZ as FXZ } from './footprint';
 import { interiorName, interiorType, report, scan, type Candidate, type InteriorType } from './osm';
 import { buildInterior } from './procedural';
 import { DOOR_REACH, Door, Switch } from './door';
@@ -37,8 +37,6 @@ export const UNLOAD_RADIUS = 230;
 export const OSM_LOAD_RADIUS = 70;
 export const OSM_UNLOAD_RADIUS = 100;
 const OSM_SCAN_EVERY = 1.0;
-/** A generated house keeps a living-room-sized room against its entrance (m). */
-const HOUSE_ROOM = { width: 8, depth: 7.5 };
 /** At most this many generated buildings at once (each needs a doorway slot in the facade
  * shader: materials.BUILDING_DOORS). */
 const MAX_GENERATED = BUILDING_DOORS;
@@ -202,7 +200,7 @@ export class Buildings {
 		const wanted = new Map<string, BuildingPlacement>();
 		const take = (c: Candidate, type: InteriorType, name?: string | null) => {
 			if (!c.result.ok || wanted.size >= MAX_GENERATED) return;
-			const plan = type === 'house' ? fitRoom(c.result.plan, HOUSE_ROOM.width, HOUSE_ROOM.depth) : c.result.plan;
+			const plan = c.result.plan;
 			const id = `osm:${c.id}`;
 			wanted.set(id, this.osmPlacements.get(id) ?? { id, spec: '', x: plan.x, z: plan.z, yaw: plan.yaw, procedural: { type, plan, seed: c.id, name: name ?? undefined } });
 		};
@@ -322,8 +320,8 @@ export class Buildings {
 	/** Draw an interior only when it can be seen. */
 	private cull(b: Loaded, px: number, pz: number): void {
 		const d = Math.hypot(b.frame.x - px, b.frame.z - pz);
-		const seen =
-			this.inside === b.placement.id || (b.facade ? b.doors.some((x) => x.door.t > 0) && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
+		// (A generated interior is seen from the street only through its front door.)
+		const seen = this.inside === b.placement.id || (b.facade ? (b.doors[0]?.door.t ?? 0) > 0 && d < INTERIOR_VISIBLE.doorway : d < INTERIOR_VISIBLE.windows);
 		for (const n of b.inside) if (n.visible !== seen) n.visible = seen;
 	}
 
@@ -506,12 +504,21 @@ export class Buildings {
 				offer({ kind: 'door', label: door.label, building: id, door: door.spec.id }, door.distance(lx, lz), DOOR_REACH, cx, cz, 0.9, 0.1);
 			}
 			if (!isInside(b.spec, b.frame, px, pz, 0.1)) continue;
+			// Only what is in the player's room (a stove behind a partition is not in reach).
+			const here = b.spec.rooms.length > 1 ? roomAt(b.spec, lx, lz) : null;
+			const near = (x: number, z: number) => {
+				if (!here) return true;
+				const there = roomAt(b.spec, x, z);
+				return !there || there === here;
+			};
 			for (const l of b.lights)
 				for (const [sx, sz] of l.spec.switches)
-					offer({ kind: 'light', label: l.state.on ? 'Turn Lights Off' : 'Turn Lights On', building: id, light: l.spec.id }, Math.hypot(sx - lx, sz - lz), REACH.switch, sx, sz, 0.4, 0.3);
+					if (near(sx, sz)) offer({ kind: 'light', label: l.state.on ? 'Turn Lights Off' : 'Turn Lights On', building: id, light: l.spec.id }, Math.hypot(sx - lx, sz - lz), REACH.switch, sx, sz, 0.4, 0.3);
 			for (const a of b.appliances)
-				offer({ kind: 'toggle', label: `Turn ${a.state.on ? 'Off' : 'On'} ${a.spec.label}`, building: id, toggle: a.spec.id }, Math.hypot(a.spec.x - lx, a.spec.z - lz), REACH.toggle, a.spec.x, a.spec.z, 0.5, 0.3);
+				if (near(a.spec.x, a.spec.z))
+					offer({ kind: 'toggle', label: `Turn ${a.state.on ? 'Off' : 'On'} ${a.spec.label}`, building: id, toggle: a.spec.id }, Math.hypot(a.spec.x - lx, a.spec.z - lz), REACH.toggle, a.spec.x, a.spec.z, 0.5, 0.3);
 			for (const item of b.spec.items) {
+				if (!near(item.x, item.z)) continue;
 				const open = this.inspecting?.item === item.id;
 				// Looking at something counts a little extra (a picture above a sofa is offered once
 				// the player steps back from the seat).
@@ -520,10 +527,12 @@ export class Buildings {
 			}
 			for (const t of b.spec.tables) {
 				const [x0, x1, z0, z1] = t.rect;
+				if (!near((x0 + x1) / 2, (z0 + z1) / 2)) continue;
 				offer({ kind: 'table', label: `Sit at the ${t.label}`, building: id, table: t.id }, rectDistance(t.rect, lx, lz), REACH.table, (x0 + x1) / 2, (z0 + z1) / 2, 0.9, 0.2);
 			}
 			for (const seat of b.spec.seats)
-				offer({ kind: 'sit', label: 'Sit Down', building: id, seat: seat.id }, Math.hypot(seat.stand[0] - lx, seat.stand[1] - lz), REACH.seat, seat.x, seat.z, 0.75, 0.0);
+				if (near(seat.stand[0], seat.stand[1]))
+					offer({ kind: 'sit', label: 'Sit Down', building: id, seat: seat.id }, Math.hypot(seat.stand[0] - lx, seat.stand[1] - lz), REACH.seat, seat.x, seat.z, 0.75, 0.0);
 		}
 		if (!sameInteraction(found, this.current)) {
 			this.current = found;
@@ -587,9 +596,9 @@ export class Buildings {
 		group.rotation.y = frame.yaw;
 		// Lights start on after dark, off by day (the switches change that).
 		const night = (this.host.materials?.night.value ?? 0) > 0.5;
-		// Lights without a switch (shops, cafés) are always on.
+		// Lights without a switch (shops, cafés) are always on; rooms without windows start lit.
 		const lights: LightGroup[] = spec.lights.map((l) => {
-			const on = l.switches.length ? night : true;
+			const on = l.switches.length ? night || !!l.startOn : true;
 			return { spec: l, state: new Switch(on), level: on ? 1 : 0, glow: [] };
 		});
 		const uniforms = maps ? prepareMaterials(group, spec, maps, lights, this.host.materials?.night ?? { value: 0 }) : (ownUniforms ?? null);
@@ -619,7 +628,7 @@ export class Buildings {
 			fans: spec.fans.map((f) => ({ node: group.getObjectByName(f.node), rpm: f.rpm })).filter((f): f is { node: THREE.Object3D; rpm: number } => !!f.node),
 			uniforms,
 			owner,
-			inside: group.children.filter((n) => n.name === 'Interior' || n.name === 'Extras' || n.name === 'Glass' || n.name === 'TVScreen' || n.name === 'StoveFlame' || n.name.startsWith('Fan_')),
+			inside: group.children.filter((n) => n.name === 'Interior' || n.name === 'Extras' || n.name === 'Glass' || n.name === 'TVScreen' || n.name === 'StoveFlame' || n.name.startsWith('Fan_') || n.name.startsWith('Inner_')),
 			facade: null
 		};
 		if (p.procedural) {

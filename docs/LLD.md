@@ -208,8 +208,8 @@ name if it has one.
   - no entrance. The door needs a straight stretch of real wall, a road within 25 m in front,
     and no other building in front (shared walls of terraced shophouses). The straight way from
     the door to that road must not cross another building (no doors onto walled-in back yards).
-- **The room** is at most 12 × 12 m (a house: 8 × 7.5 m, `fitRoom`), against the entrance; deep
-  shophouses and big villas keep their back rooms closed.
+- **The interior** is at most 12 × 12 m, against the entrance; deeper shophouses and big villas
+  keep the rest closed.
 - **Scan results** (`Buildings.scan`, 300 m around a spawn, E2E dataset): 428 of the 504
   buildings around Central Market (85%) and 146 of 208 around Wat Phnom (70%) can be entered.
   The rest mostly have no usable entrance (no straight street-facing wall with a clear way out),
@@ -217,10 +217,31 @@ name if it has one.
 - **Planning cost:** each building is planned once (the result is cached by id) and nearest
   first, with a 4 ms budget per scan; the rest wait for the next scan a second later. Roads count
   by their extent, so a long straight street with distant vertices is not missed.
-- **Generation:** a café, shop or house layout fitted to the room, from shared furniture
-  templates merged into one mesh. Lighting is per vertex and computed at build time: daylight from
-  the shopfront, lamp light, occlusion. The shader scales it by day/night and the lights switch,
-  so there are no textures and no runtime lights. That is two to four draw calls per interior.
+- **Rooms** (`planRooms`):
+  - The room by the entrance (living room, sales floor, café), with more rooms behind it once
+    the building is big enough. Partitions are 12 cm thick, with 1 m inner doors that swing into
+    the room behind and open with E ("Open Kitchen Door").
+  - Homes from about 32 m² get a living room at the front with a bedroom, kitchen and (if room)
+    a bathroom behind. A wide house puts them side by side, each opening onto the living room;
+    a narrow shophouse puts them one behind the other, each through the one before.
+  - Shops get a storeroom from 8 m deep, cafés a kitchen from 9 m.
+  - Every room is reachable from the entrance (tested for many sizes).
+- **Furniture:** each kind of room has its own templates set against its walls and kept clear of
+  doorways and door swings:
+  - living room: sofa, TV, altar;
+  - bedroom: bed, wardrobe, bedside lamp, a photo;
+  - kitchen: counter with stove and sink, fridge, table for four, water jar;
+  - bathroom: toilet, basin and mirror, a jar and a shower that turns on;
+  - storeroom: racks, a stock book;
+  - café kitchen: wok burners, a recipe board.
+  Prompts are offered only for what is in the player's room, so nothing is reached through a
+  wall.
+- **Lighting:** per vertex and computed at build time: daylight from the street front (back
+  rooms get a little), lamp light from the same room, occlusion. Each vertex carries its room's
+  light channel, so each room switches its own lamps (house rooms have a switch by their door,
+  and windowless back rooms start lit). The shader scales it by day/night and the switches, so
+  there are no textures and no runtime lights. That is two to four draw calls per interior, plus
+  one per inner door leaf while the interior is visible.
 - **Entering:** the doorway is cut into the OSM facade (`materials.setDoorSet`, shader discard)
   and into the building's collision ring (`collision.setDoors`). Both are per-owner sets shared
   with the walk-in shops. A glass or wooden door is hinged in the opening, and cafés and shops

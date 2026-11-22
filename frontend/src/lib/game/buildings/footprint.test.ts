@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LIMITS, area, clearLine, fitRoom, largestRoom, orientedBox, planInterior, pointInRing, segmentDistance, type Surroundings, type XZ } from './footprint';
+import { LIMITS, area, clearLine, largestRoom, orientedBox, planInterior, pointInRing, segmentDistance, type Surroundings, type XZ } from './footprint';
 
 /** An axis-aligned rectangle ring, optionally rotated about its centre. */
 function rect(cx: number, cz: number, w: number, d: number, angle = 0): XZ[] {
@@ -89,27 +89,6 @@ describe('planInterior: which buildings can be entered, and where', () => {
 		// The front of the room is just inside the front wall (z = 15 - wall).
 		expect(r.plan.z + r.plan.depth / 2).toBeCloseTo(15 - LIMITS.wall, 1);
 		expect(Math.abs(r.plan.doorX)).toBeLessThan(r.plan.width / 2);
-	});
-
-	it('fits a smaller room (a house) against the same entrance', () => {
-		const r = planInterior({ ring: rect(20, -30, 12, 13, 0.6), h: 9 }, { roads: [{ pts: [[-50, -30 + 14], [80, -30 + 14]], w: 6 }], neighbours: [] });
-		expect(r.ok).toBe(true);
-		if (!r.ok) return;
-		const big = r.plan,
-			small = fitRoom(big, 8, 7.5);
-		expect(small.width).toBeCloseTo(Math.min(big.width, 8));
-		expect(small.depth).toBeCloseTo(7.5);
-		// The door is the same point in the world, on the same front wall.
-		const door = (p: typeof big) => {
-			const lz = p.depth / 2;
-			return [p.x + p.doorX * Math.cos(p.yaw) + lz * Math.sin(p.yaw), p.z - p.doorX * Math.sin(p.yaw) + lz * Math.cos(p.yaw)];
-		};
-		const [ax, az] = door(big),
-			[bx, bz] = door(small);
-		expect(Math.hypot(ax - bx, az - bz)).toBeLessThan(1e-9);
-		expect(Math.abs(small.doorX)).toBeLessThanOrEqual(small.width / 2 - 0.5);
-		expect(small.facade).toEqual(big.facade);
-		expect(fitRoom(small, 8, 7.5)).toBe(small); // already small: unchanged
 	});
 
 	it('an L-shaped building: the biggest room that fits, door on an outside wall', () => {

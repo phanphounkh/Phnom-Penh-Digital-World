@@ -55,6 +55,8 @@ export interface LightSpec {
 	channel: number;
 	switches: [number, number, number][];
 	materials: string[];
+	/** Switched on from the start even by day (a room without windows). */
+	startOn?: boolean;
 }
 
 /** Something to look at closely: E shows its title and text. */

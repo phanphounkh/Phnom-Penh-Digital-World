@@ -154,25 +154,6 @@ export interface BuildingInput {
 	hill?: boolean;
 }
 
-/**
- * The same entrance with a smaller room: at most `maxWidth` x `maxDepth`, against the entrance
- * wall and around the door (a house's living room; the rest of a big building stays closed back
- * rooms). The door and the facade do not move.
- */
-export function fitRoom(plan: Plan, maxWidth: number, maxDepth: number): Plan {
-	const width = Math.min(plan.width, maxWidth),
-		depth = Math.min(plan.depth, maxDepth);
-	if (width === plan.width && depth === plan.depth) return plan;
-	// The new centre in the old room's frame: the front wall stays put, the door as central as
-	// the old room allows.
-	const slack = (plan.width - width) / 2;
-	const lx = Math.max(-slack, Math.min(slack, plan.doorX)),
-		lz = (plan.depth - depth) / 2;
-	const c = Math.cos(plan.yaw),
-		s = Math.sin(plan.yaw);
-	return { ...plan, x: plan.x + lx * c + lz * s, z: plan.z - lx * s + lz * c, width, depth, doorX: plan.doorX - lx };
-}
-
 /** The point of segment a-b nearest to (x, z). */
 function closestOnSegment(x: number, z: number, ax: number, az: number, bx: number, bz: number): XZ {
 	const dx = bx - ax,

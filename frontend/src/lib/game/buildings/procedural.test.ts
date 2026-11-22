@@ -8,8 +8,8 @@ import { Buildings, type BuildingHost, type BuildingInteraction } from './Buildi
 import { SWING_TIME } from './door';
 import { planInterior, type Plan, type XZ } from './footprint';
 import { findPath } from './nav';
-import { buildInterior } from './procedural';
-import { Frame } from './spec';
+import { PARTITION, buildInterior, planRooms } from './procedural';
+import { Frame, roomAt } from './spec';
 
 const R = 0.35;
 const rect = (cx: number, cz: number, w: number, d: number): XZ[] => [[cx - w / 2, cz - d / 2], [cx + w / 2, cz - d / 2], [cx + w / 2, cz + d / 2], [cx - w / 2, cz + d / 2]];
@@ -235,7 +235,7 @@ describe('auto mode: the buildings nearest the player open as they walk along a 
 		expect(open()).toEqual(['osm:1000']); // the nearest first; the others wait their turn
 		for (let i = 0; i < 4; i++) b.update(0.25, 0, 16, 0);
 		expect(open()).toEqual(['osm:1000', 'osm:1001', 'osm:1002']);
-		expect(b.list.every((l) => l.spec.doors.length === 1)).toBe(true);
+		expect(b.list.every((l) => l.spec.doors[0].id === 'front')).toBe(true);
 	});
 
 	it('follows the player down the street, keeping the ones just passed a little longer', () => {
@@ -249,5 +249,174 @@ describe('auto mode: the buildings nearest the player open as they walk along a 
 		stay(130, 4);
 		expect(open()).not.toContain('osm:1000'); // far behind: freed
 		expect(open()).toEqual(expect.arrayContaining(['osm:1010', 'osm:1011']));
+	});
+});
+
+describe('floor plans: rooms behind the entrance room, joined by doors', () => {
+	const kinds = (p: ReturnType<typeof planRooms>) => p.rooms.map((r) => r.kind);
+	it('a small home is one room; bigger ones have a bedroom, kitchen and bathroom behind', () => {
+		expect(kinds(planRooms('house', 5, 6, 0))).toEqual(['living']);
+		const wide = planRooms('house', 12.5, 8.5, 0);
+		expect(kinds(wide)).toEqual(['living', 'bedroom', 'bathroom', 'kitchen']);
+		expect(wide.doors.every((d) => d.front === 'living')).toBe(true); // each opens onto the living room
+		// A narrow shophouse: one room behind the other, each through the one before.
+		const narrow = planRooms('house', 4.5, 11.5, 0);
+		expect(kinds(narrow)).toEqual(['living', 'bedroom', 'kitchen', 'bathroom']);
+		expect(narrow.doors.map((d) => `${d.front}>${d.back}`)).toEqual(['living>bedroom', 'bedroom>kitchen', 'kitchen>bathroom']);
+		expect(kinds(planRooms('house', 4.5, 9, 0))).toEqual(['living', 'kitchen', 'bathroom']);
+	});
+
+	it('a shop gets a storeroom and a café a kitchen once deep enough', () => {
+		expect(kinds(planRooms('shop', 6, 10, 0))).toEqual(['sales', 'store']);
+		expect(kinds(planRooms('shop', 6, 7, 0))).toEqual(['sales']);
+		expect(kinds(planRooms('cafe', 8, 11, 0))).toEqual(['dining', 'galley']);
+		expect(kinds(planRooms('cafe', 8, 8, 0))).toEqual(['dining']);
+	});
+
+	it('rooms tile the interior: inside it, apart by a partition, big enough, one light channel each', () => {
+		for (const type of ['house', 'shop', 'cafe'] as const)
+			for (const W of [3.2, 4.5, 6, 7.5, 9, 12])
+				for (const D of [5, 7, 9.5, 12]) {
+					const p = planRooms(type, W, D, W / 5);
+					const at = `${type} ${W}x${D}`;
+					expect(p.rooms.map((r) => r.channel), at).toEqual(p.rooms.map((_, i) => i));
+					expect(p.rooms.length, at).toBeLessThanOrEqual(4);
+					for (const r of p.rooms) {
+						const [x0, x1, z0, z1] = r.rect;
+						expect(x0 >= -W / 2 - 1e-9 && x1 <= W / 2 + 1e-9 && z0 >= -D / 2 - 1e-9 && z1 <= D / 2 + 1e-9, at).toBe(true);
+						expect(Math.min(x1 - x0, z1 - z0), `${at} ${r.id}`).toBeGreaterThanOrEqual(1.6);
+						for (const o of p.rooms)
+							if (o !== r) {
+								const [a0, a1, b0, b1] = o.rect;
+								const gap = Math.max(a0 - x1, x0 - a1, b0 - z1, z0 - b1);
+								expect(gap, `${at} ${r.id}/${o.id}`).toBeGreaterThanOrEqual(PARTITION - 1e-9);
+							}
+					}
+					// Every room but the first is entered from a room nearer the entrance.
+					const seen = new Set([p.rooms[0].id]);
+					for (const d of p.doors) {
+						expect(seen.has(d.front), at).toBe(true);
+						seen.add(d.back);
+					}
+					expect(seen.size, at).toBe(p.rooms.length);
+				}
+	});
+
+	it('every room can be walked into from the entrance, round the furniture', () => {
+		for (const type of ['house', 'shop', 'cafe'] as const)
+			for (const [w, d] of [[5, 9], [8, 12], [13, 9], [4.5, 12.5]]) {
+				const plan = planFor(w, d);
+				const { spec } = buildInterior(type, plan, 3, { value: 0 });
+				const [x0, z0] = spec.interior.min;
+				const [x1, z1] = spec.interior.max;
+				const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...spec.walls, ...spec.blockers], radius: 0.38 };
+				const from: XZ = [plan.doorX, z1 - 0.5];
+				for (const room of spec.rooms) {
+					const [rx0, rx1, rz0, rz1] = room.rects[0];
+					// The free spot nearest the middle of the room.
+					const spots: XZ[] = [];
+					for (let x = rx0 + 0.45; x <= rx1 - 0.45; x += 0.25) for (let z = rz0 + 0.45; z <= rz1 - 0.45; z += 0.25) spots.push([x, z]);
+					spots.sort((a, b) => Math.hypot(a[0] - (rx0 + rx1) / 2, a[1] - (rz0 + rz1) / 2) - Math.hypot(b[0] - (rx0 + rx1) / 2, b[1] - (rz0 + rz1) / 2));
+					const spot = spots.find((p) => spec.blockers.every((ring) => !inRect(ring, p, 0.4)));
+					expect(spot, `${type} ${w}x${d} ${room.id}: some free floor`).toBeTruthy();
+					expect(findPath(area, from, spot!), `${type} ${w}x${d} ${room.id}`).not.toBeNull();
+				}
+			}
+	});
+
+	it('a home: each room has its own lights, switched beside its door; inner doors hang in gaps', () => {
+		const plan = planFor(13, 10);
+		const { spec, root } = buildInterior('house', plan, 5, { value: 0 });
+		expect(spec.rooms.length).toBeGreaterThan(2);
+		expect(spec.lights.map((l) => l.channel)).toEqual(spec.rooms.map((r) => r.light));
+		for (const l of spec.lights) {
+			expect(l.switches).toHaveLength(1);
+			const [sx, sz] = l.switches[0];
+			expect(roomAt(spec, sx, sz)?.id).toBe(l.id);
+		}
+		const inner = spec.doors.slice(1);
+		expect(inner.length).toBe(spec.rooms.length - 1);
+		for (const d of inner) {
+			expect(root.getObjectByName(d.node)).toBeTruthy();
+			const [cx, cz] = d.center;
+			expect(spec.walls.some((ring) => inRect(ring, [cx, cz], 0))).toBe(false); // a gap in the partition
+			expect(spec.lintels.some((l) => inRect(l.ring, [cx, cz], 0))).toBe(true); // a wall over it
+		}
+	});
+});
+
+/** Within `margin` of a rectangle given as a ring. */
+function inRect(ring: XZ[], [x, z]: XZ, margin: number): boolean {
+	const xs = ring.map((p) => p[0]),
+		zs = ring.map((p) => p[1]);
+	return x > Math.min(...xs) - margin && x < Math.max(...xs) + margin && z > Math.min(...zs) - margin && z < Math.max(...zs) + margin;
+}
+
+describe('a home with rooms, in the game', () => {
+	// A 13 x 10 m building on a street: a living room with a bedroom, bathroom and kitchen behind.
+	const ring = rect(0, 0, 13, 10);
+	const payload = {
+		key: '0_0',
+		ix: 0,
+		iz: 0,
+		size: 500,
+		roads: [{ id: 1, name: 'Street', name_en: null, name_km: null, cls: 'residential', w: 8, oneway: false, bridge: false, layer: 0, pts: [[-60, 11], [60, 11]] }],
+		buildings: [{ id: 555, name: null, name_km: null, kind: 'house', h: 7, min_h: 0, hs: 'osm', colour: null, polys: [[ring]] }],
+		areas: [],
+		landmarks: [],
+		features: []
+	} as unknown as ChunkPayload;
+	function home() {
+		const collision = new CollisionWorld();
+		collision.addRing('chunk', ring, 7);
+		const host: BuildingHost = {
+			scene: new THREE.Scene(),
+			collision,
+			terrain: FLAT,
+			materials: { night: { value: 0 } },
+			seated: false,
+			setGround: () => {},
+			setInterior: () => {},
+			sit: () => true,
+			stand: () => {},
+			walkTo: (_p, done) => done?.(true),
+			invalidateShadows: () => {}
+		};
+		const b = new Buildings(host, () => {}, [], undefined, { payloads: () => [payload], list: [{ id: 555, type: 'house' }] });
+		b.update(0.016, 0, 20, 0);
+		const l = b.list[0];
+		/** Stand at a local point facing a local target; the prompt then. */
+		const at = (p: XZ, target: XZ) => {
+			const [x, z] = l.frame.toWorld(p);
+			const [tx, tz] = l.frame.toWorld(target);
+			b.update(0.016, x, z, Math.atan2(tx - x, tz - z));
+			return b.interaction;
+		};
+		return { b, spec: l.spec, at };
+	}
+
+	it("offers only what is in the player's room: nothing through a partition", () => {
+		const { spec, at } = home();
+		const jar = spec.items.find((i) => i.id === 'kitchen-jar')!;
+		expect(jar).toBeTruthy();
+		const wall = spec.doors.find((d) => d.id === 'kitchen')!.center[1];
+		// In the living room, right across the wall from the jar, facing it.
+		const prompt = at([jar.x, wall + 0.5], [jar.x, jar.z]);
+		expect(prompt?.kind === 'inspect' && prompt.item === 'kitchen-jar').toBe(false);
+		// In the kitchen, in front of it: offered.
+		expect(at([jar.x, jar.z - 0.1], [jar.x, jar.z - 0.8])?.kind).not.toBe('door');
+	});
+
+	it("a room's switch turns on that room's lamps only", () => {
+		const { b, spec, at } = home();
+		const bedroom = spec.lights.find((l) => l.id === 'bedroom')!;
+		const [sx, sz] = bedroom.switches[0];
+		const prompt = at([sx + 0.1, sz - 0.7], [sx, sz]);
+		expect(prompt).toMatchObject({ kind: 'light', light: 'bedroom' });
+		const before = b.list[0].lights;
+		b.interact();
+		const after = b.list[0].lights;
+		expect(after.bedroom).toBe(!before.bedroom);
+		for (const id of Object.keys(before)) if (id !== 'bedroom') expect(after[id]).toBe(before[id]);
 	});
 });
