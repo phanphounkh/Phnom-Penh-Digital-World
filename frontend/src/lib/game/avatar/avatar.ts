@@ -35,6 +35,22 @@ export const CLOTH_COLORS = [
 ];
 export const SHOE_COLORS = ['#eee5d5', '#1d2422', '#c4552f', '#3d6fb6', '#e8a33d', '#8a6a4a'];
 
+/** What a player calls each colour (shown beside the swatches and read by screen readers). */
+const CLOTH_NAMES = ['Jade', 'River', 'Saffron', 'Brick', 'Ivory', 'Slate', 'Orchid', 'Lotus', 'Mekong blue', 'Palm', 'Ink', 'Stone'];
+const HAIR_NAMES = ['Black', 'Soft black', 'Dark brown', 'Brown', 'Honey', 'Grey'];
+const SHOE_NAMES = ['Off-white', 'Black', 'Brick', 'Blue', 'Saffron', 'Tan'];
+export const COLOR_NAMES = {
+	skin: Object.fromEntries(SKIN_TONES.map((c, i) => [c, `Tone ${i + 1}`])),
+	hair: Object.fromEntries(HAIR_COLORS.map((c, i) => [c, HAIR_NAMES[i]])),
+	cloth: Object.fromEntries(CLOTH_COLORS.map((c, i) => [c, CLOTH_NAMES[i]])),
+	shoe: Object.fromEntries(SHOE_COLORS.map((c, i) => [c, SHOE_NAMES[i]]))
+} satisfies Record<string, Record<string, string>>;
+
+/** A colour's name in a palette ('Custom' for a colour saved from outside the palette). */
+export function colorName(palette: keyof typeof COLOR_NAMES, hex: string): string {
+	return (COLOR_NAMES[palette] as Record<string, string>)[hex.toLowerCase()] ?? 'Custom';
+}
+
 export const DEFAULT_AVATAR: Avatar = {
 	avatar_name: 'Explorer',
 	body: 'a',

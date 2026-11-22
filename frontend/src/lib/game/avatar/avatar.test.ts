@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_AVATAR, SKIN_TONES, optionOf, randomAvatar, selectedOptions } from './avatar';
+import { CLOTH_COLORS, DEFAULT_AVATAR, HAIR_COLORS, SHOE_COLORS, SKIN_TONES, colorName, optionOf, randomAvatar, selectedOptions } from './avatar';
 
 /** Node names inside the GLB, as Three.js's GLTFLoader will name them (sanitised). */
 function glbNodeNames(path: string): string[] {
@@ -16,6 +16,16 @@ function glbNodeNames(path: string): string[] {
 const GLB = 'static/models/characters/avatar.glb';
 
 describe('avatar options', () => {
+	it('every palette colour has its own name (screen readers and the creator read names, not hex)', () => {
+		for (const [palette, colors] of [['skin', SKIN_TONES], ['hair', HAIR_COLORS], ['cloth', CLOTH_COLORS], ['shoe', SHOE_COLORS]] as const) {
+			const names = colors.map((c) => colorName(palette, c));
+			expect(names.every((n) => n && n !== 'Custom' && !n.startsWith('#'))).toBe(true);
+			expect(new Set(names).size).toBe(colors.length);
+		}
+		expect(colorName('cloth', '#2F7D6D')).toBe('Jade');
+		expect(colorName('cloth', '#123456')).toBe('Custom');
+	});
+
 	it('parses option node names, including Blender duplicate suffixes', () => {
 		expect(optionOf('opt__acc-glasses__rim001')).toBe('acc-glasses');
 		expect(optionOf('opt__top-tee__forearm')).toBe('top-tee');
