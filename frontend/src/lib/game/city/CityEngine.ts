@@ -24,6 +24,7 @@ import { pursuitSteer, rideState, rideStep } from '$lib/game/vehicles/kinematics
 import { MODES, PULL_OVER_M, type TravelMode, type VehicleKind } from '$lib/game/vehicles/specs';
 import { RouteLine } from '$lib/game/vehicles/RouteLine';
 import { PathFollower, RouteGuide, lanePath, stepText, type Progress, type Route } from '$lib/game/vehicles/route';
+import { JUMP_BUFFER, approachSpeed, grounded, isAirborne, stepHop, targetSpeed, turnHeading } from './locomotion';
 
 export type Quality = 'high' | 'low';
 
@@ -141,8 +142,6 @@ export interface CityOptions {
 	avatarStyle?: AvatarStyle;
 }
 
-const WALK = 2.6;
-const RUN = 6.5;
 const RADIUS = 0.35;
 const EYE = 1.55;
 /** Physics sub-step while riding (stable steering on slow, software-rendered frames). */
@@ -289,6 +288,7 @@ export async function createCity(
 	let yaw = boot.start?.yaw ?? yawForHeading(boot.spawn.heading_deg);
 	let speed = 0;
 	let holding = false;
+	const hop = grounded();
 	// Riding (Phase 5).
 	const network = new RoadNetwork();
 	let riding: RidingVehicle | null = null;
@@ -344,6 +344,11 @@ export async function createCity(
 	const onKeyDown = (e: KeyboardEvent) => {
 		if (typing(e)) return;
 		const k = e.key.toLowerCase();
+		if (k === ' ') {
+			e.preventDefault(); // no page scroll, no click on a focused HUD button
+			if (!e.repeat) hop.queued = JUMP_BUFFER;
+			return;
+		}
 		if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(k)) {
 			keys.add(k);
 			if (k.startsWith('arrow')) e.preventDefault();
@@ -431,7 +436,10 @@ export async function createCity(
 
 	function step(dt: number) {
 		network.sync(chunks.payloads(), chunks.version);
-		if (riding) return stepRiding(dt);
+		if (riding) {
+			Object.assign(hop, grounded());
+			return stepRiding(dt);
+		}
 		const forward = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
 		const strafe = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
 		const fx = -Math.sin(camYaw), fz = -Math.cos(camYaw);
@@ -458,16 +466,19 @@ export async function createCity(
 			behind = Math.atan2(Math.sin(behind), Math.cos(behind));
 			camYaw += behind * (1 - Math.exp(-dt * 2.5));
 		}
-		const target = len > 0 ? (keys.has('shift') || autoRun ? RUN : WALK) : 0;
-		speed += (target - speed) * (1 - Math.exp(-dt * 8));
-		let travel = 0;
+		let delta = 0;
 		if (len > 0) {
 			mx /= len;
 			mz /= len;
-			let delta = Math.atan2(mx, mz) - yaw;
+			delta = Math.atan2(mx, mz) - yaw;
 			delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-			yaw += delta * (1 - Math.exp(-dt * 12));
 		}
+		const airborne = isAirborne(hop);
+		speed = approachSpeed(speed, targetSpeed(len > 0, keys.has('shift') || autoRun, delta, airborne), dt, airborne);
+		if (len > 0) yaw = turnHeading(yaw, delta, speed, dt, airborne);
+		if (stepHop(hop, dt)) character.emotes.stop(); // vertical only: collisions stay 2D
+		const lift = hop.lift;
+		let travel = 0;
 		if (speed > 0.02) {
 			const result = moveCircle(collision, px, pz, Math.sin(yaw) * speed * dt, Math.cos(yaw) * speed * dt, RADIUS);
 			travel = Math.hypot(result.x - px, result.z - pz);
@@ -480,14 +491,15 @@ export async function createCity(
 			if (routeStuck > 1.5) endRoute(false);
 		}
 		const ground = terrain.height(px, pz);
-		player.position.set(px, ground, pz);
+		player.position.set(px, ground + lift, pz);
 		player.rotation.y = yaw;
 		shadowBlob.position.set(px, ground + 0.09, pz);
+		character.animations.airborne?.(isAirborne(hop), hop.vy);
 		character.animations.update(dt, dt > 0 ? travel / dt : 0, holding, false, null, travel, 1);
 		character.emotes.update(dt, speed > 0.3);
 
-		shadowBlob.scale.set(1, 1, 1);
-		placeCamera(dt, ground + EYE, camDistance);
+		shadowBlob.scale.setScalar(1 - Math.min(lift, 1) * 0.35);
+		placeCamera(dt, ground + EYE + lift * 0.4, camDistance);
 		updateWorld();
 	}
 
@@ -680,12 +692,16 @@ export async function createCity(
 		renderer,
 		materials,
 		programs: () => renderer.info.programs?.length ?? 0,
-		/** The local avatar: style in use, model name, bone count (e2e checks). */
+		/** The local avatar: style in use, model name, bone count, gait and motion (e2e checks). */
 		avatar: () => {
 			let bones = 0;
 			player.traverse((n) => (bones += (n as THREE.Bone).isBone ? 1 : 0));
 			const gait = (character.animations as { gait?: string }).gait ?? null;
-			return { style: character.style, model: character.root.name, bones, riding: !!rider, gait, emote: character.emotes.playing };
+			const lean = (character.animations as { lean?: { roll: number; pitch: number } }).lean ?? null;
+			const foot = (name: string) => character.root.getObjectByName(name)?.getWorldPosition(new THREE.Vector3()).toArray() ?? null;
+			const feet = ['LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase'].map((n) => foot('mixamorig' + n));
+			const ground = player.position.y - hop.lift;
+			return { style: character.style, model: character.root.name, bones, riding: !!rider, gait, emote: character.emotes.playing, speed, lift: hop.lift, yaw, lean, feet, ground };
 		},
 		reset() {
 			Object.assign(perf, { step: 0, render: 0, frames: 0, maxStep: 0, maxRender: 0, spikes: 0 });
@@ -899,10 +915,15 @@ export async function createCity(
 				camYaw = yaw + Math.PI;
 			}
 			speed = 0;
+			Object.assign(hop, grounded());
 			const g = terrain.height(px, pz);
 			camera.position.set(px + Math.sin(camYaw) * camDistance, g + EYE + 3, pz + Math.cos(camYaw) * camDistance);
 		},
 		setKey(key, down) {
+			if (key === ' ') {
+				if (down) hop.queued = JUMP_BUFFER;
+				return;
+			}
 			if (down) keys.add(key);
 			else keys.delete(key);
 		},

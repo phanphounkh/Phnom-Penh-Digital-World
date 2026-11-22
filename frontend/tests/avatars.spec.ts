@@ -1,6 +1,6 @@
 /**
  * Realistic avatars end to end (isolated stack): two players with different builds see
- * themselves and each other as realistic models, walk, play an emote (seen by the other player),
+ * themselves and each other as realistic models, jog, sprint and jump, play an emote (seen by the other player),
  * switch to the classic style and back at runtime; the avatar editor previews the realistic
  * model. Screenshots go to test-results/avatars/ (not committed).
  */
@@ -43,7 +43,7 @@ async function onboard(browser: Browser, baseURL: string, username: string, look
 }
 
 const ev = <T>(page: Page, fn: string) => page.evaluate(fn) as Promise<T>;
-type AvatarInfo = { style: string; model: string; bones: number; riding: boolean; gait: string | null; emote: string | null };
+type AvatarInfo = { style: string; model: string; bones: number; riding: boolean; gait: string | null; emote: string | null; lift: number };
 const avatar = (page: Page) => ev<AvatarInfo>(page, '__ppwPerf.avatar()');
 /** Model name of the other player's avatar as this page draws it (or null). */
 const remoteModel = (page: Page, username: string) =>
@@ -66,7 +66,7 @@ async function closeUp(page: Page) {
 	await page.waitForTimeout(1500);
 }
 
-test('realistic avatars: builds, remote players, walking, emotes and the classic switch', async ({ browser, baseURL }) => {
+test('realistic avatars: builds, remote players, jog/sprint/jump, emotes and the classic switch', async ({ browser, baseURL }) => {
 	test.setTimeout(600_000);
 	const id = Date.now().toString(36).slice(-6);
 	const a = await onboard(browser, baseURL!, `real_${id}`, { body: 'a', top_color: '#e9e9ee', accent_color: '#2b4ea0', bottom_color: '#1b1b1e' });
@@ -85,19 +85,36 @@ test('realistic avatars: builds, remote players, walking, emotes and the classic
 	await closeUp(a.page);
 	await a.page.screenshot({ path: `${SHOTS}/realistic-idle.png` });
 
-	// Walking: the walk clip plays while W is held, idle again after.
+	// Moving: W jogs (2.6 m/s plays the motion-captured jog), Shift sprints, idle again after.
 	await a.page.getByTestId('world-canvas').click({ position: { x: 20, y: 300 } });
 	await a.page.keyboard.down('w');
-	await expect.poll(async () => (await avatar(a.page)).gait, FRAMES).toBe('walk');
-	await a.page.waitForTimeout(700);
-	await a.page.screenshot({ path: `${SHOTS}/realistic-walk.png` });
-	await a.page.keyboard.down('Shift');
 	await expect.poll(async () => (await avatar(a.page)).gait, FRAMES).toBe('run');
+	await a.page.waitForTimeout(700);
+	await a.page.screenshot({ path: `${SHOTS}/realistic-jog.png` });
+	await a.page.keyboard.down('Shift');
+	await expect.poll(async () => (await avatar(a.page)).gait, FRAMES).toBe('sprint');
 	await a.page.waitForTimeout(500);
-	await a.page.screenshot({ path: `${SHOTS}/realistic-run.png` });
+	await a.page.screenshot({ path: `${SHOTS}/realistic-sprint.png` });
 	await a.page.keyboard.up('Shift');
 	await a.page.keyboard.up('w');
 	await expect.poll(async () => (await avatar(a.page)).gait, FRAMES).toBe('idle');
+
+	// Jumping (Space): take-off, flight, landing, then idle. Every frame's state is recorded
+	// in the page, so a 0.5 s hop is seen even at software-rendering frame rates.
+	await ev(a.page, `(() => {
+		const seen = (globalThis.__hop = { gaits: [], lift: 0 });
+		const tick = () => {
+			const s = __ppwPerf.avatar();
+			if (seen.gaits.at(-1) !== s.gait) seen.gaits.push(s.gait);
+			seen.lift = Math.max(seen.lift, s.lift);
+			if (seen.gaits.length < 12) requestAnimationFrame(tick);
+		};
+		requestAnimationFrame(tick);
+	})()`);
+	await a.page.keyboard.press(' ');
+	await expect.poll(() => ev<string[]>(a.page, '__hop.gaits'), FRAMES).toEqual(expect.arrayContaining(['jump', 'land']));
+	await expect.poll(async () => (await avatar(a.page)).gait, FRAMES).toBe('idle');
+	expect(await ev<number>(a.page, '__hop.lift')).toBeGreaterThan(0.3);
 
 	// Emote: the sampeah plays locally and the other player receives it.
 	await b.page.getByTestId('emote-sampeah').click();

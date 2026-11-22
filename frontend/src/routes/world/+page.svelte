@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
-		ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
+		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
 		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
 		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2
 	} from 'lucide-svelte';
@@ -612,9 +612,9 @@
 			<div class="world-touch absolute right-4 bottom-44 grid grid-cols-3 gap-1.5" data-testid="touch-controls">
 				<span></span><button class="pad" aria-label="Forward" {...pad('w')}><ChevronUp /></button><span></span>
 				<button class="pad" aria-label="Left" {...pad('a')}><ChevronLeft /></button>
-				<button class="pad" aria-label="Run" {...pad('shift')}><Footprints size={18} /></button>
+				<button class="pad" aria-label="Sprint" {...pad('shift')}><Footprints size={18} /></button>
 				<button class="pad" aria-label="Right" {...pad('d')}><ChevronRight /></button>
-				<span></span><button class="pad" aria-label="Back" {...pad('s')}><ChevronDown /></button><span></span>
+				<span></span><button class="pad" aria-label="Back" {...pad('s')}><ChevronDown /></button><button class="pad" aria-label="Jump" {...pad(' ')}><ArrowBigUp size={18} /></button>
 			</div>
 		{/if}
 	{/if}
@@ -740,8 +740,9 @@
 			{:else}
 				<h2 class="display text-xl font-bold">Controls</h2>
 				<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
-					<dt class="font-mono font-semibold">W A S D</dt><dd>Walk (arrow keys work too)</dd>
-					<dt class="font-mono font-semibold">Shift</dt><dd>Run</dd>
+					<dt class="font-mono font-semibold">W A S D</dt><dd>Move: jog, easing from a walk (arrow keys work too)</dd>
+					<dt class="font-mono font-semibold">Shift</dt><dd>Sprint</dd>
+					<dt class="font-mono font-semibold">Space</dt><dd>Jump</dd>
 					<dt class="font-mono font-semibold">Drag</dt><dd>Orbit the camera</dd>
 					<dt class="font-mono font-semibold">Wheel</dt><dd>Zoom</dd>
 					<dt class="font-mono font-semibold">M</dt><dd>Places / fast travel</dd>

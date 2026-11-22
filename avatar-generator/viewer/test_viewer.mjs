@@ -71,7 +71,7 @@ for (const quality of ['high', 'game']) {
 	await frame();
 	const clips = await page.evaluate(() => window.__viewer.clips());
 	const morphs = await page.evaluate(() => window.__viewer.morphs());
-	check(`${quality}: 9 animation clips`, ['Idle', 'Walk', 'Run', 'Wave', 'Sit', 'Talk', 'Dance', 'Greet', 'Cheer'].every((c) => clips.includes(c)), clips);
+	check(`${quality}: 13 animation clips`, ['Idle', 'Walk', 'Run', 'Sprint', 'Jump', 'Fall', 'Land', 'Wave', 'Sit', 'Talk', 'Dance', 'Greet', 'Cheer'].every((c) => clips.includes(c)), clips);
 	check(`${quality}: 7 face morphs`, ['Smile', 'Excited', 'Surprised', 'Thinking', 'Wink', 'Blink', 'MouthOpen'].every((c) => morphs.includes(c)), morphs);
 	await page.screenshot({ path: join(out, `${quality}_rest.png`) });
 	await page.evaluate(() => window.__viewer.play('Walk'));
@@ -86,15 +86,18 @@ for (const quality of ['high', 'game']) {
 	for (const m of ['male', 'female']) rest[m] = await bones(m);
 	for (const m of ['male', 'female']) check(`${quality}: ${m} stands on the ground (A-pose)`, Math.abs(Math.min(rest[m].mixamorigLeftFoot[1], rest[m].mixamorigRightFoot[1]) - 0.08) < 0.08, rest[m].mixamorigLeftFoot);
 
-	const durations = { Idle: 4, Walk: 0.95, Run: 0.7, Wave: 3, Sit: 4, Talk: 3, Dance: 2, Greet: 3, Cheer: 2.2 };
+	// Walk/Run/Sprint are motion capture cut from left heel strike to left heel strike: the feet
+	// are furthest apart at 0 and 0.5 of the cycle.
+	const STRIDE = new Set(['Walk', 'Run', 'Sprint']);
+	const durations = { Idle: 4, Walk: 1.03, Run: 0.77, Sprint: 0.73, Jump: 0.37, Fall: 0.2, Land: 0.63, Wave: 3, Sit: 4, Talk: 3, Dance: 2, Greet: 3, Cheer: 2.2 };
 	for (const [clip, dur] of Object.entries(durations)) {
 		const samples = {};
-		for (const f of [0.25, 0.5, 0.75]) {
+		for (const f of STRIDE.has(clip) ? [0.02, 0.5, 0.52] : [0.25, 0.5, 0.75]) {
 			await page.evaluate(([c, t]) => window.__viewer.pose(c, t), [clip, dur * f]);
 			samples[f] = { male: await bones('male'), female: await bones('female') };
 		}
 		if (quality === 'high') {
-			await page.evaluate(([c, t]) => window.__viewer.pose(c, t), [clip, dur * (clip === 'Walk' || clip === 'Run' ? 0.25 : 0.5)]);
+			await page.evaluate(([c, t]) => window.__viewer.pose(c, t), [clip, dur * (STRIDE.has(clip) ? 0.02 : 0.5)]);
 			await frame();
 			await page.screenshot({ path: join(out, `clip_${clip}.png`) });
 		}
@@ -102,12 +105,18 @@ for (const quality of ['high', 'game']) {
 			const moved = Math.max(...BONES.map((b) => dist(samples[0.5][m][b], rest[m][b])));
 			const mid = samples[0.5][m];
 			let ok = moved > 0.04, detail = { moved: +moved.toFixed(3) };
-			if (clip === 'Walk' || clip === 'Run') {
-				const a = samples[0.25][m], c = samples[0.75][m];
+			if (STRIDE.has(clip)) {
+				const a = samples[0.02][m], c = samples[0.52][m];
 				const lead1 = a.mixamorigLeftFoot[2] - a.mixamorigRightFoot[2];
 				const lead2 = c.mixamorigLeftFoot[2] - c.mixamorigRightFoot[2];
 				ok = ok && Math.sign(lead1) !== Math.sign(lead2) && Math.abs(lead1) > 0.15;
 				detail.feet_alternate = [+lead1.toFixed(2), +lead2.toFixed(2)];
+			}
+			if (clip === 'Land') {
+				// Knees absorb the landing: the hips sink while the feet stay down.
+				const drop = rest[m].mixamorigHips[1] - Math.min(...[0.25, 0.5, 0.75].map((f) => samples[f][m].mixamorigHips[1]));
+				ok = ok && drop > 0.05;
+				detail.hips_drop = +drop.toFixed(2);
 			}
 			if (clip === 'Sit') {
 				const drop = rest[m].mixamorigHips[1] - mid.mixamorigHips[1];

@@ -1,7 +1,7 @@
 {
   "high": {
     "file": "female_avatar.glb",
-    "bytes": 5990988,
+    "bytes": 6175068,
     "meshes": 76,
     "triangles": 63000,
     "vertices": 35669,
@@ -79,10 +79,14 @@
     "animations": [
       "Cheer",
       "Dance",
+      "Fall",
       "Greet",
       "Idle",
+      "Jump",
+      "Land",
       "Run",
       "Sit",
+      "Sprint",
       "Talk",
       "Walk",
       "Wave"
@@ -104,7 +108,7 @@
   },
   "game": {
     "file": "female_avatar_game.glb",
-    "bytes": 2652480,
+    "bytes": 2835648,
     "meshes": 7,
     "triangles": 25806,
     "vertices": 16762,
@@ -158,10 +162,14 @@
     "animations": [
       "Cheer",
       "Dance",
+      "Fall",
       "Greet",
       "Idle",
+      "Jump",
+      "Land",
       "Run",
       "Sit",
+      "Sprint",
       "Talk",
       "Walk",
       "Wave"

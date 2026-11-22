@@ -1,7 +1,7 @@
 {
   "high": {
     "file": "male_avatar.glb",
-    "bytes": 6114412,
+    "bytes": 6298492,
     "meshes": 69,
     "triangles": 71280,
     "vertices": 41147,
@@ -79,10 +79,14 @@
     "animations": [
       "Cheer",
       "Dance",
+      "Fall",
       "Greet",
       "Idle",
+      "Jump",
+      "Land",
       "Run",
       "Sit",
+      "Sprint",
       "Talk",
       "Walk",
       "Wave"
@@ -104,7 +108,7 @@
   },
   "game": {
     "file": "male_avatar_game.glb",
-    "bytes": 2790248,
+    "bytes": 2973420,
     "meshes": 7,
     "triangles": 30495,
     "vertices": 20456,
@@ -162,10 +166,14 @@
     "animations": [
       "Cheer",
       "Dance",
+      "Fall",
       "Greet",
       "Idle",
+      "Jump",
+      "Land",
       "Run",
       "Sit",
+      "Sprint",
       "Talk",
       "Walk",
       "Wave"

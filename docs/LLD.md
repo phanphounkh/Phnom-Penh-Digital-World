@@ -126,7 +126,15 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 
 ### Movement and camera
 
-Camera-relative WASD; walk at 2.6 m/s, run at 6.5 m/s. The player circle has a radius of 0.35 m
+Camera-relative WASD at 2.6 m/s (a jog); Shift sprints at 6.5 m/s; Space jumps. The movement
+model is in `city/locomotion.ts`:
+- **Speed:** acceleration is capped at 6 m/s² and braking at 11 m/s².
+- **Turning:** the heading eases towards the input faster when slow, within a 14 m/s² sideways-grip limit. Sharp turns cut the speed, so a reversal pivots instead of orbiting.
+- **Jump:** 3.6 m/s take-off under 14 m/s² gravity, integrated exactly, so it gives the same 0.46 m hop at any frame rate. Height is local only: the protocol carries x/z, so other players see a jump as a short pause.
+
+The realistic avatar picks Idle / Walk / Run / Sprint / Jump / Fall / Land clips from the ground
+speed and jump state, at foot-sliding-free playback rates (`avatar/RealisticAnimations.ts`).
+The player circle has a radius of 0.35 m
 and moves in sub-steps of half the radius, so it cannot tunnel through walls. World bounds are
 the playable bbox minus 3 m. The camera orbits at 2.5–22 m. A 2D ray against wall segments,
 using each building's height, pulls the camera in front of buildings that would block the view.

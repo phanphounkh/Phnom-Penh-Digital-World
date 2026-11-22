@@ -11,6 +11,8 @@ Poses are written as rotations about armature axes (X = character's left, -Y = f
 or as aim directions, and converted to each bone's local frame here.
 """
 
+import os
+
 from common import *
 from mathutils import Quaternion
 
@@ -273,6 +275,59 @@ CLIPS = {
 }
 
 
+# Motion-capture clips (CMU Graphics Lab Motion Capture Database, free for any use; BVH by
+# B. Hahne/cgspeed). They replace the procedural Walk/Run and add Sprint and the jump states when
+# assets/vendor/mocap/ has been fetched (scripts/fetch_assets.py); otherwise the procedural
+# clips above are used.
+MOCAP_LOOPS = {
+    "Walk": {"file": "16_21.bvh"},
+    "Run": {"file": "35_17.bvh"},  # a jog: the game's default movement (2.6 m/s)
+    "Sprint": {"file": "16_45.bvh", "warp": 1.3, "lean": 0.12},  # Shift (6.5 m/s): stride-warped run
+}
+MOCAP_JUMP = "16_01.bvh"
+
+
+def mocap_dir():
+    return os.path.join(ROOT, "assets", "vendor", "mocap")
+
+
+def mocap_clips(R, rig):
+    """{name: (fn, dur)} for every clip baked from motion capture (empty if not fetched)."""
+    import mocap as MC
+
+    out = {}
+    d = mocap_dir()
+    for name, spec in MOCAP_LOOPS.items():
+        path = os.path.join(d, spec["file"])
+        if not os.path.exists(path):
+            continue
+        src = MC.import_bvh(path)
+        specs, offs, n = MC.retarget_cycle(R, src, warp=spec.get("warp", 1.0), lean=spec.get("lean", 0.0))
+        bpy.data.objects.remove(src, do_unlink=True)
+        MC.ground(R, rig, specs, offs)
+        out[name] = (_sequence(specs, offs, {"Smile": 0.12}), n / FPS)
+    path = os.path.join(d, MOCAP_JUMP)
+    if os.path.exists(path):
+        src = MC.import_bvh(path)
+        take, apex, land = MC.jump_phases(src)
+        for name, (a, b) in {"Jump": (take - 18, apex), "Fall": (apex, land - 4), "Land": (land - 4, land + 70)}.items():
+            specs, offs, n = MC.retarget_range(R, src, a, b)
+            out[name] = (_sequence(specs, offs, {}, loop=False), n / FPS)
+        bpy.data.objects.remove(src, do_unlink=True)
+    return out
+
+
+def _sequence(specs, offs, morphs, loop=True):
+    n = len(specs)
+
+    def fn(R, t, dur):
+        i = round(t * FPS)
+        i = i % n if loop else min(i, n - 1)
+        return specs[i], offs[i], morphs
+
+    return fn
+
+
 def bake_clip(R, name, fn, dur, morph_meshes):
     rig = R.obj
     rig.animation_data_create()
@@ -338,9 +393,12 @@ def finish_rig(spec, body, rig):
                 o.modifiers.remove(m)
     R = Rig(rig)
     morph_meshes = [o for o in meshes if o.data.shape_keys and len(o.data.shape_keys.key_blocks) > 1]
-    for clip, (fn, dur) in CLIPS.items():
+    clips = dict(CLIPS)
+    captured = mocap_clips(R, rig)
+    clips.update(captured)
+    for clip, (fn, dur) in clips.items():
         frames = bake_clip(R, clip, fn, dur, morph_meshes)
-        log(name, "clip", clip, frames, "frames")
+        log(name, "clip", clip, frames, "frames", "(mocap)" if clip in captured else "")
     # Back to the rest (A) pose.
     for pb in rig.pose.bones:
         pb.rotation_quaternion = Quaternion()

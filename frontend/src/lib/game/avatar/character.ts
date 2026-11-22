@@ -37,6 +37,8 @@ export function saveAvatarStyle(style: AvatarStyle): void {
 
 export interface Gait {
 	update(dt: number, speed: number, holding?: boolean, picking?: boolean, targets?: null, travel?: number, direction?: number): void;
+	/** Vertical state from the engine (jumping/falling); rigs without air clips ignore it. */
+	airborne?(flying: boolean, vy: number): void;
 	dispose(): void;
 }
 
@@ -71,7 +73,7 @@ async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
 	]);
 	const instance = await createRealisticAvatar(avatar);
 	const { entry } = instance;
-	const animations = new RealisticAnimations(instance.root, instance.clips, { walk: entry.walk_speed, run: entry.run_speed }, entry.height_m);
+	const animations = new RealisticAnimations(instance.root, instance.clips, { walk: entry.walk_speed, run: entry.run_speed, sprint: entry.sprint_speed }, entry.height_m);
 	return {
 		style: 'realistic',
 		root: instance.root,

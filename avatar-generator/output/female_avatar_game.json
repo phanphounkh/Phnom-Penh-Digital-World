@@ -106,10 +106,14 @@
   "clips": [
     "Cheer",
     "Dance",
+    "Fall",
     "Greet",
     "Idle",
+    "Jump",
+    "Land",
     "Run",
     "Sit",
+    "Sprint",
     "Talk",
     "Walk",
     "Wave"
@@ -124,6 +128,7 @@
     "Wink"
   ],
   "triangles": 25806,
-  "walk_speed": 1.67,
-  "run_speed": 3.003
+  "walk_speed": 1.356,
+  "run_speed": 2.41,
+  "sprint_speed": 4.306
 }

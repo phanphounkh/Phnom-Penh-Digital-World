@@ -420,24 +420,34 @@ def build_game_lod(name, rig, high):
 
 
 def natural_speed(rig, clip, fps=30):
-    """Ground speed (m/s) at which a looping gait clip shows no foot sliding: the planted foot
-    travels the full left/right foot separation in half a cycle."""
+    """Ground speed (m/s) at which a looping gait clip shows no foot sliding: how fast a planted
+    foot moves backward relative to the hips while it is on the ground (in-place clips)."""
     track = next((t for t in rig.animation_data.nla_tracks if t.name == clip), None)
     if track is None:
         return None
     action = track.strips[0].action
     rig.animation_data.action = action
     start, end = (int(round(v)) for v in action.frame_range)
-    lead = 0.0
+    samples = {"Left": [], "Right": []}
     for f in range(start, end + 1):
         bpy.context.scene.frame_set(f)
-        l = rig.pose.bones["mixamorig:LeftFoot"].head
-        r = rig.pose.bones["mixamorig:RightFoot"].head
-        lead = max(lead, abs(l.y - r.y))
+        hips = rig.pose.bones["mixamorig:Hips"].head
+        for side in samples:
+            foot = rig.pose.bones[f"mixamorig:{side}Foot"].head
+            samples[side].append((foot.z, foot.y - hips.y))  # forward is -Y
     rig.animation_data.action = None
     bpy.context.scene.frame_set(1)
-    period = (end - start) / fps
-    return round(2 * lead / (period / 2) / 2, 3)
+    speeds = []
+    for side, s in samples.items():
+        low = min(z for z, _ in s)
+        for i in range(len(s) - 1):
+            if s[i][0] < low + 0.035 and s[i + 1][0] < low + 0.035:  # in contact with the ground
+                speeds.append((s[i + 1][1] - s[i][1]) * fps)
+    speeds = [v for v in speeds if v > 0]
+    if not speeds:
+        return None
+    speeds.sort()
+    return round(speeds[len(speeds) // 2], 3)
 
 
 def main():
@@ -478,6 +488,7 @@ def main():
         "triangles": s_game["triangles"],
         "walk_speed": natural_speed(rig, "Walk"),
         "run_speed": natural_speed(rig, "Run"),
+        "sprint_speed": natural_speed(rig, "Sprint"),
     })
     with open(os.path.join(OUTPUT, f"{name}_avatar_game.json"), "w") as f:
         json.dump(MANIFEST, f, indent=2)

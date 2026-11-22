@@ -22,7 +22,7 @@ sheets (`animations.png`, `expressions.png`) and every viewer screenshot (`previ
 
 Both characters have:
 - **Skeleton and pose:** a 52-bone humanoid skeleton with Mixamo bone names (`mixamorig:Hips` … fingers), in a neutral A-pose. Mixamo and other Mixamo-retargeted clips play on it without remapping.
-- **Animation clips:** 9 clips, `Idle`, `Walk`, `Run`, `Wave`, `Sit`, `Talk`, `Dance`, `Greet` and `Cheer`. `Greet` is the Cambodian *sampeah*: palms together at the chest with a slight bow.
+- **Animation clips:** 13 clips. The locomotion clips are retargeted motion capture: `Walk`, `Run` (a jog), `Sprint`, and a `Jump` / `Fall` / `Land` set. The others are keyframed: `Idle`, `Wave`, `Sit`, `Talk`, `Dance`, `Greet` and `Cheer`. `Greet` is the Cambodian *sampeah*: palms together at the chest with a slight bow.
 - **Face shapes:** 7 morph targets, `Smile`, `Excited`, `Surprised`, `Thinking`, `Wink`, `Blink` and `MouthOpen` (for lip-sync).
 - **Scale and orientation:** metres, Y up, facing +Z after export, feet on y = 0. The male is 1.72 m tall and the female 1.62 m.
 
@@ -89,7 +89,30 @@ procedural Python.
 | Sneakers | MakeHuman CC0 `shoes05`, thickened into a chunky sole and recoloured by region: midsole line, side stripe, heel counter, socks, plus procedural laces. |
 | Backpack, headphones, smartwatch, sunglasses, hoop earrings, necklace | Procedural, placed by ray casts onto the dressed body (`accessories.py`) |
 | Chest print, flag patch, backpack print, watch face | Original drawings generated with Pillow. The Angkor-style temple print is our own drawing. The Cambodian national flag is public domain. They are applied as decals conformed to the fabric. |
-| Rig and clips | MPFB's `mixamo` rig. Clips are keyframed procedurally from pose specifications (`setup_rig.py`), with two-bone IK for the sampeah hands. |
+| Rig and clips | MPFB's `mixamo` rig. Locomotion is CMU motion capture retargeted onto the rig (`mocap.py`, see below). The other clips are keyframed procedurally from pose specifications (`setup_rig.py`), with two-bone IK for the sampeah hands. |
+
+### Motion-captured locomotion (`scripts/mocap.py`)
+
+The walk, jog, sprint and jump come from the CMU Graphics Lab Motion Capture Database, using
+the BVH conversion by Bruce Hahne. `fetch_assets.py` downloads four takes, each pinned by
+SHA-256, into the git-ignored `assets/vendor/mocap/`.
+
+| Clip | Source take | Natural speed (male / female) |
+|---|---|---|
+| `Walk` | subject 16, take 21 (walk) | 1.50 / 1.36 m/s |
+| `Run` | subject 35, take 17 (jog) | 2.58 / 2.41 m/s |
+| `Sprint` | subject 16, take 45 (run), strides lengthened ×1.3, extra forward lean | 4.75 / 4.31 m/s |
+| `Jump`, `Fall`, `Land` | subject 16, take 1 (jump), cut at take-off, apex and landing | — |
+
+How a take becomes a clip:
+1. **Retarget.** Every cgspeed BVH starts with a T-pose frame, facing −Y with the subject's left at +X, the same convention as this rig. Each bone's world rotation since that T-pose is applied to the matching rig bone, measured from the rig bone's own T-pose direction. The hips' bounce and sway are scaled by the leg-length ratio.
+2. **Cut one cycle.** The loop runs from one left heel strike to the next (the left foot furthest ahead of the hips). The seam's small mismatch is spread over the cycle, and forward travel is removed so the clip plays in place.
+3. **Ground the feet.** The hips are shifted so the lowest ankle sits at the rig's rest ankle height (no floating or sinking).
+4. **Measure the natural speed.** This is the median backward speed of a planted foot relative to the hips. The game plays each clip at its ground speed divided by this number, so the feet don't skate. The value goes into the manifest as `walk_speed`, `run_speed` and `sprint_speed`.
+
+Because every stride clip starts at the same heel strike, the game can crossfade Walk ↔ Run ↔
+Sprint at the same point of the stride. Fingers get a relaxed curl, since the capture has no
+finger motion.
 
 ## Quality levels
 
@@ -129,7 +152,7 @@ const avatar = gltf.scene;                               // metres, faces +Z, fe
 avatar.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
 const mixer = new THREE.AnimationMixer(avatar);
 const clips = Object.fromEntries(gltf.animations.map((c) => [c.name, mixer.clipAction(c)]));
-clips.Walk.play();                                       // Idle Walk Run Wave Sit Talk Dance Greet
+clips.Walk.play();                                       // Idle Walk Run Sprint Jump Fall Land Wave Sit Talk Dance Greet Cheer
 // per frame: mixer.update(dt)
 
 // Face: morph targets on the body and on the brows/lashes mesh.
@@ -147,13 +170,14 @@ names. Hair and brows use `alphaMode: MASK`; with an MSAA renderer, setting
 
 `build_all.sh` ends by running `scripts/install_to_game.py`, which copies the game GLBs and a
 `manifest.json` into `frontend/static/models/characters/realistic/`. The manifest holds palette
-cells, the baked skin tone, the default hair colour and the measured walk and run speeds.
+cells, the baked skin tone, the default hair colour and the measured walk, jog and sprint speeds.
 
 How the game uses them (`frontend/src/lib/game/avatar/`):
 - **Default style:** realistic avatars are the default for the local player, remote players and the avatar editor preview. **Settings → Avatars** switches back to the classic avatar on that device.
 - **Build and colours:** Build A uses the male model and Build B the female. Each player's skin, hair, top, bottom, shoe and accent colours are applied when the avatar loads.
 - **Animation:**
-  - Walk and Run play at the measured speed. The male clips have no foot sliding at 1.82 and 3.30 m/s, the female at 1.67 and 3.00 m/s.
+  - Gait: Idle, Walk, Run (jog) and Sprint, picked by ground speed. Each switch happens where the two neighbouring clips play equally far from 1×, with hysteresis. Each clip plays at ground speed ÷ natural speed, and crossfades keep the stride phase. `W` (2.6 m/s) jogs at about 1×; `Shift` (6.5 m/s) sprints at 1.37× (male) or 1.51× (female).
+  - Jump, Fall and Land follow the engine's jump; the body leans into turns and while speeding up or braking (`RealisticAnimations.ts`, `city/locomotion.ts`).
   - The game's emotes map to clips: wave → `Wave`, sampeah → `Greet`, cheer → `Cheer`, dance → `Dance`.
   - Holding a product uses an IK carry pose, with the product attached to a `RightWrist` socket in the hand.
 - **Vehicles:** riding uses IK for hands and feet, and leans the rider forward until the hands reach the grips.
@@ -161,10 +185,11 @@ How the game uses them (`frontend/src/lib/game/avatar/`):
 
 ## Tests
 
-- **`node viewer/test_viewer.mjs`:** 61 checks, all passing on the latest build. For both quality levels:
-  - **Loading:** both GLBs load with no console errors, all 9 clips and 7 morphs are present, and the feet are on the ground.
+- **`node viewer/test_viewer.mjs`:** 77 checks, all passing on the latest build. For both quality levels:
+  - **Loading:** both GLBs load with no console errors, all 13 clips and 7 morphs are present, and the feet are on the ground.
   - **Every clip moves the rig the way its name says** (measured on bone positions):
-    - Walk and Run alternate the feet (male left/right lead ±0.79 m walking, ±1.0 m running).
+    - Walk, Run and Sprint alternate the feet. Measured at the two heel strikes, the male's left/right lead is ±0.73 m walking, ±0.70 m jogging and ±1.05 m sprinting.
+    - Land sinks the hips by 8 cm while the feet stay down.
     - Sit drops the hips by 0.35–0.40 m.
     - Wave lifts the hand 0.19–0.24 m above the head bone.
     - Greet brings the palms within 2.4 cm in front of the chest.
@@ -178,6 +203,7 @@ How the game uses them (`frontend/src/lib/game/avatar/`):
 
 - **Output GLBs, generated textures and these scripts:** CC0. Everything in them is either our own procedural work or MakeHuman system assets, which their copyright holders released as CC0 1.0 in 2020 (see the header of any `.mhclo` file).
 - **MPFB:** GPL-3.0, used only as a build tool. None of its code is in the outputs.
+- **Motion capture:** the CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu) is free to use for any purpose, including commercial products; the database was created with funding from NSF EIA-0196217. The BVH conversion by Bruce Hahne adds no restrictions. The raw takes are downloaded at build time and never committed. Only the retargeted clips ship inside the GLBs.
 - **`references/*.png`:** your design references. They are only read for colours and proportions, never embedded in a model.
 
 ## Limitations and manual work still worth doing
@@ -185,6 +211,6 @@ How the game uses them (`frontend/src/lib/game/avatar/`):
 - **Likeness.** These are realistic MakeHuman faces tuned toward the references, not portraits. Getting close to the illustrated faces (eye shape, the male's wavy hair volume, the female's smile) needs a 3D artist to sculpt them, or hand-made shape keys.
 - **Hair.** The hair is alpha-cut cards. At game distance it reads well. In tight close-ups the strands look like strips, and the bangs are thinner than in the reference. Hand-groomed Blender hair curves baked to cards, plus an anisotropic hair shader, would close the gap.
 - **Clothing.** Clothes are offset shells with procedural folds, not cloth simulation. Folds don't react to poses. Deep bends (Sit, raised arms) stretch the fabric at the shoulders and hips, which linear-blend skinning can't avoid. Corrective shape keys or a dual-quaternion skinning shader would help.
-- **Animations.** The 9 clips are procedural starter clips that prove the rig works. They are not motion capture, and the fingers don't animate. For production, use Mixamo or other mocap clips on the same skeleton (Mixamo's own clip files can't be redistributed in a repo).
+- **Animations.** Locomotion is motion capture, but the other clips (idle, emotes, sit) are procedural starter clips, and no clip animates the fingers. The jump is a standing jump, so a running jump tucks both legs together instead of leaping from one foot. There are no turn-in-place or stop clips: turning and stopping come from blending plus the game's procedural lean. For production, add more mocap on the same skeleton (Mixamo's own clip files can't be redistributed in a repo).
 - **Prints.** The chest and backpack prints are simplified Angkor silhouettes. The small badges and logo text in the references are left out.
 - **In the game, outfits are fixed.** Players get the realistic model of their build with their skin, hair and clothing colours. Hairstyles, garment styles and accessories only exist in the classic style (Settings → Avatars). See "In the game" above.

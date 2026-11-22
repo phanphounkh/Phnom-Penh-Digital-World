@@ -31,6 +31,16 @@ DOWNLOADS = {
         "https://extensions.blender.org/download/sha256:c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad/add-on-mpfb-v2.0.18.zip",
         "c075b3e9b94b8e5556a5f03f4653602d02ea306de08126e8f55ed6dee28a2dad",
     ),
+    # CMU Graphics Lab Motion Capture Database (free for any use), BVH conversion by B. Hahne
+    # (no added restrictions): walk, jog, run and standing-jump takes for the clips.
+    "mocap/16_21.bvh": ("https://raw.githubusercontent.com/sfd158/cmu-mocap/master/data/016/16_21.bvh",
+                        "fa1ac84e2efca453c4cd002b0d908f1e6c1fab4aa237898ac3ee5c80efdddd0e"),
+    "mocap/35_17.bvh": ("https://raw.githubusercontent.com/sfd158/cmu-mocap/master/data/035/35_17.bvh",
+                        "50c6469efea1edbba0f7acd46b1fa72e0b74b78e1698aa1b441990bd2a78d730"),
+    "mocap/16_45.bvh": ("https://raw.githubusercontent.com/sfd158/cmu-mocap/master/data/016/16_45.bvh",
+                        "6c179f799f3b2f766ce41cf962caaae08d9342ce73fc32fbc15648bf6589e872"),
+    "mocap/16_01.bvh": ("https://raw.githubusercontent.com/sfd158/cmu-mocap/master/data/016/16_01.bvh",
+                        "f989be024ec2b26099300707e182c0b96c22fdf7843757f0ba36e75a475c309c"),
     "mh_cc0.zip": (
         # The asset server only answers on plain HTTP; the SHA-256 pin protects the content.
         "http://files.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip",
@@ -49,6 +59,7 @@ def sha256(path):
 
 def fetch(name, url, digest):
     path = os.path.join(VENDOR, name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path) and sha256(path) == digest:
         print(f"ok      {name} (cached)")
         return path

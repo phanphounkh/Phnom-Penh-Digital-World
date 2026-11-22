@@ -8,15 +8,15 @@
       "textures": 75,
       "geometries": 317,
       "bytes": {
-        "male": 6114412,
-        "female": 5990988
+        "male": 6298492,
+        "female": 6175068
       },
       "loadMs": {
-        "male": 354,
-        "female": 320
+        "male": 355,
+        "female": 349
       },
-      "fps": 60.1,
-      "p95_frame_ms": 16.8
+      "fps": 60.2,
+      "p95_frame_ms": 16.7
     },
     "game": {
       "quality": "game",
@@ -25,15 +25,15 @@
       "textures": 110,
       "geometries": 331,
       "bytes": {
-        "male": 1400516,
-        "female": 1468992
+        "male": 1536800,
+        "female": 1604968
       },
       "loadMs": {
-        "male": 233,
-        "female": 239
+        "male": 119,
+        "female": 127
       },
-      "fps": 60.2,
-      "p95_frame_ms": 16.7
+      "fps": 60.1,
+      "p95_frame_ms": 16.8
     }
   },
   "clips": {
@@ -44,32 +44,66 @@
       "moved": 0.275
     },
     "high/male/Walk": {
-      "moved": 0.386,
+      "moved": 0.363,
       "feet_alternate": [
-        0.79,
-        -0.79
-      ]
-    },
-    "high/female/Walk": {
-      "moved": 0.365,
-      "feet_alternate": [
-        0.72,
+        0.74,
         -0.72
       ]
     },
-    "high/male/Run": {
-      "moved": 0.784,
+    "high/female/Walk": {
+      "moved": 0.333,
       "feet_alternate": [
-        1,
-        -1
+        0.67,
+        -0.66
+      ]
+    },
+    "high/male/Run": {
+      "moved": 0.531,
+      "feet_alternate": [
+        0.69,
+        -0.72
       ]
     },
     "high/female/Run": {
-      "moved": 0.738,
+      "moved": 0.489,
       "feet_alternate": [
-        0.9,
-        -0.9
+        0.64,
+        -0.66
       ]
+    },
+    "high/male/Sprint": {
+      "moved": 0.745,
+      "feet_alternate": [
+        1.08,
+        -1.01
+      ]
+    },
+    "high/female/Sprint": {
+      "moved": 0.675,
+      "feet_alternate": [
+        0.99,
+        -0.93
+      ]
+    },
+    "high/male/Jump": {
+      "moved": 0.256
+    },
+    "high/female/Jump": {
+      "moved": 0.234
+    },
+    "high/male/Fall": {
+      "moved": 0.235
+    },
+    "high/female/Fall": {
+      "moved": 0.214
+    },
+    "high/male/Land": {
+      "moved": 0.305,
+      "hips_drop": 0.08
+    },
+    "high/female/Land": {
+      "moved": 0.278,
+      "hips_drop": 0.08
     },
     "high/male/Wave": {
       "moved": 0.72,
@@ -128,32 +162,66 @@
       "moved": 0.275
     },
     "game/male/Walk": {
-      "moved": 0.386,
+      "moved": 0.363,
       "feet_alternate": [
-        0.79,
-        -0.79
-      ]
-    },
-    "game/female/Walk": {
-      "moved": 0.365,
-      "feet_alternate": [
-        0.72,
+        0.74,
         -0.72
       ]
     },
-    "game/male/Run": {
-      "moved": 0.784,
+    "game/female/Walk": {
+      "moved": 0.333,
       "feet_alternate": [
-        1,
-        -1
+        0.67,
+        -0.66
+      ]
+    },
+    "game/male/Run": {
+      "moved": 0.531,
+      "feet_alternate": [
+        0.69,
+        -0.72
       ]
     },
     "game/female/Run": {
-      "moved": 0.738,
+      "moved": 0.489,
       "feet_alternate": [
-        0.9,
-        -0.9
+        0.64,
+        -0.66
       ]
+    },
+    "game/male/Sprint": {
+      "moved": 0.745,
+      "feet_alternate": [
+        1.08,
+        -1.01
+      ]
+    },
+    "game/female/Sprint": {
+      "moved": 0.675,
+      "feet_alternate": [
+        0.99,
+        -0.93
+      ]
+    },
+    "game/male/Jump": {
+      "moved": 0.256
+    },
+    "game/female/Jump": {
+      "moved": 0.234
+    },
+    "game/male/Fall": {
+      "moved": 0.235
+    },
+    "game/female/Fall": {
+      "moved": 0.214
+    },
+    "game/male/Land": {
+      "moved": 0.305,
+      "hips_drop": 0.08
+    },
+    "game/female/Land": {
+      "moved": 0.278,
+      "hips_drop": 0.08
     },
     "game/male/Wave": {
       "moved": 0.72,
@@ -266,7 +334,7 @@
   },
   "checks": [
     {
-      "name": "high: 9 animation clips",
+      "name": "high: 13 animation clips",
       "ok": true,
       "detail": [
         "Idle",
@@ -277,7 +345,11 @@
         "Talk",
         "Dance",
         "Greet",
-        "Cheer"
+        "Cheer",
+        "Sprint",
+        "Jump",
+        "Fall",
+        "Land"
       ]
     },
     {
@@ -303,12 +375,12 @@
         "textures": 75,
         "geometries": 317,
         "bytes": {
-          "male": 6114412,
-          "female": 5990988
+          "male": 6298492,
+          "female": 6175068
         },
         "loadMs": {
-          "male": 354,
-          "female": 320
+          "male": 355,
+          "female": 349
         },
         "fps": 60
       }
@@ -349,10 +421,10 @@
       "name": "high: male Walk",
       "ok": true,
       "detail": {
-        "moved": 0.386,
+        "moved": 0.363,
         "feet_alternate": [
-          0.79,
-          -0.79
+          0.74,
+          -0.72
         ]
       }
     },
@@ -360,10 +432,10 @@
       "name": "high: female Walk",
       "ok": true,
       "detail": {
-        "moved": 0.365,
+        "moved": 0.333,
         "feet_alternate": [
-          0.72,
-          -0.72
+          0.67,
+          -0.66
         ]
       }
     },
@@ -371,10 +443,10 @@
       "name": "high: male Run",
       "ok": true,
       "detail": {
-        "moved": 0.784,
+        "moved": 0.531,
         "feet_alternate": [
-          1,
-          -1
+          0.69,
+          -0.72
         ]
       }
     },
@@ -382,11 +454,77 @@
       "name": "high: female Run",
       "ok": true,
       "detail": {
-        "moved": 0.738,
+        "moved": 0.489,
         "feet_alternate": [
-          0.9,
-          -0.9
+          0.64,
+          -0.66
         ]
+      }
+    },
+    {
+      "name": "high: male Sprint",
+      "ok": true,
+      "detail": {
+        "moved": 0.745,
+        "feet_alternate": [
+          1.08,
+          -1.01
+        ]
+      }
+    },
+    {
+      "name": "high: female Sprint",
+      "ok": true,
+      "detail": {
+        "moved": 0.675,
+        "feet_alternate": [
+          0.99,
+          -0.93
+        ]
+      }
+    },
+    {
+      "name": "high: male Jump",
+      "ok": true,
+      "detail": {
+        "moved": 0.256
+      }
+    },
+    {
+      "name": "high: female Jump",
+      "ok": true,
+      "detail": {
+        "moved": 0.234
+      }
+    },
+    {
+      "name": "high: male Fall",
+      "ok": true,
+      "detail": {
+        "moved": 0.235
+      }
+    },
+    {
+      "name": "high: female Fall",
+      "ok": true,
+      "detail": {
+        "moved": 0.214
+      }
+    },
+    {
+      "name": "high: male Land",
+      "ok": true,
+      "detail": {
+        "moved": 0.305,
+        "hips_drop": 0.08
+      }
+    },
+    {
+      "name": "high: female Land",
+      "ok": true,
+      "detail": {
+        "moved": 0.278,
+        "hips_drop": 0.08
       }
     },
     {
@@ -544,7 +682,7 @@
       ]
     },
     {
-      "name": "game: 9 animation clips",
+      "name": "game: 13 animation clips",
       "ok": true,
       "detail": [
         "Idle",
@@ -555,7 +693,11 @@
         "Talk",
         "Dance",
         "Greet",
-        "Cheer"
+        "Cheer",
+        "Sprint",
+        "Jump",
+        "Fall",
+        "Land"
       ]
     },
     {
@@ -581,12 +723,12 @@
         "textures": 110,
         "geometries": 331,
         "bytes": {
-          "male": 1400516,
-          "female": 1468992
+          "male": 1536800,
+          "female": 1604968
         },
         "loadMs": {
-          "male": 233,
-          "female": 239
+          "male": 119,
+          "female": 127
         },
         "fps": 60
       }
@@ -627,10 +769,10 @@
       "name": "game: male Walk",
       "ok": true,
       "detail": {
-        "moved": 0.386,
+        "moved": 0.363,
         "feet_alternate": [
-          0.79,
-          -0.79
+          0.74,
+          -0.72
         ]
       }
     },
@@ -638,10 +780,10 @@
       "name": "game: female Walk",
       "ok": true,
       "detail": {
-        "moved": 0.365,
+        "moved": 0.333,
         "feet_alternate": [
-          0.72,
-          -0.72
+          0.67,
+          -0.66
         ]
       }
     },
@@ -649,10 +791,10 @@
       "name": "game: male Run",
       "ok": true,
       "detail": {
-        "moved": 0.784,
+        "moved": 0.531,
         "feet_alternate": [
-          1,
-          -1
+          0.69,
+          -0.72
         ]
       }
     },
@@ -660,11 +802,77 @@
       "name": "game: female Run",
       "ok": true,
       "detail": {
-        "moved": 0.738,
+        "moved": 0.489,
         "feet_alternate": [
-          0.9,
-          -0.9
+          0.64,
+          -0.66
         ]
+      }
+    },
+    {
+      "name": "game: male Sprint",
+      "ok": true,
+      "detail": {
+        "moved": 0.745,
+        "feet_alternate": [
+          1.08,
+          -1.01
+        ]
+      }
+    },
+    {
+      "name": "game: female Sprint",
+      "ok": true,
+      "detail": {
+        "moved": 0.675,
+        "feet_alternate": [
+          0.99,
+          -0.93
+        ]
+      }
+    },
+    {
+      "name": "game: male Jump",
+      "ok": true,
+      "detail": {
+        "moved": 0.256
+      }
+    },
+    {
+      "name": "game: female Jump",
+      "ok": true,
+      "detail": {
+        "moved": 0.234
+      }
+    },
+    {
+      "name": "game: male Fall",
+      "ok": true,
+      "detail": {
+        "moved": 0.235
+      }
+    },
+    {
+      "name": "game: female Fall",
+      "ok": true,
+      "detail": {
+        "moved": 0.214
+      }
+    },
+    {
+      "name": "game: male Land",
+      "ok": true,
+      "detail": {
+        "moved": 0.305,
+        "hips_drop": 0.08
+      }
+    },
+    {
+      "name": "game: female Land",
+      "ok": true,
+      "detail": {
+        "moved": 0.278,
+        "hips_drop": 0.08
       }
     },
     {

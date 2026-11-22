@@ -36,6 +36,8 @@ export interface RealisticEntry {
 	morphs: string[];
 	walk_speed: number;
 	run_speed: number;
+	/** Absent in models built before the Sprint clip existed. */
+	sprint_speed?: number;
 }
 
 export interface RealisticManifest {
