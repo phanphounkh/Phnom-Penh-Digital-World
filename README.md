@@ -31,7 +31,8 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 |---|---|
 | ![Central Market at midday](frontend/artifacts/phase2-central-market-noon.png) | ![Street 136 at night](frontend/artifacts/phase2-central-market-night.png) |
 | ![Wat Phnom hill in the morning](frontend/artifacts/phase2-wat-phnom-morning.png) | ![Street 136 at sunset](frontend/artifacts/phase2-central-market-sunset.png) |
-| ![Avatar](frontend/artifacts/phase1-avatar.png) | ![Location](frontend/artifacts/phase1-location.png) |
+| ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
+| ![Creating an avatar](frontend/artifacts/phase1-avatar.png) | ![Choosing a location](frontend/artifacts/phase1-location.png) |
 | ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop on Street 63, carrying a product to the cart](frontend/artifacts/phase4-shop-interior.png) |
 | ![Seller dashboard: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Demo checkout paid](frontend/artifacts/phase4-checkout.png) |
 | ![At the shelf: product facings with price tags, the shop's cart by the door](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |

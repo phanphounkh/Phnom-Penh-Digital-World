@@ -45,7 +45,14 @@ test('a new player registers, onboards and walks the real streets of Daun Penh',
 	await page.getByRole('radio', { name: 'Long' }).click();
 	await page.getByRole('radio', { name: 'Hoodie' }).click();
 	await page.getByRole('button', { name: 'Krama scarf' }).click();
-	await page.screenshot({ path: `${shots}/phase1-avatar.png`, fullPage: true });
+	// The editor as a laptop shows it (the Save bar sticks to the window's foot, so a full-page
+	// capture would draw it mid-page).
+	const viewport = page.viewportSize()!;
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.evaluate(() => window.scrollTo(0, 0));
+	await page.waitForTimeout(1500);
+	await page.screenshot({ path: `${shots}/phase1-avatar.png` });
+	await page.setViewportSize(viewport);
 	await page.getByRole('button', { name: /Save avatar/ }).click();
 
 	// Screen 4 — roles: buyer (immediate) + seller (needs approval)
