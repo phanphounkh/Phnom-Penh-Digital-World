@@ -15,70 +15,308 @@
         32,
         0
       ],
-      "Drawstring": [
+      "Bucket": [
         48,
+        0
+      ],
+      "Button": [
+        64,
+        0
+      ],
+      "Cap": [
+        80,
+        0
+      ],
+      "Drawstring": [
+        96,
         0
       ],
       "Gold": [
-        64,
+        112,
         0
       ],
       "Hoodie": [
-        80,
-        0
-      ],
-      "HoodieRib": [
-        96,
-        0
-      ],
-      "Lace": [
-        112,
-        0
-      ],
-      "Pants": [
         0,
         16
       ],
-      "PantsRib": [
+      "HoodieRib": [
         16,
         16
       ],
-      "ShoeAccent": [
+      "Jeans": [
         32,
         16
       ],
-      "ShoeSole": [
+      "JeansStitch": [
         48,
         16
       ],
-      "ShoeUpper": [
+      "Lace": [
         64,
         16
       ],
-      "Silver": [
+      "Pants": [
         80,
         16
       ],
-      "Sock": [
+      "PantsRib": [
         96,
         16
       ],
-      "Strap": [
+      "Rivet": [
         112,
         16
       ],
-      "SunglassFrame": [
+      "SandalSole": [
         0,
         32
       ],
-      "SunglassLens": [
+      "SandalStrap": [
         16,
         32
       ],
-      "Watch": [
+      "Shirt": [
         32,
         32
+      ],
+      "ShoeAccent": [
+        48,
+        32
+      ],
+      "ShoeSole": [
+        64,
+        32
+      ],
+      "ShoeUpper": [
+        80,
+        32
+      ],
+      "Shorts": [
+        96,
+        32
+      ],
+      "ShortsRib": [
+        112,
+        32
+      ],
+      "Silver": [
+        0,
+        48
+      ],
+      "Sock": [
+        16,
+        48
+      ],
+      "Strap": [
+        32,
+        48
+      ],
+      "SunglassFrame": [
+        48,
+        48
+      ],
+      "SunglassLens": [
+        64,
+        48
+      ],
+      "Tee": [
+        80,
+        48
+      ],
+      "TeeRib": [
+        96,
+        48
+      ],
+      "Watch": [
+        112,
+        48
       ]
+    }
+  },
+  "wardrobe": {
+    "slots": {
+      "top": [
+        "hoodie",
+        "tee",
+        "shirt"
+      ],
+      "bottom": [
+        "trousers",
+        "jeans",
+        "shorts"
+      ],
+      "shoes": [
+        "sneakers",
+        "sandals"
+      ],
+      "hat": [
+        "none",
+        "cap",
+        "bucket"
+      ],
+      "bag": [
+        "backpack",
+        "none"
+      ]
+    },
+    "default": {
+      "top": "hoodie",
+      "bottom": "trousers",
+      "shoes": "sneakers",
+      "hat": "none",
+      "bag": "backpack"
+    },
+    "hidden_when": {
+      "arms": [
+        [
+          "top.hoodie"
+        ]
+      ],
+      "legs": [
+        [
+          "bottom.trousers"
+        ],
+        [
+          "bottom.jeans"
+        ]
+      ],
+      "ankles": [
+        [
+          "bottom.jeans"
+        ],
+        [
+          "bottom.trousers",
+          "shoes.sneakers"
+        ]
+      ],
+      "feet": [
+        [
+          "shoes.sneakers"
+        ]
+      ],
+      "hair_top": [
+        [
+          "hat.cap"
+        ],
+        [
+          "hat.bucket"
+        ]
+      ]
+    },
+    "meshes": {
+      "female.game.skin_arms": {
+        "region": "arms"
+      },
+      "female.game.skin_legs": {
+        "region": "legs"
+      },
+      "female.game.skin_ankles": {
+        "region": "ankles"
+      },
+      "female.game.skin_feet": {
+        "region": "feet"
+      },
+      "female.game.hair_hat": {
+        "region": "hair_top"
+      },
+      "female.game.decals.bag.backpack@top.hoodie": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.hoodie"
+      },
+      "female.game.decals.bag.backpack@top.shirt": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.shirt"
+      },
+      "female.game.decals.bag.backpack@top.tee": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.tee"
+      },
+      "female.game.decals.top.hoodie": {
+        "slot": "top",
+        "variant": "hoodie",
+        "with": null
+      },
+      "female.game.decals.top.shirt": {
+        "slot": "top",
+        "variant": "shirt",
+        "with": null
+      },
+      "female.game.decals.top.tee": {
+        "slot": "top",
+        "variant": "tee",
+        "with": null
+      },
+      "female.game.outfit.bag.backpack@top.hoodie": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.hoodie"
+      },
+      "female.game.outfit.bag.backpack@top.shirt": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.shirt"
+      },
+      "female.game.outfit.bag.backpack@top.tee": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.tee"
+      },
+      "female.game.outfit.bottom.jeans": {
+        "slot": "bottom",
+        "variant": "jeans",
+        "with": null
+      },
+      "female.game.outfit.bottom.shorts": {
+        "slot": "bottom",
+        "variant": "shorts",
+        "with": null
+      },
+      "female.game.outfit.bottom.trousers": {
+        "slot": "bottom",
+        "variant": "trousers",
+        "with": null
+      },
+      "female.game.outfit.hat.bucket": {
+        "slot": "hat",
+        "variant": "bucket",
+        "with": null
+      },
+      "female.game.outfit.hat.cap": {
+        "slot": "hat",
+        "variant": "cap",
+        "with": null
+      },
+      "female.game.outfit.region.hair_top": {
+        "region": "hair_top"
+      },
+      "female.game.outfit.shoes.sandals": {
+        "slot": "shoes",
+        "variant": "sandals",
+        "with": null
+      },
+      "female.game.outfit.shoes.sneakers": {
+        "slot": "shoes",
+        "variant": "sneakers",
+        "with": null
+      },
+      "female.game.outfit.top.hoodie": {
+        "slot": "top",
+        "variant": "hoodie",
+        "with": null
+      },
+      "female.game.outfit.top.shirt": {
+        "slot": "top",
+        "variant": "shirt",
+        "with": null
+      },
+      "female.game.outfit.top.tee": {
+        "slot": "top",
+        "variant": "tee",
+        "with": null
+      }
     }
   },
   "kind": "female",
@@ -127,7 +365,7 @@
     "Thinking",
     "Wink"
   ],
-  "triangles": 25806,
+  "triangles": 41208,
   "walk_speed": 1.356,
   "run_speed": 2.41,
   "sprint_speed": 4.306

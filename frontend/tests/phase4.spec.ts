@@ -258,7 +258,7 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	await counter.getByRole('button', { name: 'One less Num pang' }).click();
 	await expect(counter.getByTestId('counter-total')).toHaveText('$2.50');
 	await counter.getByTestId('counter-pay').click();
-	await expect(counter.getByTestId('counter-receipt')).toContainText("Paid. It's yours.");
+	await expect(counter.getByTestId('counter-receipt')).toContainText("Paid. It's yours.", { timeout: 20_000 }); // slow under software rendering
 	await expect(counter.getByTestId('counter-receipt')).toContainText('1 × Num pang');
 	await expect.poll(carrying, { timeout: 15_000 }).toBe('bag');
 	await expect.poll(async () => (await keeper())?.line).toContain('Orkun');

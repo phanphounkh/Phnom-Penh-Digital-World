@@ -4,7 +4,8 @@
  * counter and thank them when they pay.
  *
  * Who stands at a shop (body, name, skin, hair, clothes) follows from the shop's id, so every
- * player sees the same shopkeeper; the apron is in the shop's colours. They are drawn by each
+ * player sees the same shopkeeper; they wear a shirt or t-shirt (no backpack) under an apron in
+ * the shop's colours. They are drawn by each
  * player's own client (nothing is sent over the network) and only at the nearest open shops
  * (MAX within RADIUS), since each is a full character (about 30k triangles, one animation mixer).
  */
@@ -53,13 +54,16 @@ export function keeperFor(shop: Pick<Shop, 'id' | 'accent_color'>): { name: stri
 		name,
 		avatar: {
 			avatar_name: name,
+			// Dressed for work: a shirt or t-shirt, no backpack (the apron goes over it).
+			model: 'outfit',
 			body,
 			skin_tone: pick(SKIN, 5),
 			hair_style: body === 'b' ? 'bun' : 'short',
 			hair_color: pick(HAIR, 9),
-			top_style: 'tee',
+			top_style: h & 2 ? 'shirt' : 'tee',
 			top_color: pick(TOP, 12),
-			bottom_style: 'trousers',
+			bottom_style: h & 4 ? 'jeans' : 'trousers',
+			shoe_style: 'sneakers',
 			bottom_color: pick(BOTTOM, 15),
 			shoe_color: '#2b2b2b',
 			accent_color: shop.accent_color,
@@ -167,7 +171,7 @@ function frontOf(root: THREE.Object3D, from: number, to: number): number {
 	root.traverse((o) => {
 		const mesh = o as THREE.Mesh;
 		const name = (mesh.material as THREE.Material | undefined)?.name ?? '';
-		if (!mesh.isMesh || !/Outfit|decals/.test(name)) return;
+		if (!mesh.isMesh || !mesh.visible || !/Outfit|decals/.test(name)) return; // only the clothes worn
 		toRoot.multiplyMatrices(inverse, mesh.matrixWorld);
 		const count = mesh.geometry.attributes.position.count;
 		for (let i = 0; i < count; i++) {

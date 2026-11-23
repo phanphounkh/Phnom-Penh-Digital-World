@@ -29,11 +29,15 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+# The newest migration (migrations/versions): ready once the database is at it.
+SCHEMA_REVISION = "0006"
+
+
 @api_router.get("/health/ready", tags=["health"])
 async def ready(session: SessionDep):
     try:
         version = await session.scalar(text("SELECT version_num FROM alembic_version"))
-        if version != "0005":
+        if version != SCHEMA_REVISION:
             return JSONResponse({"status": "not_ready"}, status_code=503)
     except Exception:
         return JSONResponse({"status": "not_ready"}, status_code=503)

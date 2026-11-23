@@ -34,6 +34,7 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 | ![Wat Phnom hill in the morning](frontend/artifacts/phase2-wat-phnom-morning.png) | ![Street 136 at sunset](frontend/artifacts/phase2-central-market-sunset.png) |
 | ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
 | ![A new player makes their avatar in the city: the wardrobe's glass panel and wheels](frontend/artifacts/phase1-avatar.png) | ![Choosing your place: a private home anywhere in Phnom Penh, and the nearest public start](frontend/artifacts/phase1-location.png) |
+| ![The wardrobe's garments: a t-shirt, jeans, sandals and a cap, chosen on the wheels](frontend/artifacts/wardrobe-garments.png) | ![Both builds in the original outfit, a t-shirt with jeans and a cap, and a shirt with shorts and a bucket hat](avatar-generator/previews/outfits.png) |
 | ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop: the shopkeeper behind the counter, the basket in hand](frontend/artifacts/phase4-shop-interior.png) |
 | ![My shop, the seller's panel in the city: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Paid at the counter: handed over at once](frontend/artifacts/phase4-checkout.png) |
 | ![At the shelf: product facings with price tags; E puts one in your basket](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |
@@ -140,14 +141,17 @@ worker bundling, the affected onboarding and commerce suites were rerun: **5 pas
 2. **Create account**: username, email or phone (Cambodian `0…` numbers become `+855…`),
    password, display name, language, terms and privacy.
 3. **Verify** the 6-digit code.
-4. **Avatar**: build, skin tone, hairstyle, tee or hoodie, trousers or shorts, colours, up to
-   3 accessories (cap, glasses, backpack, krama). Drag to rotate the 3D preview.
-5. **Role**: visitor always; buyer immediate; seller and driver await approval.
-6. **Location**: search the city, tap the map to pin a **private** delivery address (buyers
-   only; must be inside Phnom Penh), pick a **public** spawn area, and choose visible or hidden.
-7. **World**: WASD or arrow keys to jog, Shift to sprint, Space to jump, drag to orbit, wheel to zoom, **M** for places
+4. **Your place**: search the city, tap the map to pin a **private** home address anywhere in
+   Phnom Penh, and the nearest **public** spawn area is picked (visible or hidden).
+5. **Into the city**: the wardrobe opens there to make your avatar (see 7). Everyone can explore
+   and buy; to sell or deliver, register a work role at the System Office in the city.
+6. **World**: WASD or arrow keys to jog, Shift to sprint, Space to jump, drag to orbit, wheel to zoom, **M** for places
    (fast travel), **Esc** for help. The HUD shows the street (English and Khmer), nearby
    landmark, lat/lon and world x/z; the minimap is drawn from the same data.
+7. **Wardrobe** (**O**, or the shirt button): a glass panel over the city with wheels. Choose a
+   top (hoodie, t-shirt or shirt), bottoms (joggers, jeans or shorts), shoes (sneakers or
+   sandals), a hat (none, cap or bucket hat), the backpack, colours, hair colour, build and skin;
+   your avatar changes as the wheels turn, and Save shows it to everyone around.
 8. **Multiplayer**: other visible players appear with their own avatars and name tags. **Enter**
    opens chat (Nearby ≈ 40 m or World), **1–4** play emotes (wave, sampeah, cheer, dance),
    **P** opens People: nearby players, friends with online status, requests, direct messages,
@@ -243,7 +247,8 @@ backend/            FastAPI app
   app/marketplace   units (generation), merchants, claims, catalog, checkout (orders, demo payment), media, sweeper
   app/transport     specs (modes, speeds), network (OSM access → graph), routing (A*), area (ride/park rules),
                     parking (parked-vehicle index), vehicles (garage)
-  migrations/       Alembic (0001: Phase 1 schema; 0002: multiplayer and social; 0003: marketplace; 0004: transport)
+  migrations/       Alembic (0001: Phase 1 schema; 0002: multiplayer and social; 0003: marketplace; 0004: transport;
+                    0005: delivery, wallet, recovery; 0006: wardrobe garments: shirts, jeans, a shoe style)
   scripts/          import_osm.py, seed.py, e2e_stack.py (isolated API for browser tests)
   tests/            89 tests against PostGIS (HTTP and WebSocket)
 frontend/           SvelteKit app; server.js = production server with the WebSocket upgrade proxy

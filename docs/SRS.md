@@ -15,6 +15,7 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-ROLE-1 | Visitor always; buyer immediate; seller and driver pending admin approval; admin never self-assigned | ✅ | B: test_roles (8 tests) |
 | F-ROLE-2 | Admin approves or rejects with a reason; decisions audited; rejected users can re-apply | ✅ | B: test_admin_approves_*, test_role_decisions_are_audited |
 | F-AVA-1 | Customise appearance, clothing, hairstyle, accessories and name, with a live 3D preview | ✅ | B: test_avatar_validation; U: avatar.test.ts; E |
+| F-AVA-2 | Wardrobe garments in the game: hoodie, t-shirt or button shirt; joggers, jeans or shorts; sneakers or sandals; no hat, a cap or a bucket hat; backpack on or off; each in the player's colours, seen by other players; avatars saved before keep their look | ✅ | B: test_wardrobe_garments, test_multiplayer (avatar change); U: wardrobe.test.ts, realistic.test.ts; E: wardrobe.spec.ts; generator: viewer test, renders compared with the original |
 | F-LOC-1 | Real Phnom Penh map: search, zoom, select a point | ✅ | B: test_search_finds_real_places; E |
 | F-LOC-2 | Private delivery address inside the Phnom Penh boundary; one default | ✅ | B: test_addresses_must_be_inside_phnom_penh, test_only_one_default_address |
 | F-LOC-3 | Public spawn area (curated, on open ground); explicit visibility opt-in | ✅ | B: test_spawn_points_are_on_open_public_ground, test_visibility_must_be_an_explicit_choice |

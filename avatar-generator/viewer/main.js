@@ -76,6 +76,22 @@ function prepare(gltf) {
 	return meshes;
 }
 
+// The game file holds every wardrobe choice; show one outfit (the original, or ?outfit=top=tee,...).
+const OUTFIT = Object.fromEntries((new URLSearchParams(location.search).get('outfit') ?? '').split(',').filter(Boolean).map((p) => p.split('=')));
+
+function wearOutfit(root, wardrobe) {
+	const outfit = { ...wardrobe.default, ...OUTFIT };
+	const worn = (choice) => { const [slot, variant] = choice.split('.'); return outfit[slot] === variant; };
+	const byName = new Map(Object.entries(wardrobe.meshes).map(([n, info]) => [THREE.PropertyBinding.sanitizeNodeName(n), info]));
+	root.traverse((o) => {
+		const info = o.isMesh && byName.get(o.name);
+		if (!info) return;
+		o.visible = info.region
+			? !(wardrobe.hidden_when[info.region] ?? []).some((clause) => clause.every(worn))
+			: outfit[info.slot] === info.variant && (!info.with || worn(info.with));
+	});
+}
+
 async function loadModel(name, quality) {
 	const url = FILES[quality](name);
 	const t0 = performance.now();
@@ -84,6 +100,10 @@ async function loadModel(name, quality) {
 	const buf = await res.arrayBuffer();
 	const gltf = await loader.parseAsync(buf, url.replace(/[^/]*$/, ''));
 	const meshes = prepare(gltf);
+	if (quality === 'game') {
+		const meta = await fetch(`../output/${name}_avatar_game.json`).then((r) => (r.ok ? r.json() : null));
+		if (meta?.wardrobe) wearOutfit(gltf.scene, meta.wardrobe);
+	}
 	const mixer = new THREE.AnimationMixer(gltf.scene);
 	const actions = Object.fromEntries(gltf.animations.map((c) => [c.name, mixer.clipAction(c)]));
 	const morphMeshes = meshes.filter((m) => m.morphTargetDictionary);
@@ -215,6 +235,7 @@ function stats() {
 	let triangles = 0;
 	for (const m of Object.values(state.models)) {
 		for (const mesh of m.meshes) {
+			if (!mesh.visible) continue; // other wardrobe choices (game quality)
 			const g = mesh.geometry;
 			triangles += (g.index ? g.index.count : g.attributes.position.count) / 3;
 		}

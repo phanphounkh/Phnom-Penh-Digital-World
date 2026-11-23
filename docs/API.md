@@ -42,7 +42,7 @@ WGS84 `lat`/`lon`; world coordinates are metres (`x` east, `z` = −north).
 | `POST /auth/verification/confirm` | user (20 per 10 min) | Confirm a 6-digit code (5 attempts) |
 | `GET /auth/sessions` / `DELETE /auth/sessions/{id}` | user | List or revoke your sessions |
 | `PATCH /me/profile` | user | Display name, language, visibility |
-| `GET / PUT /me/avatar` | user | Read or replace the avatar customisation |
+| `GET / PUT /me/avatar` | user | Read or replace the avatar customisation. `model`: "avatar" (the original outfit, default) or "outfit" (wear the styles below); `top_style` hoodie/tee/shirt, `bottom_style` trousers/jeans/shorts, `shoe_style` sneakers/sandals, accessories may include `cap` or `hat` (one) and `backpack` |
 | `POST /me/roles` | user, verified | Choose roles: buyer active now, seller and driver pending |
 | `GET / POST /me/addresses`, `DELETE /me/addresses/{id}` | owner only | Private delivery addresses (must be inside Phnom Penh) |
 | `PUT /me/spawn` | user | Public spawn point plus an explicit `world_visible` |

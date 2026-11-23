@@ -362,8 +362,11 @@ def bone_tail(armature, name) -> Vector:
     return armature.matrix_world @ armature.data.bones[name].tail_local
 
 
+_T0 = __import__("time").monotonic()
+
+
 def log(*a):
-    print("[avatar]", *a, flush=True)
+    print("[avatar]", f"{__import__('time').monotonic() - _T0:6.1f}s", *a, flush=True)
 
 
 def args_after_dashes() -> list[str]:

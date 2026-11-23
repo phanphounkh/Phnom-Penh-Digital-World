@@ -112,6 +112,41 @@ async def test_avatar_validation(client: httpx.AsyncClient):
     assert again.json()["hair_style"] == "bun"  # replaced, not duplicated
 
 
+async def test_wardrobe_garments(client: httpx.AsyncClient):
+    """Avatars saved before the wardrobe had garments keep model "avatar" (their original
+    outfit); the wardrobe saves "outfit" with the chosen shirt, jeans, sandals and hat."""
+    await register_verified(client)
+    old = (await client.put("/me/avatar", json=AVATAR)).json()
+    assert old["model"] == "avatar" and old["shoe_style"] == "sneakers"
+    outfit = {
+        **AVATAR,
+        "model": "outfit",
+        "top_style": "shirt",
+        "bottom_style": "jeans",
+        "shoe_style": "sandals",
+        "accessories": ["backpack", "hat"],
+    }
+    saved = await client.put("/me/avatar", json=outfit)
+    assert saved.status_code == 200, saved.text
+    got = (await client.get("/me/avatar")).json()
+    assert {
+        k: got[k] for k in ("model", "top_style", "bottom_style", "shoe_style", "accessories")
+    } == {
+        "model": "outfit",
+        "top_style": "shirt",
+        "bottom_style": "jeans",
+        "shoe_style": "sandals",
+        "accessories": ["backpack", "hat"],
+    }
+    for bad in (
+        {**outfit, "accessories": ["cap", "hat"]},  # one hat at a time
+        {**outfit, "shoe_style": "boots"},
+        {**outfit, "model": "fancy"},
+        {**outfit, "bottom_style": "skirt"},
+    ):
+        assert (await client.put("/me/avatar", json=bad)).status_code == 422, bad
+
+
 async def test_new_players_choose_their_place_and_enter(client: httpx.AsyncClient):
     """Two steps: verify, then a private place and the spawn area. No avatar or roles first:
     they get the buyer role on finishing and a default look until they save one in the game."""

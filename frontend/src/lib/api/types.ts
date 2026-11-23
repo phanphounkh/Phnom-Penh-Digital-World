@@ -55,19 +55,28 @@ export interface SessionResponse {
 }
 
 export type HairStyle = 'short' | 'long' | 'bun' | 'buzz';
-export type Accessory = 'cap' | 'glasses' | 'backpack' | 'krama';
+/** `cap` and `hat` (a bucket hat) are hats: one at a time. */
+export type Accessory = 'cap' | 'hat' | 'glasses' | 'backpack' | 'krama';
+export type TopStyle = 'hoodie' | 'tee' | 'shirt';
+export type BottomStyle = 'trousers' | 'jeans' | 'shorts';
+export type ShoeStyle = 'sneakers' | 'sandals';
 
 export interface Avatar {
 	avatar_name: string;
+	/** How the realistic character dresses: "avatar" (saved before the wardrobe had garments,
+	 *  or never saved) wears its original outfit whatever the style fields say; "outfit" wears
+	 *  the chosen top, bottom, shoes, hat and backpack. */
+	model?: 'avatar' | 'outfit';
 	body: 'a' | 'b';
 	skin_tone: string;
 	hair_style: HairStyle;
 	hair_color: string;
-	top_style: 'hoodie' | 'tee';
+	top_style: TopStyle;
 	top_color: string;
-	bottom_style: 'trousers' | 'shorts';
+	bottom_style: BottomStyle;
 	bottom_color: string;
 	shoe_color: string;
+	shoe_style?: ShoeStyle;
 	accent_color: string;
 	accessories: Accessory[];
 }

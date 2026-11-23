@@ -23,9 +23,42 @@ ap.add_argument("--size", type=int, default=360, help="image height in pixels")
 ap.add_argument("--engine", default="EEVEE")
 ap.add_argument("--views", default="front,34,side,back,face")
 ap.add_argument("--samples", type=int, default=16)
+ap.add_argument("--outfit", default="", help="what to wear, e.g. top=tee,bottom=jeans,shoes=sandals,hat=cap "
+                "(other slots: the original outfit; see scripts/outfits.py)")
+ap.add_argument("--only", default="", help="show only objects whose names contain these (comma-separated; debugging)")
+ap.add_argument("--hide", default="", help="also hide objects whose names contain these (comma-separated; debugging)")
 args = ap.parse_args(argv)
 
 scene = bpy.context.scene
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import outfits as O  # noqa: E402
+
+# Wear the outfit: other garments hidden, covered skin and hair under a hat masked out.
+outfit = O.parse(args.outfit)
+_rig = next((o for o in scene.objects if o.type == "ARMATURE"), None)
+for o in scene.objects:
+    if o.type != "MESH" or o.name.startswith("_preview"):
+        continue
+    o.hide_render = not O.shown(o, outfit) or any(h and h in o.name for h in args.hide.split(","))
+    if args.only:
+        o.hide_render = not any(h and h in o.name for h in args.only.split(","))
+    o.hide_set(o.hide_render)
+    hidden = [r for r in O.REGIONS if O.region_hidden(r, outfit) and f"region_{r}" in o.vertex_groups]
+    if ".hair_cards" in o.name and O.region_hidden("hair_top", outfit) and _rig is not None:
+        mask = O.under_hat_faces(o, _rig)
+        vg = o.vertex_groups.get("_under_hat") or o.vertex_groups.new(name="_under_hat")
+        vg.add(sorted({v for f in o.data.polygons if mask[f.index] for v in f.vertices}), 1.0, "REPLACE")
+        hidden.append("_under_hat")
+    if hidden:
+        vg = o.vertex_groups.get("_preview_hidden") or o.vertex_groups.new(name="_preview_hidden")
+        for name in hidden:
+            src = o.vertex_groups[name if name.startswith("_") else f"region_{name}"]
+            idx = [v.index for v in o.data.vertices if any(g.group == src.index and g.weight > 0.5 for g in v.groups)]
+            if idx:
+                vg.add(idx, 1.0, "REPLACE")
+        m = o.modifiers.new("_preview_mask", "MASK")
+        m.vertex_group = vg.name
+        m.invert_vertex_group = True
 
 # The character: every visible mesh; frame it from its bounding box.
 meshes = [o for o in scene.objects if o.type == "MESH" and o.visible_get() and not o.name.startswith("_preview")]

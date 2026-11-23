@@ -247,10 +247,12 @@ erDiagram
         uuid user_id PK
         varchar body "a|b"
         varchar hair_style
-        varchar top_style
-        varchar bottom_style
+        varchar model "avatar (original outfit) | outfit (garments chosen)"
+        varchar top_style "hoodie|tee|shirt"
+        varchar bottom_style "trousers|jeans|shorts"
+        varchar shoe_style "sneakers|sandals (0006)"
         varchar colours "6 hex columns, CHECKed"
-        varchar_array accessories "max 3"
+        varchar_array accessories "max 3: cap|hat, backpack, …"
     }
     user_addresses {
         uuid id PK

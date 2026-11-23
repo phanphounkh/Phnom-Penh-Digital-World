@@ -108,7 +108,7 @@ def shell(body, name, keep_vertex, offset, *, smooth=14, clearance=0.006, below=
         off = off + folds(co)
     set_coords(g, co + n * off[:, None])
     smooth_laplacian(g, iterations=2, factor=0.3, pin=pin)
-    push_outside(g, [(tree, clearance)] + [(bvh(b), c) for b, c in below])
+    push_outside(g, [(tree, clearance)] + [(bvh(b), *rest) for b, *rest in below])
     if material:
         assign_material(g, material)
     set_smooth(g)
@@ -162,12 +162,17 @@ def smooth_hems(g, iterations=12):
 
 
 def push_outside(obj, layers):
-    """Move vertices that are inside (or too close to) any layer out along its normal."""
+    """Move vertices that are inside (or too close to) any layer out along its normal.
+
+    A layer is (tree, clearance) or (tree, clearance, reach): with a reach, only vertices within
+    `reach` of the layer are considered (an open garment's edge must not pull far fabric to it)."""
     co = coords(obj)
     changed = False
-    for tree, clearance in layers:
+    for layer in layers:
+        tree, clearance = layer[0], layer[1]
+        reach = layer[2] if len(layer) > 2 else None
         for i, p in enumerate(co):
-            hit, nrm, _, dist = tree.find_nearest(Vector(p))
+            hit, nrm, _, dist = tree.find_nearest(Vector(p)) if reach is None else tree.find_nearest(Vector(p), reach)
             if hit is None:
                 continue
             outward = Vector(p) - hit
@@ -289,6 +294,41 @@ def source_index(obj):
     a = np.empty(len(obj.data.vertices), dtype=np.int32)
     attr.data.foreach_get("value", a)
     return a
+
+
+def covered_by(co, nrm, shells, margin, reach=0.07):
+    """Body points really under these garments: straight out from the skin (along its normal) the
+    fabric is within `reach` (or the skin pokes just through it), and the point is further than
+    `margin` from every open edge (hem, cuff, neckline) of the garments. Skin merely near a hem
+    (below the shorts) does not count."""
+    from mathutils.kdtree import KDTree
+
+    trees = [bvh(g) for g in shells]
+    under = np.zeros(len(co), dtype=bool)
+    for i in range(len(co)):
+        o = Vector(co[i])
+        d = Vector(nrm[i])
+        for t in trees:
+            hit = t.ray_cast(o + d * 0.001, d, reach)
+            if hit[0] is not None:
+                under[i] = True
+                break
+            # Skin poking through the fabric (the body sticks out past the softened shape the
+            # fabric drapes over): just outside it, so the ray above never meets it.
+            near = t.find_nearest(o, 0.02)
+            if near[0] is not None and (o - near[0]).dot(near[1]) > 0:
+                under[i] = True
+                break
+    edge = [coords(g)[loop] for g in shells for loop in boundary_loops(g)]
+    if not edge:
+        return under
+    edge = np.vstack(edge)
+    kd = KDTree(len(edge))
+    for i, p in enumerate(edge):
+        kd.insert(Vector(p), i)
+    kd.balance()
+    far = np.array([kd.find(Vector(p))[2] > margin for p in co])
+    return under & far
 
 
 def delete_covered(target, covered_mask, garments, margin):
@@ -731,6 +771,25 @@ def outfit_materials(spec):
         "sock": mats.flat("Sock", "#f2f1ee", roughness=0.9),
         "lace": mats.flat("Lace", "#f4f3f0", roughness=0.8),
     }
+    # The wardrobe's other garments (wardrobe_garments.py); the game recolours most of them.
+    M.update({
+        "tee": mats.flat("Tee", c.get("tee", "#e9e6df"), roughness=0.88, normal=knit, normal_scale=12,
+                         normal_strength=0.2, double_sided=True),
+        "tee_rib": mats.flat("TeeRib", c.get("tee", "#e9e6df"), roughness=0.9, normal=rib, normal_scale=10),
+        "shirt": mats.flat("Shirt", c.get("shirt", "#7d9bb8"), roughness=0.75, double_sided=True),
+        "button": mats.flat("Button", "#f1eee6", roughness=0.4),
+        "jeans": mats.flat("Jeans", c.get("jeans", "#2f4a6d"), roughness=0.85, normal=twill, normal_scale=10,
+                           normal_strength=0.25, double_sided=True),
+        "stitch": mats.flat("JeansStitch", "#c98a3c", roughness=0.8),
+        "rivet": mats.flat("Rivet", "#b87333", roughness=0.35, metallic=0.8),
+        "shorts": mats.flat("Shorts", c.get("shorts", "#b8a27c"), roughness=0.82, normal=twill, normal_scale=8,
+                            normal_strength=0.15, double_sided=True),
+        "shorts_rib": mats.flat("ShortsRib", c.get("shorts", "#b8a27c"), roughness=0.85, normal=rib, normal_scale=10),
+        "sandal_sole": mats.flat("SandalSole", "#2a2420", roughness=0.8),
+        "sandal_strap": mats.flat("SandalStrap", c["shoe_upper"], roughness=0.6),
+        "cap": mats.flat("Cap", c.get("cap", "#1f3b5a"), roughness=0.75, double_sided=True),
+        "bucket": mats.flat("Bucket", c.get("cap", "#1f3b5a"), roughness=0.85, double_sided=True),
+    })
     if "jacket" in spec["outfit"]:
         M.update({
             "jacket": mats.flat("Jacket", c["jacket"], roughness=0.5, double_sided=True),
@@ -742,6 +801,16 @@ def outfit_materials(spec):
 
 
 def build_outfit(spec, body, rig, parts):
+    """Every garment the wardrobe offers (outfits.SLOTS), tagged with its slot and variant.
+
+    The original outfit (hoodie or jacket+hoodie, cargo joggers, sneakers) is built exactly as
+    before; the other choices are built over the same body. Body skin is deleted only where every
+    choice of a slot covers it; skin some choices show (forearms, lower legs, ankles, feet) is kept
+    and marked with region_* vertex groups, which the export cuts into separate meshes.
+    """
+    import outfits as O
+    import wardrobe_garments as W
+
     L = Landmarks(rig)
     Wt = Weights(body, rig)
     co = coords(body)
@@ -754,7 +823,9 @@ def build_outfit(spec, body, rig, parts):
     tree = bvh(collider)
     bpy.data.objects.remove(collider)
     garments = {}
+    covers = {slot: {} for slot in O.SLOTS}
 
+    # ── The original outfit (unchanged) ──
     pants_parts, pants_cover, cuff_z = cargo_pants(spec, body, L, Wt, M, co, tree=tree)
     garments["pants"] = pants_parts
     pants = pants_parts[0]
@@ -766,31 +837,109 @@ def build_outfit(spec, body, rig, parts):
     garments["hoodie"] = hoodie_parts
     if name == "female":
         garments["hoodie"] += kangaroo_pocket(spec, hoodie_parts[0], L, M, hem_z)
-    covered = pants_cover | hoodie_cover
+    top_cover = hoodie_cover.copy()
     if jacketed:
         jacket_parts, jacket_cover = jacket(spec, body, L, Wt, M, co, [(pants, 0.01), (hoodie_parts[0], 0.012)], hem_z,
                                             tree=tree)
         garments["jacket"] = jacket_parts
-        covered |= jacket_cover
+        top_cover |= jacket_cover
         # Most of the hoodie is hidden by the jacket: keep the opening, hem and neck.
         hidden = delete_covered(hoodie_parts[0], jacket_cover, [jacket_parts[0]], margin=0.045)
         log(name, "hoodie faces hidden under the jacket", hidden)
     shoes = sneakers(spec, body, rig, M, parts["shoes"])
     garments["shoes"] = [shoes] + laces(spec, shoes, M)
-    feet_cover = (Wt.feet > 0.3) | (co[:, 2] < L_ankle_z(rig) + 0.05)
-    covered |= feet_cover & (co[:, 2] < cuff_z + 0.02)
+    legacy_top = [hoodie_parts[0]] + ([jacket_parts[0]] if jacketed else [])
 
-    # Skin the new meshes like the body, then hide the body under the fabric.
-    for group in garments.values():
+    # ── The other choices ──
+    jeans_parts, _, _ = W.jeans(spec, body, L, Wt, M, co, tree=tree)
+    shorts_parts, _, shorts_hem = W.shorts(spec, body, L, Wt, M, co, tree=tree)
+    garments["jeans"], garments["shorts"] = jeans_parts, shorts_parts
+    # Over the trousers, jeans and shorts (each pushes only fabric near it: see push_outside).
+    below = [(pants, 0.008, 0.05), (jeans_parts[0], 0.008, 0.05), (shorts_parts[0], 0.008, 0.05)]
+    tee_parts, _, _ = W.tee(spec, body, L, Wt, M, co, below, tree=tree)
+    shirt_parts, _, _ = W.shirt(spec, body, L, Wt, M, co, below, tree=tree)
+    garments["tee"], garments["shirt"] = tee_parts, shirt_parts
+    sandal_parts, _ = W.sandals(spec, body, rig, L, Wt, M, co)
+    garments["sandals"] = sandal_parts
+    frame = W.HatFrame(body, parts)
+    garments["cap"] = W.cap(spec, frame, M)
+    garments["bucket"] = W.bucket(spec, frame, M)
+    # Where hats sit, for the export and previews (hair above this plane hides under a hat).
+    rig["hat_point"], rig["hat_normal"] = list(frame.p0), list(frame.n)
+
+    wardrobe = {
+        "pants": ("bottom", "trousers"), "jeans": ("bottom", "jeans"), "shorts": ("bottom", "shorts"),
+        "hoodie": ("top", "hoodie"), "jacket": ("top", "hoodie"), "tee": ("top", "tee"), "shirt": ("top", "shirt"),
+        "shoes": ("shoes", "sneakers"), "sandals": ("shoes", "sandals"),
+        "cap": ("hat", "cap"), "bucket": ("hat", "bucket"),
+    }
+    for key, group in garments.items():
+        for g in group:
+            O.tag(g, *wardrobe[key])
+
+    # Skin the new meshes like the body (hats ride the head).
+    for key, group in garments.items():
         for g in group:
             if g.name.endswith("sneakers"):
                 continue
-            transfer_weights(g, body, rig)
-    removed = delete_covered(body, covered, [g for group in garments.values() for g in group[:1]], margin=0.035)
-    for o in [body] + [g for group in garments.values() for g in group]:
+            if key in ("cap", "bucket"):
+                rigid_bind(g, rig, B + "Head")
+            else:
+                transfer_weights(g, body, rig)
+
+    # Delete only the skin every choice of a slot really covers (measured on the garments).
+    margin = 0.035
+    nrm = normals(body)
+    covers["top"] = {"hoodie": covered_by(co, nrm, legacy_top, margin), "tee": covered_by(co, nrm, [tee_parts[0]], margin),
+                     "shirt": covered_by(co, nrm, [shirt_parts[0]], margin)}
+    covers["bottom"] = {v: covered_by(co, nrm, [g[0]], margin) for v, g in
+                        (("trousers", pants_parts), ("jeans", jeans_parts), ("shorts", shorts_parts))}
+    always = np.zeros(len(co), dtype=bool)
+    for slot in ("top", "bottom"):
+        always |= np.logical_and.reduce(list(covers[slot].values()))
+    removed = int(face_vertex_all(body, always[source_index(body)]).sum())
+    keep_faces(body, ~face_vertex_all(body, always[source_index(body)]))
+
+    # Regions of the skin that stays, for the game to hide under the garments that cover them.
+    ankle_z = L_ankle_z(rig)
+    t_arm, d_arm = arm_param(L, co)
+    z = co[:, 2]
+    # A region holds only skin that every garment hiding it really covers (outfits.HIDDEN_WHEN):
+    # skin near a cuff or hem stays visible under every choice, as it did before regions.
+    shoes_cover = covered_by(co, nrm, [garments["shoes"][0]], margin)
+    trousers, jeans_c = covers["bottom"]["trousers"], covers["bottom"]["jeans"]
+    # Skin the original top only just covers (or pokes through): hidden with it, like the arms.
+    hoodie_trees = [bvh(g) for g in legacy_top]
+    grazing = np.zeros(len(co), dtype=bool)
+    for i in range(len(co)):
+        if Wt.hands[i] > 0.4 or Wt.head[i] > 0.3:
+            continue
+        for t in hoodie_trees:
+            if t.find_nearest(Vector(co[i]), 0.004)[0] is not None:
+                grazing[i] = True
+                break
+    region = {
+        "arms": (((Wt.arms > 0.4) | ((d_arm < 0.13) & (t_arm > 0.15))) & (Wt.hands < 0.4) & (Wt.head < 0.3)
+                 & covers["top"]["hoodie"]) | grazing,
+        # Below the ankle everything goes under sneakers (toes too, whatever bones they follow).
+        "feet": z < ankle_z + 0.025,
+        "ankles": (z >= ankle_z + 0.025) & (z < cuff_z + 0.02) & (Wt.legs + Wt.feet > 0.3)
+        & jeans_c & (trousers | shoes_cover),
+        "legs": (z >= cuff_z + 0.02) & (Wt.legs > 0.3) & (Wt.arms + Wt.hands < 0.3) & trousers & jeans_c,
+    }
+    src = source_index(body)
+    for r, mask in region.items():
+        vg = body.vertex_groups.new(name=f"region_{r}")
+        idx = np.nonzero(mask[src])[0].tolist()
+        if idx:
+            vg.add(idx, 1.0, "REPLACE")
+
+    all_objs = [g for group in garments.values() for g in group]
+    for o in [body] + all_objs:
         if "src_index" in o.data.attributes:
             o.data.attributes.remove(o.data.attributes["src_index"])
-    log(name, "garments", {k: sum(len(o.data.polygons) for o in v) for k, v in garments.items()}, "body faces hidden", removed)
+    log(name, "garments", {k: sum(len(o.data.polygons) for o in v) for k, v in garments.items()},
+        "body faces hidden", removed, "regions", {r: int(m[src].sum()) for r, m in region.items()})
     parts["garments"] = garments
     return garments
 

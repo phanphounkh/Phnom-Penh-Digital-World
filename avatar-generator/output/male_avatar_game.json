@@ -15,82 +15,317 @@
         32,
         0
       ],
-      "Drawstring": [
+      "Bucket": [
         48,
+        0
+      ],
+      "Button": [
+        64,
+        0
+      ],
+      "Cap": [
+        80,
+        0
+      ],
+      "Drawstring": [
+        96,
         0
       ],
       "HeadphoneGlow": [
-        64,
+        112,
         0
       ],
       "HeadphonePad": [
-        80,
-        0
+        0,
+        16
       ],
       "Headphones": [
-        96,
-        0
+        16,
+        16
       ],
       "Hoodie": [
-        112,
-        0
+        32,
+        16
       ],
       "HoodieRib": [
-        0,
+        48,
         16
       ],
       "Jacket": [
-        16,
+        64,
         16
       ],
       "JacketPanel": [
-        32,
+        80,
         16
       ],
       "JacketTrim": [
-        48,
-        16
-      ],
-      "Lace": [
-        64,
-        16
-      ],
-      "Pants": [
-        80,
-        16
-      ],
-      "PantsRib": [
         96,
         16
       ],
-      "ShoeAccent": [
+      "Jeans": [
         112,
         16
       ],
-      "ShoeSole": [
+      "JeansStitch": [
         0,
         32
       ],
-      "ShoeUpper": [
+      "Lace": [
         16,
         32
       ],
-      "Sock": [
+      "Pants": [
         32,
         32
       ],
-      "Strap": [
+      "PantsRib": [
         48,
         32
       ],
-      "Watch": [
+      "Rivet": [
         64,
         32
       ],
-      "Zip": [
+      "SandalSole": [
         80,
         32
+      ],
+      "SandalStrap": [
+        96,
+        32
+      ],
+      "Shirt": [
+        112,
+        32
+      ],
+      "ShoeAccent": [
+        0,
+        48
+      ],
+      "ShoeSole": [
+        16,
+        48
+      ],
+      "ShoeUpper": [
+        32,
+        48
+      ],
+      "Shorts": [
+        48,
+        48
+      ],
+      "ShortsRib": [
+        64,
+        48
+      ],
+      "Sock": [
+        80,
+        48
+      ],
+      "Strap": [
+        96,
+        48
+      ],
+      "Tee": [
+        112,
+        48
+      ],
+      "TeeRib": [
+        0,
+        64
+      ],
+      "Watch": [
+        16,
+        64
+      ],
+      "Zip": [
+        32,
+        64
       ]
+    }
+  },
+  "wardrobe": {
+    "slots": {
+      "top": [
+        "hoodie",
+        "tee",
+        "shirt"
+      ],
+      "bottom": [
+        "trousers",
+        "jeans",
+        "shorts"
+      ],
+      "shoes": [
+        "sneakers",
+        "sandals"
+      ],
+      "hat": [
+        "none",
+        "cap",
+        "bucket"
+      ],
+      "bag": [
+        "backpack",
+        "none"
+      ]
+    },
+    "default": {
+      "top": "hoodie",
+      "bottom": "trousers",
+      "shoes": "sneakers",
+      "hat": "none",
+      "bag": "backpack"
+    },
+    "hidden_when": {
+      "arms": [
+        [
+          "top.hoodie"
+        ]
+      ],
+      "legs": [
+        [
+          "bottom.trousers"
+        ],
+        [
+          "bottom.jeans"
+        ]
+      ],
+      "ankles": [
+        [
+          "bottom.jeans"
+        ],
+        [
+          "bottom.trousers",
+          "shoes.sneakers"
+        ]
+      ],
+      "feet": [
+        [
+          "shoes.sneakers"
+        ]
+      ],
+      "hair_top": [
+        [
+          "hat.cap"
+        ],
+        [
+          "hat.bucket"
+        ]
+      ]
+    },
+    "meshes": {
+      "male.game.skin_arms": {
+        "region": "arms"
+      },
+      "male.game.skin_legs": {
+        "region": "legs"
+      },
+      "male.game.skin_ankles": {
+        "region": "ankles"
+      },
+      "male.game.skin_feet": {
+        "region": "feet"
+      },
+      "male.game.hair_hat": {
+        "region": "hair_top"
+      },
+      "male.game.decals.bag.backpack@top.hoodie": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.hoodie"
+      },
+      "male.game.decals.bag.backpack@top.shirt": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.shirt"
+      },
+      "male.game.decals.bag.backpack@top.tee": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.tee"
+      },
+      "male.game.decals.top.hoodie": {
+        "slot": "top",
+        "variant": "hoodie",
+        "with": null
+      },
+      "male.game.decals.top.shirt": {
+        "slot": "top",
+        "variant": "shirt",
+        "with": null
+      },
+      "male.game.decals.top.tee": {
+        "slot": "top",
+        "variant": "tee",
+        "with": null
+      },
+      "male.game.outfit.bag.backpack@top.hoodie": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.hoodie"
+      },
+      "male.game.outfit.bag.backpack@top.shirt": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.shirt"
+      },
+      "male.game.outfit.bag.backpack@top.tee": {
+        "slot": "bag",
+        "variant": "backpack",
+        "with": "top.tee"
+      },
+      "male.game.outfit.bottom.jeans": {
+        "slot": "bottom",
+        "variant": "jeans",
+        "with": null
+      },
+      "male.game.outfit.bottom.shorts": {
+        "slot": "bottom",
+        "variant": "shorts",
+        "with": null
+      },
+      "male.game.outfit.bottom.trousers": {
+        "slot": "bottom",
+        "variant": "trousers",
+        "with": null
+      },
+      "male.game.outfit.hat.bucket": {
+        "slot": "hat",
+        "variant": "bucket",
+        "with": null
+      },
+      "male.game.outfit.hat.cap": {
+        "slot": "hat",
+        "variant": "cap",
+        "with": null
+      },
+      "male.game.outfit.shoes.sandals": {
+        "slot": "shoes",
+        "variant": "sandals",
+        "with": null
+      },
+      "male.game.outfit.shoes.sneakers": {
+        "slot": "shoes",
+        "variant": "sneakers",
+        "with": null
+      },
+      "male.game.outfit.top.hoodie": {
+        "slot": "top",
+        "variant": "hoodie",
+        "with": null
+      },
+      "male.game.outfit.top.shirt": {
+        "slot": "top",
+        "variant": "shirt",
+        "with": null
+      },
+      "male.game.outfit.top.tee": {
+        "slot": "top",
+        "variant": "tee",
+        "with": null
+      }
     }
   },
   "kind": "male",
@@ -140,7 +375,7 @@
     "Thinking",
     "Wink"
   ],
-  "triangles": 30495,
+  "triangles": 49137,
   "walk_speed": 1.498,
   "run_speed": 2.578,
   "sprint_speed": 4.753

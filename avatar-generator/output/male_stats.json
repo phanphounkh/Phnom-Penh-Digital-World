@@ -1,10 +1,10 @@
 {
   "high": {
     "file": "male_avatar.glb",
-    "bytes": 6298492,
+    "bytes": 6264968,
     "meshes": 69,
-    "triangles": 71280,
-    "vertices": 41147,
+    "triangles": 70390,
+    "vertices": 40654,
     "materials": 34,
     "draw_calls_estimate": 73,
     "textures": {
@@ -92,7 +92,7 @@
       "Wave"
     ],
     "per_mesh_triangles": {
-      "male.body": 17842,
+      "male.body": 16952,
       "male.teeth": 7120,
       "male.jacket": 6714,
       "male.hair_cards": 5736,
@@ -108,12 +108,12 @@
   },
   "game": {
     "file": "male_avatar_game.glb",
-    "bytes": 2973420,
-    "meshes": 7,
-    "triangles": 30495,
-    "vertices": 20456,
+    "bytes": 4192416,
+    "meshes": 31,
+    "triangles": 49137,
+    "vertices": 30491,
     "materials": 7,
-    "draw_calls_estimate": 7,
+    "draw_calls_estimate": 31,
     "textures": {
       "male_skin.jpg": [
         1024,
@@ -133,11 +133,11 @@
       ],
       "male_game_hair.png": [
         1024,
-        512
+        1024
       ],
       "male_game_decals.png": [
-        512,
-        512
+        768,
+        768
       ],
       "male_palette_base.png": [
         128,
@@ -152,7 +152,7 @@
         128
       ]
     },
-    "texture_pixels": 2146304,
+    "texture_pixels": 2998272,
     "bones": 52,
     "morph_targets": [
       "Blink",
@@ -179,13 +179,18 @@
       "Wave"
     ],
     "per_mesh_triangles": {
-      "male.game.outfit": 13932,
-      "male.game.hair": 7742,
-      "male.game.body": 5886,
-      "male.game.eyes": 1020,
-      "male.game.teeth": 853,
-      "male.game.browslashes": 560,
-      "male.game.decals": 502
+      "male.game.outfit.top.hoodie": 6293,
+      "male.game.hair_hat": 5728,
+      "male.game.body": 4786,
+      "male.game.outfit.top.shirt": 3942,
+      "male.game.outfit.top.tee": 3538,
+      "male.game.outfit.shoes.sneakers": 3456,
+      "male.game.outfit.bottom.trousers": 2245,
+      "male.game.hair": 2014,
+      "male.game.outfit.bottom.jeans": 1808,
+      "male.game.outfit.bag.backpack@top.hoodie": 1786,
+      "male.game.outfit.bag.backpack@top.shirt": 1770,
+      "male.game.outfit.bag.backpack@top.tee": 1754
     }
   }
 }

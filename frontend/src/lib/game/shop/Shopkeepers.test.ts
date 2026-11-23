@@ -21,7 +21,9 @@ describe('keeperFor', () => {
 			const k = keeperFor(shop(`s${i}`));
 			expect(k.avatar.avatar_name).toBe(k.name);
 			expect(k.avatar.accent_color).toBe('#e8a33d');
-			expect(k.avatar.accessories).toEqual([]);
+			expect(k.avatar.accessories).toEqual([]); // no backpack behind the counter
+			expect(k.avatar.model).toBe('outfit');
+			expect(['tee', 'shirt']).toContain(k.avatar.top_style);
 			expect(['a', 'b']).toContain(k.avatar.body);
 			for (const key of ['skin_tone', 'hair_color', 'top_color', 'bottom_color', 'shoe_color'] as const)
 				expect(k.avatar[key]).toMatch(/^#[0-9a-f]{6}$/);

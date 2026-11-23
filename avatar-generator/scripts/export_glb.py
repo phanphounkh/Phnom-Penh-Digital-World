@@ -4,9 +4,13 @@
 
 * output/<name>_avatar.glb       high quality (close-ups, avatar editor): full meshes, separate
                                   materials, textures up to 2048 px.
-* output/<name>_avatar_game.glb  gameplay: decimated meshes, every flat-colour part merged into one
-                                  "Outfit" mesh with a palette texture, decals/brows+lashes/hair
-                                  in small atlases (7 materials ≈ 7 draw calls), textures ≤ 1024 px.
+* output/<name>_avatar_game.glb  gameplay: decimated meshes, the flat-colour parts merged into one
+                                  mesh per wardrobe choice (outfits.py) sharing one palette
+                                  material, decals/brows+lashes/hair in small atlases, the skin
+                                  some garments hide cut into region meshes; textures ≤ 1024 px.
+                                  The manifest's "wardrobe" says which mesh is which, so the game
+                                  shows one outfit at a time (about 12 draw calls).
+The high-quality GLB (viewer, renders) carries the original outfit only.
 Both keep the same 52-bone Mixamo skeleton, the 7 face morphs and the 8 animation clips.
 Statistics go to output/<name>_stats.json.
 """
@@ -19,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from common import *  # noqa: E402
 import body as body_stage  # noqa: E402
+import outfits as O  # noqa: E402
 import setup_materials as mats  # noqa: E402
 
 PALETTE = {"size": 0, "cell": 0, "cells": {}}
@@ -167,7 +172,8 @@ def decimate(o, ratio):
 
 def flat_ratio(o):
     n = o.name
-    if any(k in n for k in ("pants", "hoodie", "jacket", "pocket", "flap")) and len(o.data.polygons) > 400:
+    shells = ("pants", "hoodie", "jacket", "pocket", "flap", "tee", "shirt", "jeans", "shorts")
+    if any(k in n for k in shells) and len(o.data.polygons) > 400:
         return GAME_DECIMATE["shell"]
     if "sneakers" in n:
         return GAME_DECIMATE["shoes"]
@@ -313,6 +319,68 @@ def join(objs, name):
     return j
 
 
+def wear_key(o):
+    """The wardrobe choice an object belongs to ("top.tee", "bag.backpack@top.tee"), or None."""
+    if o.get("region"):
+        return f"region.{o['region']}"
+    slot = o.get("slot")
+    if not slot:
+        return None
+    w = o.get("with")
+    return f"{slot}.{o['variant']}" + (f"@{w}" if w else "")
+
+
+def wear_info(key):
+    if key.startswith("region."):
+        return {"region": key[7:]}
+    choice, _, w = key.partition("@")
+    slot, variant = choice.split(".")
+    return {"slot": slot, "variant": variant, "with": w or None}
+
+
+def separate_faces(obj, mask, name):
+    """Move the faces in `mask` into a new object (same modifiers, parent and materials)."""
+    activate(obj)
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="DESELECT")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    obj.data.polygons.foreach_set("select", np.asarray(mask, dtype=bool))
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.separate(type="SELECTED")
+    bpy.ops.object.mode_set(mode="OBJECT")
+    new = next(o for o in bpy.context.selected_objects if o is not obj)
+    new.name = new.data.name = name
+    return new
+
+
+def split_skin_regions(gb, name):
+    """Cut the region_* skin (outfits.REGIONS) off the game body into meshes of their own; a face
+    belongs to a region when its vertices are mostly in it (the decimated weights blend)."""
+    out = []
+    for r in O.REGIONS:
+        vg = gb.vertex_groups.get(f"region_{r}")
+        if vg is None:
+            continue
+        w = np.zeros(len(gb.data.vertices))
+        for v in gb.data.vertices:
+            for g in v.groups:
+                if g.group == vg.index:
+                    w[v.index] = g.weight
+        sel = np.array([w[list(p.vertices)].mean() > 0.5 for p in gb.data.polygons])
+        if not sel.any():
+            continue
+        part = separate_faces(gb, sel, f"{name}.game.skin_{r}")
+        if part.data.shape_keys:  # only the face morphs: not on arms, legs or feet
+            activate(part)
+            bpy.ops.object.shape_key_remove(all=True, apply_mix=False)
+        out.append((part, r))
+    for o in [gb] + [p for p, _ in out]:
+        for vg in list(o.vertex_groups):
+            if vg.name.startswith("region_"):
+                o.vertex_groups.remove(vg)
+    return out
+
+
 def copy_morph_tracks(src, dst):
     sk, dk = src.data.shape_keys, dst.data.shape_keys
     if not (sk and dk and sk.animation_data):
@@ -341,6 +409,10 @@ def build_game_lod(name, rig, high):
     copy_morph_tracks(hb, gb)
     bind_armature(gb, rig)
     game.append(gb)
+    wardrobe = {}
+    for part, r in split_skin_regions(gb, name):
+        game.append(part)
+        wardrobe[part.name] = {"region": r}
 
     # Eyes, teeth (tongue dropped: hidden behind the teeth at gameplay distance).
     for kind in ("eyes", "teeth"):
@@ -363,19 +435,29 @@ def build_game_lod(name, rig, high):
         assign_material(g, m)
     game.append(join([g for g, _ in bl], f"{name}.game.browslashes"))
 
-    # Hair: base hair + cards in one atlas.
-    hair = []
+    # Hair: base hair + cards in one atlas; the cards on top of the head (hidden under a hat)
+    # in a mesh of their own.
+    hair, under_hat = [], []
     for kind in ("hair", "hair_cards"):
         for o in by_kind.get(kind, []):
             g = duplicate(o, f"{name}.game.{kind}")
             decimate(g, GAME_DECIMATE["hair"] if kind == "hair" else 1.0)
             bind_armature(g, rig)
-            hair.append((g, base_image(o.data.materials[0])))
-    m = atlas(f"{name}_game_hair", [([g], img) for g, img in hair], (512, 512), True, roughness=0.62,
+            img = base_image(o.data.materials[0])
+            if kind == "hair_cards":
+                mask = O.under_hat_faces(g, rig)
+                if mask.any():
+                    under_hat.append((separate_faces(g, mask, f"{name}.game.hair_cards_hat"), img))
+            hair.append((g, img))
+    m = atlas(f"{name}_game_hair", [([g], img) for g, img in hair + under_hat], (512, 512), True, roughness=0.62,
               factor=SPEC["hair"]["color"])
-    for g, _ in hair:
+    for g, _ in hair + under_hat:
         assign_material(g, m)
     game.append(join([g for g, _ in hair], f"{name}.game.hair"))
+    if under_hat:
+        h = join([g for g, _ in under_hat], f"{name}.game.hair_hat")
+        game.append(h)
+        wardrobe[h.name] = {"region": "hair_top"}
 
     # Decals (chest print, flag patch, backpack print, watch face): one atlas.
     dec = []
@@ -387,7 +469,14 @@ def build_game_lod(name, rig, high):
         m = atlas(f"{name}_game_decals", [([g], img) for g, img in dec], (256, 256), True, double_sided=False, roughness=0.75)
         for g, _ in dec:
             assign_material(g, m)
-        game.append(join([g for g, _ in dec], f"{name}.game.decals"))
+        groups = {}
+        for g, _ in dec:
+            groups.setdefault(wear_key(g), []).append(g)
+        for key, objs in sorted(groups.items(), key=lambda kv: kv[0] or ""):
+            j = join(objs, f"{name}.game.decals" + (f".{key}" if key else ""))
+            game.append(j)
+            if key:
+                wardrobe[j.name] = wear_info(key)
 
     # Everything flat-coloured: decimate, point UVs at palette cells, one mesh, one material.
     flats = []
@@ -405,8 +494,16 @@ def build_game_lod(name, rig, high):
             g.data.uv_layers.remove(uvl)
         g.data.materials.clear()
         g.data.materials.append(pal)
-    outfit = join(flats, f"{name}.game.outfit")
-    game.append(outfit)
+    groups = {}
+    for g in flats:
+        groups.setdefault(wear_key(g), []).append(g)
+    for key, objs in sorted(groups.items(), key=lambda kv: kv[0] or ""):
+        j = join(objs, f"{name}.game.outfit" + (f".{key}" if key else ""))
+        game.append(j)
+        if key:
+            wardrobe[j.name] = wear_info(key)
+    MANIFEST["wardrobe"] = {"slots": O.SLOTS, "default": O.DEFAULT, "hidden_when": O.HIDDEN_WHEN,
+                            "meshes": wardrobe}
 
     for g in game:
         activate(g)
@@ -456,16 +553,25 @@ def main():
     from characters import CHARACTERS
 
     SPEC.update(CHARACTERS[name])
-    high = character_objects(rig)
-    limit_images(high, HIGH_LIMITS)
+    everything = character_objects(rig)
     os.makedirs(OUTPUT, exist_ok=True)
+    game = build_game_lod(name, rig, everything)
+
+    # High quality: the original outfit, its hidden skin removed (this session only, not saved).
+    high = [o for o in everything if O.shown(o)]
+    for o in high:
+        groups = {vg.index: vg.name[7:] for vg in o.vertex_groups if vg.name.startswith("region_")}
+        hidden = [i for i, r in groups.items() if O.region_hidden(r)]
+        if hidden:
+            gone = np.array([any(g.group in hidden and g.weight > 0.5 for g in v.groups) for v in o.data.vertices])
+            keep_faces(o, ~face_vertex_all(o, gone))
+    limit_images(high, HIGH_LIMITS)
     out_high = os.path.join(OUTPUT, f"{name}_avatar.glb")
     export(out_high, high, rig)
     s_high = stats(high, rig, out_high)
     log(name, "high", s_high["file"], f"{s_high['bytes'] / 1e6:.2f} MB", s_high["triangles"], "tris",
         s_high["draw_calls_estimate"], "draw calls")
 
-    game = build_game_lod(name, rig, high)
     limit_images(game, {"default": 1024, f"{name}.game.Skin": 1024, "Skin": 1024, "Eyes": 256, "Teeth": 256})
     out_game = os.path.join(OUTPUT, f"{name}_avatar_game.glb")
     export(out_game, game, rig)

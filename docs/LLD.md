@@ -542,17 +542,32 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
 * Opened with **O** or the shirt button. The camera turns to face the player
   (`CityController.setShowcase`: beside a glass panel on wide screens, above a glass sheet on
   phones), movement keys are ignored, the HUD and other players' name tags hide.
-* What the realistic avatar shows, as wheels (`wardrobe.ts`): top (build A's jacket, build B's
-  hoodie), trousers, shoes, backpack (its colour also trims the top's panels and the shoes), hair
-  colour, and body (build, skin tone). Turned with the mouse wheel or touchpad (one choice per
-  notch), the arrow keys, a drag, or a click; `[` and `]` change category.
+* What the realistic avatar shows, as wheels (`wardrobe.ts`): top (style: the original hoodie,
+  under a jacket on build A; a t-shirt; a short-sleeved button shirt; and a colour), bottoms
+  (joggers, jeans, shorts; colour), shoes (sneakers, sandals; colour), hat (none, cap, bucket
+  hat; the backpack's colour), backpack (on or off; its colour also trims the jacket's panels,
+  the shoes and the hat), hair colour, and body (build, skin tone). Turned with the mouse wheel or
+  touchpad (one choice per notch), the arrow keys, a drag, or a click; `[` and `]` change
+  category. "Surprise me" is a random outfit (`randomOutfit`).
+* Garments and old avatars: an avatar's `model` is "avatar" for avatars saved before garments
+  existed (and new players until they save): the realistic character wears the original outfit
+  (hoodie, joggers, sneakers, backpack) whatever its old style fields say (`realistic.outfitOf`),
+  so nobody's look changed. The wardrobe opens such an avatar `dressed()` in that outfit and
+  saves `model: "outfit"`, after which `top_style` (hoodie | tee | shirt), `bottom_style`
+  (trousers | jeans | shorts), `shoe_style` (sneakers | sandals) and the accessories `cap`/`hat`
+  (a bucket hat, one hat at a time) and `backpack` are worn.
+* The realistic GLB holds every garment as its own mesh; the manifest's `wardrobe` says which
+  mesh is which choice (`slot`, `variant`, `with`: backpack straps, prints and the flag patch are
+  fitted per top) or which `region` of skin it is (arms, legs, ankles, feet: kept only where some
+  choice shows them) and the hair on top of the head (and head-worn sunglasses) that hides under a
+  hat; `hidden_when` lists the garments that hide each region. `realistic.meshShown` applies it:
+  a change of garment is a visibility change in place, never a rebuild. About 20–30k triangles
+  and 14–16 draw calls per character, whatever is worn.
 * Every turn is worn at once (`CityController.setAvatar`: colours in place, another build is a
   rebuild, `GameCharacter.update` says which; a product held in a shop moves to the new hands).
   Save → `PUT /me/avatar`, then the hub sends the player's card again (`spawn`) to everyone who
   sees them, so they see the new outfit without reconnecting. Cancel or Escape puts back what
   was worn.
-* New garments (shirts, jeans, hats, other shoes) need new realistic models from the avatar
-  generator first; each then becomes an item wheel.
 * Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)

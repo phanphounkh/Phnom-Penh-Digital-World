@@ -496,14 +496,26 @@ async def test_a_new_outfit_reaches_players_around_at_once(client: httpx.AsyncCl
             ya = (await expect(a, "welcome"))["you"]["id"]
             await expect(b, "welcome")
             first = await expect(b, "spawn", where=lambda m: m["p"]["id"] == ya)
+            assert (
+                first["p"]["av"]["model"] == "avatar"
+            )  # saved before garments: the original outfit
             outfit = {
                 **first["p"]["av"],
-                "top_style": "hoodie",
+                "model": "outfit",
+                "top_style": "shirt",
                 "top_color": "#e8a33d",
+                "bottom_style": "jeans",
+                "shoe_style": "sandals",
                 "accessories": ["cap"],
             }
             assert (await client.put("/me/avatar", json=outfit)).status_code == 200
             again = await expect(b, "spawn", where=lambda m: m["p"]["id"] == ya)
-            assert again["p"]["av"]["top_style"] == "hoodie"
-            assert again["p"]["av"]["accessories"] == ["cap"]
+            av = again["p"]["av"]
+            assert (av["model"], av["top_style"], av["bottom_style"], av["shoe_style"]) == (
+                "outfit",
+                "shirt",
+                "jeans",
+                "sandals",
+            )
+            assert av["accessories"] == ["cap"]
             await never(a, "spawn", where=lambda m: m["p"]["id"] == ya)  # not to themselves

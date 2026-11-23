@@ -7,8 +7,7 @@
 	 */
 	import { Backpack, Footprints, PersonStanding, Scissors, Shirt, Shuffle, X } from 'lucide-svelte';
 	import type { Avatar } from '$lib/api/types';
-	import { randomAvatar } from '$lib/game/avatar/avatar';
-	import { CATEGORIES, describe, wheels, type CategoryId } from '$lib/game/avatar/wardrobe';
+	import { CATEGORIES, describe, dressed, randomOutfit, wheels, type CategoryId } from '$lib/game/avatar/wardrobe';
 	import { untrack } from 'svelte';
 	import Drum from './Drum.svelte';
 
@@ -29,9 +28,10 @@
 		onClose: () => void;
 	} = $props();
 
-	// What was worn when the wardrobe opened (Cancel goes back to it).
-	const saved = untrack(() => $state.snapshot(outfit) as Avatar);
-	let draft = $state<Avatar>(untrack(() => $state.snapshot(outfit) as Avatar));
+	// What was worn when the wardrobe opened (Cancel goes back to it), dressed in garments (an
+	// avatar saved before garments existed shows the outfit it wears now).
+	const saved = untrack(() => dressed($state.snapshot(outfit) as Avatar));
+	let draft = $state<Avatar>(untrack(() => dressed($state.snapshot(outfit) as Avatar)));
 	let category = $state<CategoryId>('top');
 	let busy = $state(false);
 	let error = $state('');
@@ -140,7 +140,7 @@
 
 		{#if error}<p class="error" role="alert">{error}</p>{/if}
 		<footer class="foot">
-			<button type="button" class="ghost" onclick={() => wear(randomAvatar(draft.avatar_name))}><Shuffle size={15} /> Surprise me</button>
+			<button type="button" class="ghost" onclick={() => wear(randomOutfit(draft.avatar_name))}><Shuffle size={15} /> Surprise me</button>
 			<span class="grow"></span>
 			{#if !first}<button type="button" class="ghost" onclick={cancel}>Cancel</button>{/if}
 			<button type="button" class="save" disabled={busy} onclick={save} data-testid="wardrobe-save">{busy ? 'Saving…' : first ? 'Enter the city' : changed ? 'Save outfit' : 'Done'}</button>

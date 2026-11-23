@@ -2,8 +2,9 @@
  * The wardrobe in the game (isolated stack): a player opens it (O), the camera turns to face
  * them and the HUD gives way to a glass panel; they turn the colour wheels with the mouse wheel
  * and the keys and see it on their avatar at once; Save keeps it, and another player nearby sees
- * the new outfit without reconnecting. Escape puts back what was worn. There is only the
- * realistic look (no Classic switch).
+ * the new outfit without reconnecting. Item wheels choose garments (a t-shirt, jeans, sandals, a
+ * cap): only those show on the avatar, here and for the other player. Escape puts back what was
+ * worn. There is only the realistic look (no Classic switch).
  * Screenshots go to test-results/wardrobe/.
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -39,6 +40,10 @@ async function join(browser: Browser, baseURL: string | undefined, username: str
 	return { page, api, errors };
 }
 
+/** Visible wardrobe meshes of a character root, by their game names ("…outfittoptee" → "top.tee"). */
+const WORN = `(root) => { const out = []; root?.traverse((o) => { const m = /game(?:outfit|decals)(top|bottom|shoes|hat|bag)(\\w+?)(?:@|$)/.exec(o.name); if (o.isMesh && m && o.visible) out.push(m[1] + '.' + m[2]); }); return [...new Set(out)].sort(); }`;
+const wornBy = (page: Page, root: string) => ev<string[]>(page, `(${WORN})(${root})`);
+
 /** Turn a wheel with the mouse wheel, one notch at a time. */
 async function scroll(page: Page, drum: string, notches: number) {
 	const box = (await page.getByTestId(`drum-${drum}`).boundingBox())!;
@@ -58,6 +63,12 @@ test('the wardrobe: wheels, a live avatar, saved for everyone around', async ({ 
 	const seenByB = () => ev<{ top_color: string } | null>(b.page, `globalThis.__ppwNet.remotes.players.get(${aId})?.card.av ?? null`);
 	await expect.poll(seenByB, FRAMES).toMatchObject({ top_color: '#2f7d6d' });
 
+	// The other player steps aside (both start on the same spot) so the screenshots show A.
+	await b.page.evaluate(
+		`new Promise((done) => { const c = globalThis.__ppwNet.city; const p = c.localState(); c.walkTo([[p.x + 3.5, p.z + 3.5]], done); setTimeout(done, 15000); })`
+	);
+	// Daylight for the screenshots (the city otherwise follows Phnom Penh's real time).
+	await a.page.evaluate(`globalThis.__ppwNet.city.setTimeMode('noon')`);
 	// O opens it: the panel, no HUD.
 	await a.page.locator('[data-testid="world-canvas"] canvas').click({ position: { x: 300, y: 300 } });
 	await a.page.keyboard.press('o');
@@ -74,21 +85,48 @@ test('the wardrobe: wheels, a live avatar, saved for everyone around', async ({ 
 	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Saffron jacket');
 	// Worn at once, before saving.
 	await expect.poll(() => ev<string>(a.page, `globalThis.__ppwNet.city.outfit.top_color`), FRAMES).toBe('#e8a33d');
-	// Keys too: down on the trousers wheel goes from Slate to Orchid.
+	// Keys too: down on the bottoms' colour wheel goes from Slate to Orchid.
 	await a.page.getByTestId('cat-bottom').click();
 	await a.page.getByTestId('drum-bottom-colour').focus();
 	await a.page.keyboard.press('ArrowDown');
-	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Orchid trousers');
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Orchid joggers');
 	await a.page.waitForTimeout(2000);
 	await a.page.screenshot({ path: `${SHOTS}/changed.png` });
+
+	// Garments: the original outfit until an item wheel turns.
+	const mine = `globalThis.__ppwNet.city.avatar`;
+	expect(await wornBy(a.page, mine)).toEqual(['bag.backpack', 'bottom.trousers', 'shoes.sneakers', 'top.hoodie']);
+	await a.page.getByTestId('cat-top').click();
+	await scroll(a.page, 'top-item', 1);
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Saffron T-shirt');
+	await a.page.getByTestId('cat-bottom').click();
+	await scroll(a.page, 'bottom-item', 1);
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Orchid jeans');
+	await a.page.getByTestId('cat-shoes').click();
+	await scroll(a.page, 'shoes-item', 1);
+	await expect(a.page.getByTestId('wardrobe-now')).toContainText('sandals');
+	await a.page.getByTestId('cat-hat').click();
+	await scroll(a.page, 'hat-item', 1);
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Saffron cap');
+	await expect.poll(() => wornBy(a.page, mine), FRAMES).toEqual(['bag.backpack', 'bottom.jeans', 'hat.cap', 'shoes.sandals', 'top.tee']);
+	await a.page.waitForTimeout(2000);
+	await a.page.screenshot({ path: `${SHOTS}/garments.png` });
+	await a.page.screenshot({ path: 'artifacts/wardrobe-garments.png' }); // README
 
 	// Save: kept, and the other player sees it without reconnecting.
 	await a.page.getByTestId('wardrobe-save').click();
 	await expect(a.page.getByTestId('wardrobe')).toHaveCount(0);
 	await expect(a.page.getByRole('navigation', { name: 'World controls' })).toBeVisible();
 	const saved = await (await a.api.get('/api/v1/me/avatar')).json();
-	expect(saved).toMatchObject({ top_color: '#e8a33d', bottom_color: '#6b4fa0' });
+	expect(saved).toMatchObject({ model: 'outfit', top_style: 'tee', top_color: '#e8a33d', bottom_style: 'jeans', bottom_color: '#6b4fa0', shoe_style: 'sandals', accessories: ['backpack', 'cap'] });
 	await expect.poll(seenByB, FRAMES).toMatchObject({ top_color: '#e8a33d' });
+	await expect.poll(() => wornBy(b.page, `globalThis.__ppwNet.remotes.players.get(${aId})?.character?.root`), FRAMES).toEqual([
+		'bag.backpack',
+		'bottom.jeans',
+		'hat.cap',
+		'shoes.sandals',
+		'top.tee'
+	]);
 
 	// Escape puts back what was worn.
 	await a.page.getByTestId('open-wardrobe').click();

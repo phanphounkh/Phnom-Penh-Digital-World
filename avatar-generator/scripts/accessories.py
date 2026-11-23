@@ -498,31 +498,65 @@ def accessory_materials(spec):
 
 
 def build_accessories(spec, body, rig, parts):
+    """Accessories. Those that sit on the top (prints, flag patch, drawstrings, backpack straps,
+    headphones, necklace) are fitted to each top the wardrobe offers and tagged with it; the
+    original top's are made exactly as before. The watch, sunglasses and earrings are always worn."""
+    import outfits as O
+
     name = spec["name"]
     L = G.Landmarks(rig)
     M = accessory_materials(spec)
     gar = parts["garments"]
+    rigid, wrapped = [], []
+
+    def fitted(top, objs):
+        for o in objs:
+            if o is not None:
+                O.tag(o, "top", top)
+        return objs
+
+    def bag_for(top, objs):
+        for o in objs:
+            O.tag(o, "bag", "backpack", with_=f"top.{top}")
+        return objs
+
+    # ── The original top: hoodie (under the jacket on the male) ──
     hoodie = gar["hoodie"][0]
     outer = gar["jacket"][0] if "jacket" in gar else hoodie
     outer_objs = [o for o in (outer, hoodie) if o]
-    rigid, wrapped = [], []
-
     # Replace the free-hanging drawstrings with ones lying on the fabric.
     for o in list(gar["hoodie"]):
         if ".drawstring" in o.name or ".aglet" in o.name:
             gar["hoodie"].remove(o)
             bpy.data.objects.remove(o)
-    wrapped += drawstrings_on(spec, hoodie, L, M)
-    wrapped.append(chest_print(spec, hoodie, L, M))
-    patch = flag_patch(spec, outer, L, M)
-    if patch:
-        wrapped.append(patch)
+    wrapped += fitted("hoodie", drawstrings_on(spec, hoodie, L, M))
+    wrapped += fitted("hoodie", [chest_print(spec, hoodie, L, M)])
+    wrapped += fitted("hoodie", [flag_patch(spec, outer, L, M)])
     bag, straps = backpack(spec, outer_objs, L, M)
-    rigid += [(o, "Spine2") for o in bag]
-    wrapped += straps
+    rigid += [(o, "Spine2") for o in bag_for("hoodie", bag)]
+    wrapped += bag_for("hoodie", straps)
     if "headphones" in spec["outfit"]:
-        neckwear = [o for o in gar["jacket"] + gar["hoodie"] if o.name.endswith((".hood", ".collar", ".jacket"))]
-        rigid += [(o, "Spine2") for o in headphones(spec, L, M, outer_tree(neckwear))]
+        neckwear = [o for o in gar.get("jacket", []) + gar["hoodie"] if o.name.endswith((".hood", ".collar", ".jacket"))]
+        rigid += [(o, "Spine2") for o in fitted("hoodie", headphones(spec, L, M, outer_tree(neckwear)))]
+    if "necklace" in spec["outfit"]:
+        wrapped += fitted("hoodie", necklace(spec, body, hoodie, L, M))
+
+    # ── The other tops ──
+    for top in ("tee", "shirt"):
+        shell = gar[top][0]
+        if top == "tee":
+            wrapped += fitted(top, [chest_print(spec, shell, L, M)])
+        wrapped += fitted(top, [flag_patch(spec, shell, L, M)])
+        bag, straps = backpack(spec, [shell], L, M)
+        rigid += [(o, "Spine2") for o in bag_for(top, bag)]
+        wrapped += bag_for(top, straps)
+        if "headphones" in spec["outfit"]:
+            neckwear = [o for o in gar[top] if o.name.split(".")[-1].startswith(("tee_neck", "shirt_collar", "tee", "shirt"))]
+            rigid += [(o, "Spine2") for o in fitted(top, headphones(spec, L, M, outer_tree(neckwear)))]
+        if "necklace" in spec["outfit"]:
+            wrapped += fitted(top, necklace(spec, body, shell, L, M))
+
+    # ── Always worn ──
     for o in watch(spec, body, L, M, "Left"):
         rigid.append((o, "LeftForeArm"))
     if "sunglasses" in spec["outfit"]:
@@ -530,11 +564,12 @@ def build_accessories(spec, body, rig, parts):
         import hair as H
 
         head = H.Head(body)
-        rigid += [(o, "Head") for o in sunglasses(spec, outer_tree(hair_objs + [body]), head.center, M)]
+        shades = sunglasses(spec, outer_tree(hair_objs + [body]), head.center, M)
+        for o in shades:
+            o["region"] = "hair_top"  # pushed up on the head: they go under a hat with the hair
+        rigid += [(o, "Head") for o in shades]
     if "earrings" in spec["outfit"]:
         rigid += [(o, "Head") for o in earrings(spec, body, M)]
-    if "necklace" in spec["outfit"]:
-        wrapped += necklace(spec, body, hoodie, L, M)
 
     for o, bone in rigid:
         rigid_bind(o, rig, B + bone)

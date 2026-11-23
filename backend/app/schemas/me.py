@@ -22,18 +22,24 @@ def _hex(value: str) -> str:
 
 
 class AvatarIn(BaseModel):
+    """An avatar. `model` says how the realistic character dresses: "avatar" (avatars saved
+    before the wardrobe had garments) wears its original outfit whatever the style fields say;
+    "outfit" wears the chosen top, bottom, shoes, hat (accessory "cap" or "hat") and backpack."""
+
     avatar_name: str = Field(min_length=2, max_length=32)
+    model: Literal["avatar", "outfit"] = "avatar"
     body: Literal["a", "b"]
     skin_tone: str
     hair_style: Literal["short", "long", "bun", "buzz"]
     hair_color: str
-    top_style: Literal["hoodie", "tee"]
+    top_style: Literal["hoodie", "tee", "shirt"]
     top_color: str
-    bottom_style: Literal["trousers", "shorts"]
+    bottom_style: Literal["trousers", "jeans", "shorts"]
     bottom_color: str
     shoe_color: str
+    shoe_style: Literal["sneakers", "sandals"] = "sneakers"
     accent_color: str
-    accessories: list[Literal["cap", "glasses", "backpack", "krama"]] = Field(
+    accessories: list[Literal["cap", "hat", "glasses", "backpack", "krama"]] = Field(
         default_factory=list, max_length=3
     )
 
@@ -55,6 +61,8 @@ class AvatarIn(BaseModel):
     def unique(cls, v: list[str]) -> list[str]:
         if len(set(v)) != len(v):
             raise ValueError("Each accessory can be chosen once")
+        if "cap" in v and "hat" in v:
+            raise ValueError("Wear one hat at a time")
         return sorted(v)
 
     @field_validator("avatar_name")
@@ -67,7 +75,7 @@ class AvatarIn(BaseModel):
 
 
 class AvatarOut(AvatarIn, Schema):
-    model: str
+    pass
     updated_at: datetime
 
     # Stored values were validated on the way in; don't re-check presets on the way out.

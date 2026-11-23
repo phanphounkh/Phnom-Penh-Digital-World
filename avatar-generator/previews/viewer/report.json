@@ -3,37 +3,37 @@
   "qualities": {
     "high": {
       "quality": "high",
-      "triangles": 134280,
+      "triangles": 132390,
       "drawCalls": 305,
       "textures": 75,
       "geometries": 317,
       "bytes": {
-        "male": 6298492,
-        "female": 6175068
+        "male": 6264968,
+        "female": 6138176
       },
       "loadMs": {
-        "male": 355,
-        "female": 349
+        "male": 267,
+        "female": 274
       },
-      "fps": 60.2,
-      "p95_frame_ms": 16.7
+      "fps": 59.9,
+      "p95_frame_ms": 16.8
     },
     "game": {
       "quality": "game",
-      "triangles": 56301,
-      "drawCalls": 29,
-      "textures": 110,
-      "geometries": 331,
+      "triangles": 54092,
+      "drawCalls": 59,
+      "textures": 125,
+      "geometries": 346,
       "bytes": {
-        "male": 1536800,
-        "female": 1604968
+        "male": 2083720,
+        "female": 2126688
       },
       "loadMs": {
-        "male": 119,
-        "female": 127
+        "male": 223,
+        "female": 235
       },
-      "fps": 60.1,
-      "p95_frame_ms": 16.8
+      "fps": 60.2,
+      "p95_frame_ms": 16.7
     }
   },
   "clips": {
@@ -370,17 +370,17 @@
       "ok": true,
       "detail": {
         "quality": "high",
-        "triangles": 134280,
+        "triangles": 132390,
         "drawCalls": 305,
         "textures": 75,
         "geometries": 317,
         "bytes": {
-          "male": 6298492,
-          "female": 6175068
+          "male": 6264968,
+          "female": 6138176
         },
         "loadMs": {
-          "male": 355,
-          "female": 349
+          "male": 267,
+          "female": 274
         },
         "fps": 60
       }
@@ -718,17 +718,17 @@
       "ok": true,
       "detail": {
         "quality": "game",
-        "triangles": 56301,
-        "drawCalls": 29,
-        "textures": 110,
-        "geometries": 331,
+        "triangles": 54092,
+        "drawCalls": 59,
+        "textures": 125,
+        "geometries": 346,
         "bytes": {
-          "male": 1536800,
-          "female": 1604968
+          "male": 2083720,
+          "female": 2126688
         },
         "loadMs": {
-          "male": 119,
-          "female": 127
+          "male": 223,
+          "female": 235
         },
         "fps": 60
       }
