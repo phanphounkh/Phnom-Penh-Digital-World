@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import type { ChunkPayload, WorldBootstrap } from '$lib/api/types';
+import type { Avatar, ChunkPayload, WorldBootstrap } from '$lib/api/types';
 import { WorldProjection, compassHeading, yawForHeading } from '$lib/geo/projection';
 import { createCharacter, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { EmoteName } from '$lib/game/net/protocol';
@@ -143,9 +143,16 @@ export interface CityController {
 	followRoute(onDone?: (arrived: boolean) => void): void;
 	readonly following: boolean;
 	playEmote(name: EmoteName): void;
-	/** Realistic or classic avatars (a local display preference; rebuilds the player's model). */
-	setAvatarStyle(style: AvatarStyle): Promise<void>;
-	/** The avatar style in use (realistic falls back to classic if its models cannot load). */
+	/** What the player's avatar wears (the avatar description). */
+	readonly outfit: Avatar;
+	/** Wear another avatar: in place where the model can, else rebuilt (the wardrobe's live
+	 * preview; saving it is up to the caller). */
+	setAvatar(avatar: Avatar): Promise<void>;
+	/** The camera turns to face the player, who stands still (movement keys are ignored), with
+	 * the avatar framed `right` metres left of centre and `down` metres higher (room for a panel
+	 * beside or below), from `distance` metres at `pitch` (radians); null: back behind the player. */
+	setShowcase(view: { right?: number; down?: number; distance?: number; pitch?: number } | null): void;
+	/** The avatar model in use: realistic, or classic if the realistic models cannot load. */
 	readonly avatarStyle: AvatarStyle;
 	/** Current graphics preset (may start at 'low' on software rendering, see softwareRenderer). */
 	readonly quality: Quality;
@@ -164,7 +171,6 @@ export interface CityOptions {
 	preferKhmer?: boolean;
 	quality?: Quality;
 	timeMode?: TimeMode;
-	avatarStyle?: AvatarStyle;
 }
 
 const RADIUS = 0.35;
@@ -290,7 +296,10 @@ export async function createCity(
 	// shops, vehicles and the camera keep their reference.
 	const player = new THREE.Group();
 	player.name = 'player';
-	let character: GameCharacter = await createCharacter(boot.player.avatar, options.avatarStyle ?? 'realistic');
+	let character: GameCharacter = await createCharacter(boot.player.avatar);
+	/** The wardrobe's view (see setShowcase), and the camera to go back to. */
+	let showcase: { right: number; down: number } | null = null;
+	let beforeShowcase: { pitch: number; distance: number } | null = null;
 	let styleToken = 0;
 	const wear = (c: GameCharacter) => {
 		// The avatar uses the contact blob below instead of the cached shadow map.
@@ -298,6 +307,23 @@ export async function createCity(
 		player.add(c.root);
 	};
 	wear(character);
+	/** Build the player's model again (another build, or parts the current one cannot change),
+	 * and put it on the vehicle if they are riding. The newest request wins. */
+	async function rebuild(): Promise<void> {
+		const token = ++styleToken;
+		const next = await createCharacter(boot.player.avatar);
+		if (token !== styleToken || disposed) return next.dispose();
+		const mounted = rider && vehicle ? vehicle : null;
+		rider?.detach(scene);
+		rider = null;
+		character.dispose();
+		character = next;
+		wear(next);
+		if (mounted) {
+			player.rotation.set(0, 0, 0);
+			rider = character.mount(mounted, player);
+		}
+	}
 	scene.add(player);
 	const frameCallbacks = new Set<(dt: number) => void>();
 	const shadowBlob = new THREE.Mesh(
@@ -383,11 +409,13 @@ export async function createCity(
 	const keys = new Set<string>();
 	const typing = (e: Event) => {
 		const t = e.target as HTMLElement | null;
-		return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+		return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 	};
 	const onKeyDown = (e: KeyboardEvent) => {
-		if (typing(e)) return;
+		if (typing(e) || showcase) return;
 		const k = e.key.toLowerCase();
+		// Space presses a focused button in a panel over the city (My shop, the office), not jump.
+		if (k === ' ' && (e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
 		if (k === ' ') {
 			e.preventDefault(); // no page scroll, no click on a focused HUD button
 			if (!e.repeat) jump();
@@ -645,10 +673,14 @@ export async function createCity(
 		viewDistance = Number.isNaN(viewDistance) ? limit : viewDistance + (limit - viewDistance) * ease;
 		viewPitch = Number.isNaN(viewPitch) ? pitchLimit : viewPitch + (pitchLimit - viewPitch) * ease;
 		const distance = viewDistance;
+		// Showcase: aim at the chest, beside the avatar (it then sits off centre, clear of a panel).
+		const ox = showcase ? Math.cos(camYaw) * showcase.right : 0,
+			oz = showcase ? -Math.sin(camYaw) * showcase.right : 0;
+		const aim = showcase ? head - 0.5 - showcase.down : head;
 		desired.set(
-			px + Math.sin(camYaw) * Math.cos(viewPitch) * distance,
-			head + Math.sin(viewPitch) * distance,
-			pz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
+			px + ox + Math.sin(camYaw) * Math.cos(viewPitch) * distance,
+			aim + Math.sin(viewPitch) * distance,
+			pz + oz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
 		);
 		// Camera collision: the centre ray, and indoors two more at the sides of the near plane,
 		// so a wall just beside the camera is never seen through.
@@ -686,7 +718,7 @@ export async function createCity(
 		if (interior) camera.position.y = Math.min(camera.position.y, interior.ceiling - 0.25);
 		const over = ceilingProvider?.(camera.position.x, camera.position.y, camera.position.z) ?? null;
 		if (over !== null) camera.position.y = Math.min(camera.position.y, over - 0.25);
-		cameraTarget.set(px, head, pz);
+		cameraTarget.set(px + ox, aim, pz + oz);
 		camera.lookAt(cameraTarget);
 		// Small rooms: a short near plane (no wall clipping); outdoors the usual one (depth precision).
 		const near = interior ? 0.1 : 0.3;
@@ -1099,20 +1131,30 @@ export async function createCity(
 		playEmote(name) {
 			if (!riding) character.emotes.play(name);
 		},
-		async setAvatarStyle(style) {
-			const token = ++styleToken;
-			const next = await createCharacter(boot.player.avatar, style);
-			if (token !== styleToken || disposed) return next.dispose();
-			const mounted = rider && vehicle ? vehicle : null;
-			rider?.detach(scene);
-			rider = null;
-			character.dispose();
-			character = next;
-			wear(next);
-			if (mounted) {
-				player.rotation.set(0, 0, 0);
-				rider = character.mount(mounted, player);
+		get outfit() {
+			return boot.player.avatar;
+		},
+		async setAvatar(avatar) {
+			boot.player.avatar = avatar;
+			if (!character.update(avatar)) await rebuild();
+		},
+		setShowcase(view) {
+			if (view && !showcase) {
+				beforeShowcase = { pitch: camPitch, distance: camDistance };
+				keys.clear();
+				if (route.length) endRoute(false);
+				camYaw = yaw; // in front, facing the player
+			} else if (!view && showcase) {
+				camYaw = yaw + Math.PI;
+				camPitch = beforeShowcase?.pitch ?? 0.38;
+				camDistance = beforeShowcase?.distance ?? 7.5;
+				beforeShowcase = null;
 			}
+			if (view) {
+				camPitch = view.pitch ?? 0.1;
+				camDistance = view.distance ?? 3.3;
+			}
+			showcase = view ? { right: view.right ?? 0, down: view.down ?? 0 } : null;
 		},
 		get quality() {
 			return quality;
@@ -1192,10 +1234,19 @@ export async function createCity(
 	return controller;
 }
 
+/**
+ * The minimap is see-through glass over the city (the page blurs what is behind it): a light
+ * tint of dark teal, light roads (saffron for the main ones), faint buildings, tinted water and
+ * parks. Only the player's arrow and a route are solid.
+ */
 const MINI_ROADS: Record<string, [string, number]> = {
-	trunk: ['#e8a33d', 7], primary: ['#e8a33d', 6], secondary: ['#f4cf8e', 5], tertiary: ['#ffffff', 4],
-	residential: ['#ffffff', 3], unclassified: ['#ffffff', 3], living_street: ['#ffffff', 3],
-	service: ['#e9e2d2', 2], pedestrian: ['#e6d8b8', 2.5], footway: ['#e6d8b8', 1.5]
+	trunk: ['#e8a33d', 7], primary: ['#e8a33d', 6], secondary: ['rgba(244, 207, 142, 0.9)', 5], tertiary: ['rgba(255, 250, 240, 0.85)', 4],
+	residential: ['rgba(255, 250, 240, 0.75)', 3], unclassified: ['rgba(255, 250, 240, 0.75)', 3], living_street: ['rgba(255, 250, 240, 0.75)', 3],
+	service: ['rgba(255, 250, 240, 0.4)', 2], pedestrian: ['rgba(244, 207, 142, 0.45)', 2.5], footway: ['rgba(244, 207, 142, 0.35)', 1.5]
+};
+const MINI_AREAS: Record<string, string> = {
+	water: 'rgba(76, 158, 178, 0.6)', park: 'rgba(104, 158, 88, 0.5)', grass: 'rgba(116, 168, 96, 0.45)', pitch: 'rgba(116, 168, 96, 0.45)',
+	temple_grounds: 'rgba(232, 200, 140, 0.35)', plaza: 'rgba(255, 250, 240, 0.12)'
 };
 
 function drawMinimap(
@@ -1212,7 +1263,7 @@ function drawMinimap(
 	const tx = (x: number) => half + (x - px) / mpp;
 	const tz = (z: number) => half + (z - pz) / mpp;
 	ctx.clearRect(0, 0, size, size);
-	ctx.fillStyle = '#d8d0bf';
+	ctx.fillStyle = 'rgba(11, 37, 36, 0.42)';
 	ctx.fillRect(0, 0, size, size);
 	const payloads = chunks.payloads();
 	const fillRings = (rings: [number, number][][]) => {
@@ -1220,21 +1271,20 @@ function drawMinimap(
 		for (const ring of rings) ring.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
 		ctx.fill('evenodd');
 	};
-	const AREA: Record<string, string> = { water: '#7fb3bb', park: '#9fbb83', grass: '#a9c48a', pitch: '#a9c48a', temple_grounds: '#e5d3a8', plaza: '#e6dcc6' };
 	for (const p of payloads)
 		for (const a of p.areas) {
-			const c = AREA[a.kind];
+			const c = MINI_AREAS[a.kind];
 			if (!c) continue;
 			ctx.fillStyle = c;
 			for (const poly of a.polys) fillRings(poly);
 		}
-	ctx.fillStyle = '#b3a993';
+	ctx.fillStyle = 'rgba(255, 250, 240, 0.2)';
 	for (const p of payloads) for (const bld of p.buildings) for (const poly of bld.polys) fillRings(poly);
 	ctx.lineCap = 'round';
 	ctx.lineJoin = 'round';
 	for (const p of payloads)
 		for (const r of p.roads) {
-			const [color, w] = MINI_ROADS[r.cls.replace(/_link$/, '')] ?? ['#f1ece0', 1.5];
+			const [color, w] = MINI_ROADS[r.cls.replace(/_link$/, '')] ?? ['rgba(255, 250, 240, 0.4)', 1.5];
 			ctx.strokeStyle = color;
 			ctx.lineWidth = Math.max(1, (w * 3) / (mpp * 2));
 			ctx.beginPath();
@@ -1242,13 +1292,13 @@ function drawMinimap(
 			ctx.stroke();
 		}
 	if (routePoints && routePoints.length > 1) {
-		ctx.strokeStyle = '#c4552f';
+		ctx.strokeStyle = '#f0703f';
 		ctx.lineWidth = 3.5;
 		ctx.beginPath();
 		routePoints.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
 		ctx.stroke();
 		const [ex, ez] = routePoints[routePoints.length - 1];
-		ctx.fillStyle = '#c4552f';
+		ctx.fillStyle = '#f0703f';
 		ctx.beginPath();
 		ctx.arc(tx(ex), tz(ez), 5, 0, Math.PI * 2);
 		ctx.fill();
@@ -1256,8 +1306,18 @@ function drawMinimap(
 	ctx.save();
 	ctx.translate(half, half);
 	ctx.rotate(Math.PI - yaw);
-	ctx.fillStyle = '#c4552f';
-	ctx.strokeStyle = '#fff';
+	// A soft cone where the player faces, then the arrow.
+	const cone = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
+	cone.addColorStop(0, 'rgba(255, 250, 240, 0.32)');
+	cone.addColorStop(1, 'rgba(255, 250, 240, 0)');
+	ctx.fillStyle = cone;
+	ctx.beginPath();
+	ctx.moveTo(0, 0);
+	ctx.arc(0, 0, 46, -Math.PI / 2 - 0.6, -Math.PI / 2 + 0.6);
+	ctx.closePath();
+	ctx.fill();
+	ctx.fillStyle = '#fffaf0';
+	ctx.strokeStyle = '#0b2524';
 	ctx.lineWidth = 2;
 	ctx.beginPath();
 	ctx.moveTo(0, -9);

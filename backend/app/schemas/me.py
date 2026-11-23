@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import Language, RoleName
 from app.schemas.common import Schema
+from app.schemas.market import MerchantIn
 
 HEX = re.compile(r"^#[0-9a-f]{6}$")
 SKIN_TONES = ("#f1d0b5", "#e0b48f", "#c8946b", "#a8744f", "#7e5236", "#5a3824")
@@ -21,18 +22,24 @@ def _hex(value: str) -> str:
 
 
 class AvatarIn(BaseModel):
+    """An avatar. `model` says how the realistic character dresses: "avatar" (avatars saved
+    before the wardrobe had garments) wears its original outfit whatever the style fields say;
+    "outfit" wears the chosen top, bottom, shoes, hat (accessory "cap" or "hat") and backpack."""
+
     avatar_name: str = Field(min_length=2, max_length=32)
+    model: Literal["avatar", "outfit"] = "avatar"
     body: Literal["a", "b"]
     skin_tone: str
     hair_style: Literal["short", "long", "bun", "buzz"]
     hair_color: str
-    top_style: Literal["hoodie", "tee"]
+    top_style: Literal["hoodie", "tee", "shirt"]
     top_color: str
-    bottom_style: Literal["trousers", "shorts"]
+    bottom_style: Literal["trousers", "jeans", "shorts"]
     bottom_color: str
     shoe_color: str
+    shoe_style: Literal["sneakers", "sandals"] = "sneakers"
     accent_color: str
-    accessories: list[Literal["cap", "glasses", "backpack", "krama"]] = Field(
+    accessories: list[Literal["cap", "hat", "glasses", "backpack", "krama"]] = Field(
         default_factory=list, max_length=3
     )
 
@@ -54,6 +61,8 @@ class AvatarIn(BaseModel):
     def unique(cls, v: list[str]) -> list[str]:
         if len(set(v)) != len(v):
             raise ValueError("Each accessory can be chosen once")
+        if "cap" in v and "hat" in v:
+            raise ValueError("Wear one hat at a time")
         return sorted(v)
 
     @field_validator("avatar_name")
@@ -66,7 +75,7 @@ class AvatarIn(BaseModel):
 
 
 class AvatarOut(AvatarIn, Schema):
-    model: str
+    pass
     updated_at: datetime
 
     # Stored values were validated on the way in; don't re-check presets on the way out.
@@ -80,6 +89,35 @@ class ProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=2, max_length=48)
     preferred_language: Language | None = None
     world_visible: bool | None = None
+
+
+class WorkRoleIn(BaseModel):
+    """A work role registered at the System Office: a seller's business details (a merchant
+    application) or a driver's note."""
+
+    role: Literal["seller", "driver"]
+    note: str | None = Field(default=None, max_length=500)
+    business: MerchantIn | None = None
+
+
+def default_avatar(name: str) -> AvatarIn:
+    """The look a new player has until they choose one in the in-game wardrobe (the same
+    values as the client's DEFAULT_AVATAR)."""
+    name = name.strip()[:32]
+    return AvatarIn(
+        avatar_name=name if len(name) >= 2 else "Explorer",
+        body="a",
+        skin_tone="#c8946b",
+        hair_style="short",
+        hair_color="#2b2220",
+        top_style="tee",
+        top_color="#2f7d6d",
+        bottom_style="trousers",
+        bottom_color="#343b4a",
+        shoe_color="#eee5d5",
+        accent_color="#e8a33d",
+        accessories=[],
+    )
 
 
 class RoleSelection(BaseModel):

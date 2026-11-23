@@ -1,10 +1,10 @@
 {
   "high": {
     "file": "female_avatar.glb",
-    "bytes": 6175068,
+    "bytes": 6138176,
     "meshes": 76,
-    "triangles": 63000,
-    "vertices": 35669,
+    "triangles": 62000,
+    "vertices": 35122,
     "materials": 31,
     "draw_calls_estimate": 79,
     "textures": {
@@ -92,7 +92,7 @@
       "Wave"
     ],
     "per_mesh_triangles": {
-      "female.body": 17328,
+      "female.body": 16328,
       "female.teeth": 7120,
       "female.sneakers": 4864,
       "female.hoodie": 4606,
@@ -108,12 +108,12 @@
   },
   "game": {
     "file": "female_avatar_game.glb",
-    "bytes": 2835648,
-    "meshes": 7,
-    "triangles": 25806,
-    "vertices": 16762,
+    "bytes": 3786844,
+    "meshes": 32,
+    "triangles": 41208,
+    "vertices": 25162,
     "materials": 7,
-    "draw_calls_estimate": 7,
+    "draw_calls_estimate": 32,
     "textures": {
       "female_skin.jpg": [
         1024,
@@ -133,11 +133,11 @@
       ],
       "female_game_hair.png": [
         1024,
-        512
+        1024
       ],
       "female_game_decals.png": [
-        512,
-        512
+        768,
+        768
       ],
       "female_palette_base.png": [
         128,
@@ -148,7 +148,7 @@
         128
       ]
     },
-    "texture_pixels": 2129920,
+    "texture_pixels": 2981888,
     "bones": 52,
     "morph_targets": [
       "Blink",
@@ -175,13 +175,18 @@
       "Wave"
     ],
     "per_mesh_triangles": {
-      "female.game.outfit": 12410,
-      "female.game.body": 5718,
-      "female.game.hair": 4742,
-      "female.game.eyes": 1020,
-      "female.game.teeth": 854,
-      "female.game.browslashes": 560,
-      "female.game.decals": 502
+      "female.game.body": 4609,
+      "female.game.outfit.shoes.sneakers": 3472,
+      "female.game.hair_hat": 3384,
+      "female.game.outfit.top.hoodie": 3155,
+      "female.game.outfit.bottom.trousers": 2607,
+      "female.game.outfit.top.shirt": 2299,
+      "female.game.outfit.top.tee": 1955,
+      "female.game.outfit.bottom.jeans": 1774,
+      "female.game.outfit.bag.backpack@top.hoodie": 1770,
+      "female.game.outfit.bag.backpack@top.shirt": 1770,
+      "female.game.outfit.bag.backpack@top.tee": 1770,
+      "female.game.skin_feet": 1538
     }
   }
 }

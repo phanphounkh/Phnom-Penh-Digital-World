@@ -11,8 +11,9 @@ map data**. This repository grew out of two existing projects, which are left un
   reused. Its canteen ordering and demo-payment code are the reference for Phases 4 and 7.
 
 **Status: Phases 1–7 are implemented: foundation, 3D city, multiplayer, marketplace,
-transportation, simulated delivery and the demo wallet.** A new user can register, verify, build an avatar, choose roles, pick a private
-delivery address and a public spawn area on a real map, then walk the real streets of Daun Penh
+transportation, simulated delivery and the demo wallet.** A new user can register, verify, pick a private home anywhere in Phnom Penh (they start
+at the nearest public spawn area), make their avatar in the city's wardrobe (and register a work role, seller or driver, at the
+System Office in the city), then walk the real streets of Daun Penh
 in 3D with other real players (chat, emotes, friends, invites, moderation). **Sellers** apply
 with their business details, are approved by an administrator, claim one of 1,680 virtual shop
 units cut into real street frontages, and stock it from a dashboard. **Buyers** walk through the
@@ -32,10 +33,11 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 | ![Central Market at midday](frontend/artifacts/phase2-central-market-noon.png) | ![Street 136 at night](frontend/artifacts/phase2-central-market-night.png) |
 | ![Wat Phnom hill in the morning](frontend/artifacts/phase2-wat-phnom-morning.png) | ![Street 136 at sunset](frontend/artifacts/phase2-central-market-sunset.png) |
 | ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
-| ![Creating an avatar](frontend/artifacts/phase1-avatar.png) | ![Choosing a location](frontend/artifacts/phase1-location.png) |
-| ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop on Street 63, carrying a product to the cart](frontend/artifacts/phase4-shop-interior.png) |
-| ![Seller dashboard: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Demo checkout paid](frontend/artifacts/phase4-checkout.png) |
-| ![At the shelf: product facings with price tags, the shop's cart by the door](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |
+| ![A new player makes their avatar in the city: the wardrobe's glass panel and wheels](frontend/artifacts/phase1-avatar.png) | ![Choosing your place: a private home anywhere in Phnom Penh, and the nearest public start](frontend/artifacts/phase1-location.png) |
+| ![The wardrobe's garments: a t-shirt, jeans, sandals and a cap, chosen on the wheels](frontend/artifacts/wardrobe-garments.png) | ![Both builds in the original outfit, a t-shirt with jeans and a cap, and a shirt with shorts and a bucket hat](avatar-generator/previews/outfits.png) |
+| ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop: the shopkeeper behind the counter, the basket in hand](frontend/artifacts/phase4-shop-interior.png) |
+| ![My shop, the seller's panel in the city: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Paid at the counter: handed over at once](frontend/artifacts/phase4-checkout.png) |
+| ![At the shelf: product facings with price tags; E puts one in your basket](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |
 | ![Riding the route at 38 km/h in the right-hand lane of Calmette (Street 53)](frontend/artifacts/phase5-route.png) | ![Parked at the kerb on a real street; the garage lists it by street name](frontend/artifacts/phase5-parked.png) |
 
 *Phase 2 screenshots: headless Chrome on the machine's Intel GPU (`tests/perf/tour.mjs`).
@@ -93,9 +95,10 @@ docker compose --profile full up -d --build   # http://localhost:3000
 ```
 
 The API container migrates, imports the OSM snapshot if the database has none, then serves.
-Both `http://localhost:3000` and `http://127.0.0.1:3000` are allowed locally. For a custom
-address, set `PUBLIC_ORIGIN` in `.env` to the exact browser origin (scheme, hostname and port),
-then rerun the command above to apply it to the backend and frontend.
+`http://localhost:3000` and `http://127.0.0.1:3000` always work. To open it at one more address
+(a domain, or the machine's LAN address for another device), set `PUBLIC_ORIGIN` in `.env` to that
+exact browser origin (scheme, hostname and port), then rerun the command above to apply it to the
+backend and frontend; the local addresses keep working.
 `infrastructure/nginx/ppw.conf` is an example TLS front proxy.
 
 To create the administrator and an optional local demo shop:
@@ -139,25 +142,34 @@ worker bundling, the affected onboarding and commerce suites were rerun: **5 pas
 2. **Create account**: username, email or phone (Cambodian `0…` numbers become `+855…`),
    password, display name, language, terms and privacy.
 3. **Verify** the 6-digit code.
-4. **Avatar**: build, skin tone, hairstyle, tee or hoodie, trousers or shorts, colours, up to
-   3 accessories (cap, glasses, backpack, krama). Drag to rotate the 3D preview.
-5. **Role**: visitor always; buyer immediate; seller and driver await approval.
-6. **Location**: search the city, tap the map to pin a **private** delivery address (buyers
-   only; must be inside Phnom Penh), pick a **public** spawn area, and choose visible or hidden.
-7. **World**: WASD or arrow keys to jog, Shift to sprint, Space to jump, drag to orbit, wheel to zoom, **M** for places
+4. **Your place**: search the city, tap the map to pin a **private** home address anywhere in
+   Phnom Penh, and the nearest **public** spawn area is picked (visible or hidden).
+5. **Into the city**: the wardrobe opens there to make your avatar (see 7). Everyone can explore
+   and buy; to sell or deliver, register a work role at the System Office in the city.
+6. **World**: WASD or arrow keys to jog, Shift to sprint, Space to jump, drag to orbit, wheel to zoom, **M** for places
    (fast travel), **Esc** for help. The HUD shows the street (English and Khmer), nearby
    landmark, lat/lon and world x/z; the minimap is drawn from the same data.
+7. **Wardrobe** (**O**, or the shirt button): a glass panel over the city with wheels. Choose a
+   top (hoodie, t-shirt or shirt), bottoms (joggers, jeans or shorts), shoes (sneakers or
+   sandals), a hat (none, cap or bucket hat), the backpack, colours, hair colour, build and skin;
+   your avatar changes as the wheels turn, and Save shows it to everyone around.
 8. **Multiplayer**: other visible players appear with their own avatars and name tags. **Enter**
    opens chat (Nearby ≈ 40 m or World), **1–4** play emotes (wave, sampeah, cheer, dance),
    **P** opens People: nearby players, friends with online status, requests, direct messages,
    and per-player actions (add friend, invite, message, mute, block, report). An invite shows a
    "Join" toast to your friend. The chip at the top shows the connection state and players online.
 9. **Shops**: **M** lists the shops by distance (Browse, or Walk there). Walk through a shop's
-   doorway; **E** at a shelf picks a product up, **E** at the cart puts it in, **E** at the
-   counter (or **C** anywhere) opens the cart and the demo checkout. **/orders** tracks orders.
-10. **Sell** (`/seller`): apply, then claim a unit on the map, customise the storefront, add
-   products (photo, price, stock, 3D display model), fulfil orders, see demo revenue, answer
-   customer messages.
+   doorway: the shopkeeper behind the counter greets you with a sampeah. **E** at a shelf puts
+   the product in your basket (you carry it, with your picks in it). **E** at the counter (the
+   shopkeeper tells you the price) shows the basket and one **Pay** button: it's yours at once, you
+   walk out with a paper bag in the shop's colours, and the seller sees "Sold in person". To
+   order ahead for pickup or delivery, Browse a shop and check out from the cart (**C**);
+   collect a ready pickup order at the shop's counter. **/orders** lists your orders.
+10. **Sell** (in the city): register as a seller at the System Office; once approved, **B**
+   (or the shop button in the toolbar) opens My shop over the city: what to do next and today's
+   sales, orders (accept, prepare, mark ready), products (photo, price, stock, how it looks on
+   the shelf), the shop's name, tagline and colours, and your spot (walk to a free spot and claim
+   it there; renew, hand over or give it up). Customer messages are in People (**P**).
 11. **Vehicles** (**V**): take a free bicycle or motorbike (parked on the nearest street), walk
    to it (**Walk there**), press **F** to ride: **W/S** throttle and brake, **A/D** steer, keep
    right. The HUD shows speed, the OSM speed limit and one-way streets (and warns when you ride
@@ -236,7 +248,8 @@ backend/            FastAPI app
   app/marketplace   units (generation), merchants, claims, catalog, checkout (orders, demo payment), media, sweeper
   app/transport     specs (modes, speeds), network (OSM access → graph), routing (A*), area (ride/park rules),
                     parking (parked-vehicle index), vehicles (garage)
-  migrations/       Alembic (0001: Phase 1 schema; 0002: multiplayer and social; 0003: marketplace; 0004: transport)
+  migrations/       Alembic (0001: Phase 1 schema; 0002: multiplayer and social; 0003: marketplace; 0004: transport;
+                    0005: delivery, wallet, recovery; 0006: wardrobe garments: shirts, jeans, a shoe style)
   scripts/          import_osm.py, seed.py, e2e_stack.py (isolated API for browser tests)
   tests/            89 tests against PostGIS (HTTP and WebSocket)
 frontend/           SvelteKit app; server.js = production server with the WebSocket upgrade proxy
@@ -246,7 +259,7 @@ frontend/           SvelteKit app; server.js = production server with the WebSoc
                     lighting + sun, terrain, collision, chunk streaming
   src/lib/game/net  WorldSocket (reconnect), WorldSession (reactive state), Interpolator, RemotePlayers
   src/lib/game      avatar/ (+ emotes), legacy player/camera/cart/npc
-  src/lib/components/world  ChatBox, PeoplePanel, ShopPanel, CartPanel; components/seller: dashboard tabs, UnitMap
+  src/lib/components/world  ChatBox, PeoplePanel, ShopPanel, CartPanel; components/myshop: My shop (the seller's panel)
   src/lib/game/shop Storefronts (walk-in shops), layout, ShopAssets
   src/lib/game/vehicles  specs (+ shared fixture), kinematics, RoadNetwork, route (lanes, guidance), RouteLine,
                     VehicleModels, Rider (seated IK pose)
@@ -371,11 +384,12 @@ live tracking on the order page, and the delivery states the order machine alrea
 * **Merchants.** One application: business name (EN/KM), category, description, customer
   contacts, private real address, opening hours, documents (PDF/JPEG/PNG, magic-byte checked,
   stored privately, admin download audited). Approval activates the seller role.
-* **Seller dashboard** (`/seller`): business, units (MapLibre claim map with unit outlines
-  coloured by status, plus a list and code search), storefront (name EN/KM, tagline, theme,
-  colours, open/closed, live sign preview), products (category policy, price, stock,
-  visibility, photo, 3D display model), orders with the allowed next steps, demo revenue chart,
-  customer messages (direct messages).
+* **My shop** (in the city, **B**; it replaced the `/seller` dashboard, whose address now opens
+  it): today (checklist, figures, new orders), orders as a board with the allowed next step,
+  products (category policy, price, stock, visibility, photo, 3D display model), the storefront
+  (name EN/KM, tagline, theme, colours, open/closed, live sign preview), spots (free spots near
+  the player, claimed in person; renew, transfer, release) and the business details. Customer
+  messages are direct messages (People).
 * **Catalogue rules.** Integer cents with database CHECKs; prohibited categories refused
   (tobacco, medicines, weapons, other regulated goods); alcohol listed only after admin review
   and sold only with an 18+ confirmation. Photos are re-encoded to WebP (metadata such as GPS
@@ -405,7 +419,7 @@ merchants, claims, catalog, checkout, media, sweeper), `app/schemas/market.py`,
 `tests/test_market_shopping.py`. Frontend: `src/lib/api/market.ts`, `src/lib/game/shop/`
 (Storefronts, layout, ShopAssets), doorway support in `collision.ts` and `materials.ts`, the
 autopilot and carry pose in `CityEngine.ts`, `components/world/{ShopPanel,CartPanel}`,
-`components/seller/*`, routes `/seller` and `/orders`, admin tabs, `playwright.config.ts`,
+`components/myshop/*` (was `components/seller/*` and the `/seller` route), `/orders`, admin tabs, `playwright.config.ts`,
 `tests/phase4.spec.ts`. Assets: `tools/blender/generate_shop_assets.py` (11 GLBs).
 Infrastructure: media volume, upload size limits. Docs: HLD, LLD, ERD, API, SRS, DATA, ROADMAP,
 privacy draft.

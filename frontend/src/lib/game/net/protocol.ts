@@ -58,7 +58,7 @@ export type ServerMessage =
 	| { t: 'error'; code: string; message: string }
 	| { t: 'kicked'; why: string }
 	| { t: 'shops' }
-	| { t: 'order'; number: string; status: string }
+	| { t: 'order'; number: string; status: string; sold?: boolean; total?: number }
 	| { t: 'ride'; id: number; v: RideCard | null; x?: number; z?: number; yaw?: number }
 	| { t: 'vspawn'; v: ParkedCard }
 	| { t: 'vdespawn'; id: string }

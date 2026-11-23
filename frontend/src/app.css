@@ -105,3 +105,110 @@ body {
 		linear-gradient(90deg, rgba(18, 59, 58, 0.05) 1px, transparent 1px);
 	background-size: 44px 44px;
 }
+
+/*
+ * Dark glass over the city, as in the wardrobe: the world's pop-up panels. The city shows
+ * through, blurred. Inside, the light palette is remapped so every panel reads on glass without
+ * knowing it is there: text turns light, white and paper surfaces become faint glass tiles,
+ * the selected tab a light chip, primary buttons saffron. `.solid` (Performance graphics) drops
+ * the blur for a denser tint.
+ */
+.glass-sheet {
+	--color-ink: #fffaf0;
+	--color-ink-soft: #d3ddd8;
+	--color-paper-2: rgb(255 255 255 / 0.1);
+	--color-white: rgb(255 255 255 / 0.09);
+	color: var(--color-ink);
+	background: rgb(11 37 36 / 0.58);
+	-webkit-backdrop-filter: blur(18px) saturate(150%);
+	backdrop-filter: blur(18px) saturate(150%);
+	border: 1px solid rgb(255 255 255 / 0.22);
+	box-shadow:
+		0 24px 60px -24px rgb(0 0 0 / 0.55),
+		inset 0 1px 0 rgb(255 255 255 / 0.18);
+	scrollbar-color: rgb(255 255 255 / 0.3) transparent;
+}
+.glass-sheet.solid {
+	background: rgb(11 37 36 / 0.9);
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+}
+.glass-sheet .bg-white.shadow {
+	background-color: rgb(255 255 255 / 0.92);
+	color: var(--color-river-900);
+}
+.glass-sheet :is(.display, .chip) {
+	color: var(--color-ink);
+}
+.glass-sheet .eyebrow {
+	color: var(--color-saffron-300);
+}
+.glass-sheet .text-white {
+	color: #fff;
+}
+.glass-sheet .border-white {
+	border-color: rgb(255 255 255 / 0.4);
+}
+.glass-sheet
+	:is(
+		.border-river-900\/10,
+		.border-river-900\/15,
+		.border-river-900\/20,
+		.border-river-900\/25,
+		.border-river-500\/30,
+		.chip
+	) {
+	border-color: rgb(255 255 255 / 0.16);
+}
+.glass-sheet .divide-river-900\/10 > :not(:last-child) {
+	border-color: rgb(255 255 255 / 0.16);
+}
+.glass-sheet .bg-river-900 {
+	background-color: var(--color-river-700);
+}
+.glass-sheet :is(.bg-saffron-100, .alert-dev) {
+	background-color: rgb(232 163 61 / 0.16);
+	color: var(--color-ink);
+}
+.glass-sheet .bg-river-200\/40 {
+	background-color: rgb(191 224 216 / 0.16);
+}
+.glass-sheet .btn-primary {
+	background-color: var(--color-saffron-500);
+	color: var(--color-river-950);
+	box-shadow: 0 6px 0 -2px var(--color-saffron-600);
+}
+.glass-sheet .btn-primary:hover {
+	background-color: var(--color-saffron-300);
+}
+.glass-sheet .btn-ghost {
+	color: var(--color-ink);
+	border-color: rgb(255 255 255 / 0.24);
+	background-color: rgb(255 255 255 / 0.08);
+}
+.glass-sheet .btn-ghost:hover {
+	border-color: rgb(255 255 255 / 0.45);
+	background-color: rgb(255 255 255 / 0.16);
+}
+.glass-sheet .btn-quiet {
+	color: var(--color-saffron-300);
+}
+.glass-sheet .btn-quiet:hover {
+	background-color: rgb(255 255 255 / 0.1);
+}
+.glass-sheet .text-river-700 {
+	color: var(--color-saffron-300);
+}
+.glass-sheet :is(.text-brick-600, .error-text, .alert-error) {
+	color: #ffb59c;
+}
+.glass-sheet .input {
+	border-color: rgb(255 255 255 / 0.26);
+}
+.glass-sheet .input:focus {
+	border-color: var(--color-saffron-300);
+}
+.glass-sheet option {
+	color: #1d2422;
+	background: #f6f1e6;
+}

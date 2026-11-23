@@ -15,6 +15,7 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-ROLE-1 | Visitor always; buyer immediate; seller and driver pending admin approval; admin never self-assigned | ✅ | B: test_roles (8 tests) |
 | F-ROLE-2 | Admin approves or rejects with a reason; decisions audited; rejected users can re-apply | ✅ | B: test_admin_approves_*, test_role_decisions_are_audited |
 | F-AVA-1 | Customise appearance, clothing, hairstyle, accessories and name, with a live 3D preview | ✅ | B: test_avatar_validation; U: avatar.test.ts; E |
+| F-AVA-2 | Wardrobe garments in the game: hoodie, t-shirt or button shirt; joggers, jeans or shorts; sneakers or sandals; no hat, a cap or a bucket hat; backpack on or off; each in the player's colours, seen by other players; avatars saved before keep their look | ✅ | B: test_wardrobe_garments, test_multiplayer (avatar change); U: wardrobe.test.ts, realistic.test.ts; E: wardrobe.spec.ts; generator: viewer test, renders compared with the original |
 | F-LOC-1 | Real Phnom Penh map: search, zoom, select a point | ✅ | B: test_search_finds_real_places; E |
 | F-LOC-2 | Private delivery address inside the Phnom Penh boundary; one default | ✅ | B: test_addresses_must_be_inside_phnom_penh, test_only_one_default_address |
 | F-LOC-3 | Public spawn area (curated, on open ground); explicit visibility opt-in | ✅ | B: test_spawn_points_are_on_open_public_ground, test_visibility_must_be_an_explicit_choice |
@@ -38,11 +39,12 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-PROP-3 | No claiming someone else's real business: units at a named OSM business need evidence and admin review; disputes | ✅ | B: test_real_business_unit_needs_evidence_review_and_can_be_disputed |
 | F-PROP-4 | Claim expiry and renewal, release, transfer between merchants, admin revoke; per-merchant limit | ✅ | B: test_claim_limit_release_and_expiry, test_transfer_moves_the_unit_to_another_merchant |
 | F-MER-1 | Merchant registration (name, category, contacts, private address, hours, documents) with approve/reject/suspend | ✅ | B: test_merchant_application_needs_admin_approval; E: phase4 (dashboard + admin UI) |
-| F-MER-2 | Seller dashboard: units map, storefront customisation, products, stock, orders, revenue, customer messages | ✅ | E: phase4; B: catalogue/order tests |
+| F-MER-2 | My shop, in the city (B): spots near the player claimed in person, storefront customisation, products, stock, orders, revenue; customer messages in People | ✅ | E: phase4, system-office; U: myshop/types; B: catalogue/order tests |
 | F-CAT-1 | Products with price (integer cents), currency, stock, images (EXIF stripped), display model, availability, fulfilment | ✅ | B: test_catalogue_rules_and_storefront, test_image_upload_strips_metadata |
 | F-CAT-2 | Regulated categories: prohibited (refused) and restricted (admin review, 18+ confirmation) | ✅ | B: test_catalogue_rules_and_storefront, test_age_restricted_items_need_confirmation |
 | F-SHOP-1 | Walk-in 3D storefronts at the real frontage: sign, awning, shelves, products with price tags, cart, counter | ✅ | U: layout.test.ts, collision doorway tests; B: test_shop_floor_is_walkable…; E: phase4 |
-| F-SHOP-2 | Press E to pick up a product (held in hand), put it in the cart (server cart), pay at the counter | ✅ | E: phase4.spec.ts |
+| F-SHOP-2 | E at a shelf puts a product in the basket (server cart, carried in hand); at the counter one Pay completes the sale at once, in person only (no seller step); ready pickup orders are collected at the counter | ✅ | B: test_counter.py; E: phase4.spec.ts |
+| F-SHOP-3 | A shopkeeper behind each open shop's counter (the same for every player; apron in the shop's colours) greets walk-in customers, faces them, quotes the price and thanks them; nearest 2 shops only (1 on low graphics), not drawn out of view | ✅ | U: Shopkeepers.test.ts; E: phase4.spec.ts |
 | F-CART-1 | Server cart (product, merchant, quantity, quoted price, owner); repriced on every view; stock checks | ✅ | B: test_cart_reprices_and_checks_stock |
 | F-ORD-1 | One checkout → one order per merchant; server recalculates prices (PRICE_CHANGED on mismatch) | ✅ | B: test_multi_merchant_checkout_is_server_priced_and_idempotent |
 | F-ORD-2 | Explicit order state machine (13 states) with actor rules and history | ✅ | B: test_order_lifecycle_refunds_and_revenue; E: phase4 |

@@ -80,8 +80,8 @@ const RECOLOR: Record<string, (a: Avatar) => string> = {
 export function selectedOptions(a: Avatar): Set<string> {
 	return new Set([
 		`body-${a.body}`,
-		`top-${a.top_style}`,
-		`bottom-${a.bottom_style}`,
+		`top-${a.top_style === 'shirt' ? 'tee' : a.top_style}`,
+		`bottom-${a.bottom_style === 'jeans' ? 'trousers' : a.bottom_style}`,
 		`hair-${a.hair_style}`,
 		...a.accessories.map((x) => `acc-${x}`)
 	]);

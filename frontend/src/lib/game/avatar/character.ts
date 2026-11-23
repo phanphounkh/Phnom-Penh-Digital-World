@@ -2,11 +2,9 @@
  * One avatar in the world, whatever its style: model, gait animation, emotes and the vehicle
  * rider, behind one interface so CityEngine and RemotePlayers do not care which rig it is.
  *
- * - `realistic` (default): avatar-generator's MakeHuman-based characters (realistic.ts).
- * - `classic`: the original modular Blender avatar (avatar.ts) with every style option.
- * The style is a local display preference (like graphics quality): it changes how this browser
- * draws every avatar, not what other players see, and needs no server or database change.
- * If the realistic models cannot load, the classic avatar is used.
+ * - `realistic`: avatar-generator's MakeHuman-based characters (realistic.ts), the game's look.
+ * - `classic`: the original modular Blender avatar (avatar.ts), only drawn when the realistic
+ *   models cannot load, so the game never ends up without avatars.
  */
 import type * as THREE from 'three';
 import type { Avatar } from '$lib/api/types';
@@ -14,26 +12,6 @@ import type { EmoteName } from '$lib/game/net/protocol';
 import type { VehicleInstance } from '$lib/game/vehicles/VehicleModels';
 
 export type AvatarStyle = 'realistic' | 'classic';
-export const AVATAR_STYLES: AvatarStyle[] = ['realistic', 'classic'];
-export const STYLE_KEY = 'ppw.avatarStyle';
-
-export function loadAvatarStyle(): AvatarStyle {
-	try {
-		const v = globalThis.localStorage?.getItem(STYLE_KEY);
-		if (v === 'realistic' || v === 'classic') return v;
-	} catch {
-		/* storage blocked: use the default */
-	}
-	return 'realistic';
-}
-
-export function saveAvatarStyle(style: AvatarStyle): void {
-	try {
-		globalThis.localStorage?.setItem(STYLE_KEY, style);
-	} catch {
-		/* storage blocked: the choice lasts for this page only */
-	}
-}
 
 export interface Gait {
 	update(dt: number, speed: number, holding?: boolean, picking?: boolean, targets?: null, travel?: number, direction?: number): void;
@@ -64,6 +42,9 @@ export interface GameCharacter {
 	readonly emotes: Emotes;
 	/** Seat `holder` (the object that carries this avatar in the world) on a vehicle. */
 	mount(vehicle: VehicleInstance, holder: THREE.Object3D): Mount;
+	/** Wear a changed avatar in place (colours, and parts where the model can); false when it
+	 * has to be built again (another realistic build, or other classic parts). */
+	update(avatar: Avatar): boolean;
 	dispose(): void;
 }
 
@@ -82,6 +63,7 @@ async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
 		animations,
 		emotes: new RealisticEmotes(animations),
 		mount: (vehicle, holder) => new RealisticRider(holder, animations, vehicle),
+		update: (next) => instance.update(next),
 		dispose() {
 			animations.dispose();
 			instance.dispose();
@@ -90,7 +72,7 @@ async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
 }
 
 async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
-	const [{ createAvatar }, { PlayerAnimations }, { EmotePlayer }, { Rider }] = await Promise.all([
+	const [{ createAvatar, selectedOptions }, { PlayerAnimations }, { EmotePlayer }, { Rider }] = await Promise.all([
 		import('./avatar'),
 		import('$lib/game/player/PlayerAnimations.js'),
 		import('./emotes'),
@@ -98,12 +80,21 @@ async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
 	]);
 	const instance = await createAvatar(avatar, { batch: true });
 	const animations = new PlayerAnimations(instance.root);
+	// The world's classic avatar keeps only the parts it wears (merged per joint): colours
+	// change in place, other parts need a new build.
+	const parts = (a: Avatar) => [...selectedOptions(a)].sort().join(',');
+	const wearing = parts(avatar);
 	return {
 		style: 'classic',
 		root: instance.root,
 		animations,
 		emotes: new EmotePlayer(instance.root),
 		mount: (vehicle, holder) => new Rider(holder, animations, vehicle),
+		update(next) {
+			if (parts(next) !== wearing) return false;
+			instance.update(next);
+			return true;
+		},
 		dispose() {
 			animations.dispose();
 			instance.dispose();
@@ -111,13 +102,12 @@ async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
 	};
 }
 
-export async function createCharacter(avatar: Avatar, style: AvatarStyle): Promise<GameCharacter> {
-	if (style === 'realistic') {
-		try {
-			return await realisticCharacter(avatar);
-		} catch (error) {
-			console.warn('Realistic avatar unavailable, using the classic one:', error);
-		}
+/** The realistic avatar, or the classic one if the realistic models cannot load. */
+export async function createCharacter(avatar: Avatar): Promise<GameCharacter> {
+	try {
+		return await realisticCharacter(avatar);
+	} catch (error) {
+		console.warn('Realistic avatar unavailable, using the classic one:', error);
 	}
 	return classicCharacter(avatar);
 }

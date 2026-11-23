@@ -146,8 +146,9 @@ class ContactVerification(UUIDPrimaryKey, CreatedAtMixin, Base):
 AVATAR_CHECKS = (
     CheckConstraint("body IN ('a','b')", name="body"),
     CheckConstraint("hair_style IN ('short','long','bun','buzz')", name="hair_style"),
-    CheckConstraint("top_style IN ('hoodie','tee')", name="top_style"),
-    CheckConstraint("bottom_style IN ('trousers','shorts')", name="bottom_style"),
+    CheckConstraint("top_style IN ('hoodie','tee','shirt')", name="top_style"),
+    CheckConstraint("bottom_style IN ('trousers','jeans','shorts')", name="bottom_style"),
+    CheckConstraint("shoe_style IN ('sneakers','sandals')", name="shoe_style"),
     *(
         CheckConstraint(f"{c} ~ '^#[0-9a-f]{{6}}$'", name=f"{c}_hex")
         for c in (
@@ -181,6 +182,9 @@ class AvatarCustomization(TimestampMixin, Base):
     bottom_style: Mapped[str] = mapped_column(String(10))
     bottom_color: Mapped[str] = mapped_column(String(7))
     shoe_color: Mapped[str] = mapped_column(String(7))
+    shoe_style: Mapped[str] = mapped_column(
+        String(10), default="sneakers", server_default="sneakers"
+    )
     accent_color: Mapped[str] = mapped_column(String(7))
     accessories: Mapped[list[str]] = mapped_column(
         ARRAY(String(12)), default=list, server_default="{}"

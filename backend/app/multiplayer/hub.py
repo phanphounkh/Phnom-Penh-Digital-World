@@ -22,7 +22,7 @@ from typing import Any
 
 from fastapi import WebSocket
 from pydantic import ValidationError
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from shapely.geometry.base import BaseGeometry
 from sqlalchemy import select, text, update
 
@@ -160,6 +160,8 @@ class Room:
     # Active shops: id -> (door x, door z, heading out to the street). Shared with the
     # region template and updated in place when shops change.
     shops: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    # Their floors (the unit's footprint), to know who stands in which shop (the counter).
+    shop_floors: dict[str, BaseGeometry] = field(default_factory=dict)
     # Phase 5, shared with the region template: where vehicles may ride and park, and the
     # vehicles parked in the region (visible from every room).
     area: TravelArea | None = None
@@ -281,6 +283,7 @@ class Hub:
             validator=template.validator,
             spawns=template.spawns,
             shops=template.shops,
+            shop_floors=template.shop_floors,
             area=template.area,
             parked=template.parked,
             footprints=template.footprints,
@@ -425,6 +428,8 @@ class Hub:
         template.validator.set_open_zones([Polygon(row.corners) for row in rows])
         template.shops.clear()  # in place: every room of the region shares this dict
         template.shops.update({str(row.id): (row.door_x, row.door_z, row.heading) for row in rows})
+        template.shop_floors.clear()
+        template.shop_floors.update({str(row.id): Polygon(row.corners) for row in rows})
 
     def catalog_changed(self) -> None:
         """Products or stock changed somewhere: clients reload the storefront list (each shop
@@ -1124,6 +1129,34 @@ class Hub:
                 self._announce_ride(player)
 
     # ── relationships & moderation (called by REST endpoints) ───────────────────────────
+    def at_building(self, user_id: uuid.UUID, building: str, reach: float = 15.0) -> bool:
+        """Is the player in the world, in or at this building (its footprint within `reach`)?"""
+        player = self.by_user.get(user_id)
+        return player is not None and building_near(
+            building, player.x, player.z, player.room.footprints, reach
+        )
+
+    def in_shop(self, user_id: uuid.UUID, shop_id: uuid.UUID, margin: float = 1.0) -> bool:
+        """Is the player in the world, standing in this walk-in shop (its floor, give or take
+        `margin` metres for the doorway)?"""
+        player = self.by_user.get(user_id)
+        if player is None:
+            return False
+        floor = player.room.shop_floors.get(str(shop_id))
+        return floor is not None and floor.distance(Point(player.x, player.z)) <= margin
+
+    def avatar_changed(self, user_id: uuid.UUID, avatar: dict[str, Any]) -> None:
+        """A player saved a new outfit: they wear it at once for everyone who sees them (their
+        card is sent again; clients replace the avatar)."""
+        player = self.by_user.get(user_id)
+        if player is None:
+            return
+        player.avatar = avatar
+        card = player.card()
+        for other in player.room.players.values():
+            if player.sid in other.known:
+                self.send(other, {"t": "spawn", "p": card})
+
     def update_relations(self, user_id: uuid.UUID, relations: dict[str, set[uuid.UUID]]) -> None:
         player = self.by_user.get(user_id)
         if player:

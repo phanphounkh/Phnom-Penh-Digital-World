@@ -382,12 +382,14 @@ def finish_rig(spec, body, rig):
             bind_armature(o, rig)
         activate(o)
         deform = {b.name for b in rig.data.bones}
+        # Keep the skin regions (region_*: which garments hide which skin, cut apart at export).
         for vg in list(o.vertex_groups):
-            if vg.name not in deform:
+            if vg.name not in deform and not vg.name.startswith("region_"):
                 o.vertex_groups.remove(vg)
         if o.vertex_groups:
-            bpy.ops.object.vertex_group_limit_total(group_select_mode="ALL", limit=4)
-            bpy.ops.object.vertex_group_normalize_all(group_select_mode="ALL", lock_active=False)
+            mode = "BONE_DEFORM" if any(vg.name.startswith("region_") for vg in o.vertex_groups) else "ALL"
+            bpy.ops.object.vertex_group_limit_total(group_select_mode=mode, limit=4)
+            bpy.ops.object.vertex_group_normalize_all(group_select_mode=mode, lock_active=False)
         for m in list(o.modifiers):
             if m.type != "ARMATURE":
                 o.modifiers.remove(m)

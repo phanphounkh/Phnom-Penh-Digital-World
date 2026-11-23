@@ -77,9 +77,10 @@ delivery. Phases 3 and 4 can overlap.
   with administrator approval; the seller role is granted in the same step.
 * Exclusive claims guaranteed by the database; evidence and review for units at real
   businesses; disputes; 30-day terms with renewal and expiry; release; transfers; revocation.
-* Seller dashboard: units map, storefront customisation (name EN/KM, tagline, theme, colours,
-  open/closed), products (category policy, photos without metadata, display models, stock),
-  orders with explicit transitions, demo revenue, customer messages.
+* My shop, the seller's panel in the city (it replaced the `/seller` dashboard): spots claimed
+  in person, storefront customisation (name EN/KM, tagline, theme, colours, open/closed),
+  products (category policy, photos without metadata, display models, stock), orders with
+  explicit transitions, demo revenue; customer messages in People.
 * Walk-in 3D storefronts at the real frontage: doorway, sign, awning, shelves with product
   facings and price tags, island table, cart and counter. E picks a product up (held in the
   avatar's hand), E puts it in the cart, E at the counter opens checkout. "Walk there" from the

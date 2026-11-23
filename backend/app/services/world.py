@@ -19,7 +19,7 @@ from app.models import (
     WorldChunk,
     WorldRoom,
 )
-from app.schemas.me import AvatarIn
+from app.schemas.me import AvatarIn, default_avatar
 from app.schemas.world import (
     PlayableRegion,
     StartPosition,
@@ -96,11 +96,11 @@ async def bootstrap(session: AsyncSession, user: User) -> WorldBootstrapOut:
         select(AvatarCustomization).where(AvatarCustomization.user_id == user.id)
     )
     spawn = await geo.spawn_point(session, user.profile.spawn_point_id)
-    if avatar is None or spawn is None:
+    if spawn is None:
         raise AppError(
             status.HTTP_409_CONFLICT,
             "ONBOARDING_INCOMPLETE",
-            "Choose an avatar and a spawn area first.",
+            "Choose your place in Phnom Penh first.",
         )
     return WorldBootstrapOut(
         player=WorldPlayer(
@@ -108,7 +108,10 @@ async def bootstrap(session: AsyncSession, user: User) -> WorldBootstrapOut:
             username=user.username,
             display_name=user.profile.display_name,
             world_visible=bool(user.profile.world_visible),
-            avatar=AvatarIn.model_validate(avatar, from_attributes=True),
+            # No avatar yet (a new player): the default look until they choose one.
+            avatar=AvatarIn.model_validate(avatar, from_attributes=True)
+            if avatar is not None
+            else default_avatar(user.profile.display_name),
         ),
         spawn=spawn,
         start=await start_position(session, user, spawn),

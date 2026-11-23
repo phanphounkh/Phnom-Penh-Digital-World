@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { MerchantInput } from './market';
 import type {
 	Address,
 	Avatar,
@@ -51,6 +52,10 @@ export const me = {
 	saveAvatar: (body: Avatar) => api<Avatar>('/me/avatar', { method: 'PUT', body }),
 	chooseRoles: (body: { roles: string[]; seller_note?: string; driver_note?: string }) =>
 		api<Me>('/me/roles', { method: 'POST', body }),
+	/** At the System Office's counter (the server checks the player is there): one work role. */
+	registerWorkRole: (body: { role: 'seller' | 'driver'; note?: string | null; business?: MerchantInput }) =>
+		api<Me>('/me/work-role', { method: 'POST', body }),
+	leaveWorkRole: () => api<Me>('/me/work-role/leave', { method: 'POST' }),
 	addresses: (o: F = {}) => api<Address[]>('/me/addresses', o),
 	addAddress: (body: {
 		label: string;

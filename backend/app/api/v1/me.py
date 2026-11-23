@@ -20,8 +20,9 @@ from app.schemas.me import (
     ProfileUpdate,
     RoleSelection,
     SpawnChoice,
+    WorkRoleIn,
 )
-from app.services import onboarding
+from app.services import onboarding, work_roles
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -57,6 +58,7 @@ async def put_avatar(data: AvatarIn, user: CurrentUser, session: SessionDep) -> 
         setattr(avatar, field, value)
     await session.commit()
     await session.refresh(avatar)
+    hub.avatar_changed(user.id, data.model_dump())  # players around see the new outfit at once
     return avatar
 
 
@@ -64,6 +66,24 @@ async def put_avatar(data: AvatarIn, user: CurrentUser, session: SessionDep) -> 
 async def choose_roles(data: RoleSelection, user: CurrentUser, session: SessionDep) -> MeOut:
     await onboarding.select_roles(session, user, data)
     await session.commit()
+    return await onboarding.me_out(session, user)
+
+
+@router.post(
+    "/work-role",
+    response_model=MeOut,
+    summary="Register a work role (seller or driver) at the System Office, one at a time",
+)
+async def register_work_role(
+    data: WorkRoleIn, user: CurrentUser, session: SessionDep, ip: ClientIP
+) -> MeOut:
+    await work_roles.register(session, user, data, ip)
+    return await onboarding.me_out(session, user)
+
+
+@router.post("/work-role/leave", response_model=MeOut, summary="Leave your work role")
+async def leave_work_role(user: CurrentUser, session: SessionDep) -> MeOut:
+    await work_roles.leave(session, user)
     return await onboarding.me_out(session, user)
 
 

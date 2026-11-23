@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_AVATAR } from './avatar';
-import { RECOLOR, hairFactor, kindFor, paletteFills, skinFactor, type RealisticManifest } from './realistic';
+import { ORIGINAL_OUTFIT, RECOLOR, hairFactor, kindFor, meshShown, outfitOf, paletteFills, skinFactor, type Outfit, type RealisticManifest, type WardrobeMesh } from './realistic';
 import { EMOTE_CLIP } from './RealisticAnimations';
 import { EMOTES } from '$lib/game/net/protocol';
 
@@ -89,5 +89,62 @@ describe('realistic avatar recolouring', () => {
 		expect(r * 0.5).toBeCloseTo(0.1946, 3); // sRGB 0x7a → linear
 		expect(g).toBeLessThan(r);
 		expect(b).toBeLessThan(g);
+	});
+});
+
+describe('what the realistic character wears', () => {
+	it('avatars saved before garments wear the original outfit, whatever their old styles say', () => {
+		expect(outfitOf({ ...DEFAULT_AVATAR, top_style: 'tee', bottom_style: 'shorts', accessories: ['cap'] })).toEqual(ORIGINAL_OUTFIT);
+		expect(outfitOf({ ...DEFAULT_AVATAR, model: 'outfit', top_style: 'shirt', bottom_style: 'jeans', shoe_style: 'sandals', accessories: ['hat'] })).toEqual({
+			top: 'shirt',
+			bottom: 'jeans',
+			shoes: 'sandals',
+			hat: 'bucket',
+			bag: 'none'
+		});
+	});
+
+	it('shows exactly one choice per slot, straps with their top, and hides covered skin', () => {
+		for (const kind of ['male', 'female'] as const) {
+			const w = manifest.characters[kind].wardrobe!;
+			const outfits: Outfit[] = [
+				ORIGINAL_OUTFIT,
+				{ top: 'tee', bottom: 'shorts', shoes: 'sandals', hat: 'cap', bag: 'backpack' },
+				{ top: 'shirt', bottom: 'jeans', shoes: 'sneakers', hat: 'bucket', bag: 'none' }
+			];
+			for (const outfit of outfits) {
+				const shown = Object.entries(w.meshes as Record<string, WardrobeMesh>).filter(([, info]) => meshShown(info, outfit, w.hidden_when));
+				const garments = shown.filter(([, i]) => i.slot);
+				// Every worn choice has a mesh; nothing else of that slot shows.
+				for (const [slot, variant] of Object.entries(outfit)) {
+					const mine = garments.filter(([, i]) => i.slot === slot);
+					if (variant === 'none') expect(mine).toEqual([]);
+					else expect(mine.length, `${kind} ${slot}.${variant}`).toBeGreaterThan(0);
+					expect(mine.every(([, i]) => i.variant === variant)).toBe(true);
+				}
+				// Backpack parts only for the top being worn.
+				expect(garments.filter(([, i]) => i.with).every(([, i]) => i.with === `top.${outfit.top}`)).toBe(true);
+				const regions = new Set(shown.filter(([, i]) => i.region).map(([, i]) => i.region));
+				expect(regions.has('arms')).toBe(outfit.top !== 'hoodie');
+				expect(regions.has('legs')).toBe(outfit.bottom === 'shorts');
+				expect(regions.has('feet')).toBe(outfit.shoes === 'sandals');
+				expect(regions.has('hair_top')).toBe(outfit.hat === 'none');
+			}
+		}
+	});
+
+	it('recolours the new garments with the avatar colours', () => {
+		for (const kind of ['male', 'female'] as const) {
+			const entry = manifest.characters[kind];
+			const fills = paletteFills(entry, { ...DEFAULT_AVATAR, top_color: '#111111', bottom_color: '#222222', shoe_color: '#333333', accent_color: '#444444' });
+			const colourOf = (cell: string) => fills.find(([x, y]) => x === entry.palette.cells[cell][0] && y === entry.palette.cells[cell][1])?.[3];
+			expect(colourOf('Tee')).toBe('#111111');
+			expect(colourOf('Shirt')).toBe('#111111');
+			expect(colourOf('Jeans')).toBe('#222222');
+			expect(colourOf('Shorts')).toBe('#222222');
+			expect(colourOf('SandalStrap')).toBe('#333333');
+			expect(colourOf('Cap')).toBe('#444444');
+			expect(colourOf('Bucket')).toBe('#444444');
+		}
 	});
 });

@@ -42,7 +42,7 @@ WGS84 `lat`/`lon`; world coordinates are metres (`x` east, `z` = −north).
 | `POST /auth/verification/confirm` | user (20 per 10 min) | Confirm a 6-digit code (5 attempts) |
 | `GET /auth/sessions` / `DELETE /auth/sessions/{id}` | user | List or revoke your sessions |
 | `PATCH /me/profile` | user | Display name, language, visibility |
-| `GET / PUT /me/avatar` | user | Read or replace the avatar customisation |
+| `GET / PUT /me/avatar` | user | Read or replace the avatar customisation. `model`: "avatar" (the original outfit, default) or "outfit" (wear the styles below); `top_style` hoodie/tee/shirt, `bottom_style` trousers/jeans/shorts, `shoe_style` sneakers/sandals, accessories may include `cap` or `hat` (one) and `backpack` |
 | `POST /me/roles` | user, verified | Choose roles: buyer active now, seller and driver pending |
 | `GET / POST /me/addresses`, `DELETE /me/addresses/{id}` | owner only | Private delivery addresses (must be inside Phnom Penh) |
 | `PUT /me/spawn` | user | Public spawn point plus an explicit `world_visible` |
@@ -87,6 +87,7 @@ WGS84 `lat`/`lon`; world coordinates are metres (`x` east, `z` = −north).
 | `GET /merchant/revenue?days=` | owner | Demo revenue per day, refunds, open orders |
 | `GET /cart`, `POST /cart/items {product_id, quantity, shop_id}`, `PATCH / DELETE /cart/items/{id}`, `DELETE /cart` | buyer | Server cart, repriced on every read; stock-checked |
 | `POST /checkout {expected_total_minor, note, age_confirmed}` + `Idempotency-Key` | buyer (20/10 min) | One demo payment, one order per merchant, stock reserved. 409 `PRICE_CHANGED`, `ITEMS_UNAVAILABLE`, `IDEMPOTENCY_KEY_REUSED`; same key and body → same checkout |
+| `POST /shops/{id}/counter {expected_total_minor, age_confirmed}` + `Idempotency-Key` | buyer standing in that shop in the world (20/10 min) | Pay for the basket (cart lines from this shop's merchant) in person: one transaction, order `completed` at once (`in_person`), other shops' lines stay in the cart. 403 `AT_THE_COUNTER`; 409 `SHOP_CLOSED`, `BASKET_EMPTY`, `PRICE_CHANGED`, `ITEMS_UNAVAILABLE`, `INSUFFICIENT_FUNDS` (nothing changes); same key and body → same receipt |
 | `GET /payments/{id}` · `POST /payments/{id}/confirm` · `/cancel` | owner | Demo pay (repeat → same result, `already_confirmed`), cancel; unpaid checkouts expire after 15 min |
 | `GET /orders`, `GET /orders/{id}`, `POST /orders/{id}/cancel`, `POST /orders/{id}/received` | buyer | Track, cancel (refund if paid), confirm collection. Other people's orders are 404 |
 | `GET /admin/merchants?status=` · `POST /admin/merchants/{id}/approve\|reject\|suspend` · `GET /admin/documents/{id}` | admin | Review merchants and documents (download audited) |

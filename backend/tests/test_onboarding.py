@@ -110,3 +110,80 @@ async def test_avatar_validation(client: httpx.AsyncClient):
     assert saved.status_code == 200 and saved.json()["top_color"] == "#aabbcc"
     again = await client.put("/me/avatar", json={**AVATAR, "hair_style": "bun"})
     assert again.json()["hair_style"] == "bun"  # replaced, not duplicated
+
+
+async def test_wardrobe_garments(client: httpx.AsyncClient):
+    """Avatars saved before the wardrobe had garments keep model "avatar" (their original
+    outfit); the wardrobe saves "outfit" with the chosen shirt, jeans, sandals and hat."""
+    await register_verified(client)
+    old = (await client.put("/me/avatar", json=AVATAR)).json()
+    assert old["model"] == "avatar" and old["shoe_style"] == "sneakers"
+    outfit = {
+        **AVATAR,
+        "model": "outfit",
+        "top_style": "shirt",
+        "bottom_style": "jeans",
+        "shoe_style": "sandals",
+        "accessories": ["backpack", "hat"],
+    }
+    saved = await client.put("/me/avatar", json=outfit)
+    assert saved.status_code == 200, saved.text
+    got = (await client.get("/me/avatar")).json()
+    assert {
+        k: got[k] for k in ("model", "top_style", "bottom_style", "shoe_style", "accessories")
+    } == {
+        "model": "outfit",
+        "top_style": "shirt",
+        "bottom_style": "jeans",
+        "shoe_style": "sandals",
+        "accessories": ["backpack", "hat"],
+    }
+    for bad in (
+        {**outfit, "accessories": ["cap", "hat"]},  # one hat at a time
+        {**outfit, "shoe_style": "boots"},
+        {**outfit, "model": "fancy"},
+        {**outfit, "bottom_style": "skirt"},
+    ):
+        assert (await client.put("/me/avatar", json=bad)).status_code == 422, bad
+
+
+async def test_new_players_choose_their_place_and_enter(client: httpx.AsyncClient):
+    """Two steps: verify, then a private place and the spawn area. No avatar or roles first:
+    they get the buyer role on finishing and a default look until they save one in the game."""
+    await register_verified(client)
+    me = (await client.get("/auth/me")).json()
+    assert me["onboarding"]["next_step"] == "location"
+    assert me["onboarding"]["needs_address"] is True  # every new player can buy
+    spawn = {"spawn_point_id": await first_spawn_id(client), "world_visible": True}
+    assert (await client.put("/me/spawn", json=spawn)).status_code == 200
+    r = await client.post("/me/onboarding/complete")
+    assert r.status_code == 409 and r.json()["error"]["details"]["next_step"] == "location"
+    lat, lon = CENTRAL_MARKET
+    address = {"label": "Home", "lat": lat, "lon": lon, "address_line": "Street 130"}
+    assert (await client.post("/me/addresses", json=address)).status_code == 201
+    done = await client.post("/me/onboarding/complete")
+    assert done.status_code == 200, done.text
+    me = (await client.get("/auth/me")).json()
+    assert me["onboarding"]["next_step"] == "world"
+    assert me["onboarding"]["avatar"] is False  # the wardrobe opens on the first visit
+    assert sorted(me["active_roles"]) == ["buyer", "visitor"]
+    boot = (await client.get("/world/bootstrap")).json()
+    assert boot["player"]["avatar"]["top_color"] == "#2f7d6d"
+    assert boot["player"]["avatar"]["avatar_name"] == me["display_name"][:32]
+    assert (await client.put("/me/avatar", json=AVATAR)).status_code == 200
+    assert (await client.get("/auth/me")).json()["onboarding"]["avatar"] is True
+
+
+async def test_a_new_player_enters_the_world_with_the_default_look(client: httpx.AsyncClient):
+    from tests.conftest import expect, world_socket
+
+    await register_verified(client)
+    lat, lon = CENTRAL_MARKET
+    address = {"label": "Home", "lat": lat, "lon": lon, "address_line": "Street 130"}
+    await client.post("/me/addresses", json=address)
+    spawn = {"spawn_point_id": await first_spawn_id(client), "world_visible": True}
+    await client.put("/me/spawn", json=spawn)
+    assert (await client.post("/me/onboarding/complete")).status_code == 200
+    async with world_socket(client) as ws:
+        welcome = await expect(ws, "welcome")
+    assert welcome["you"]["u"] == "sokha"

@@ -13,6 +13,7 @@ from app.schemas.market import (
     CartOut,
     CartQuantityIn,
     CheckoutIn,
+    CounterIn,
     OrderOut,
     PaymentOut,
 )
@@ -67,6 +68,25 @@ async def create_checkout(
     idempotency_key: str | None = Header(default=None, max_length=64),
 ) -> PaymentOut:
     return await checkout.checkout(session, user, data, idempotency_key, ip)
+
+
+@router.post(
+    "/shops/{shop_id}/counter",
+    response_model=PaymentOut,
+    status_code=201,
+    dependencies=[Depends(rate_limit("checkout", 20, 600))],
+)
+async def pay_at_counter(
+    shop_id: uuid.UUID,
+    data: CounterIn,
+    user: CurrentUser,
+    session: SessionDep,
+    ip: ClientIP,
+    idempotency_key: str | None = Header(default=None, max_length=64),
+) -> PaymentOut:
+    """Pay for the basket at a walk-in shop's counter, standing in the shop: the goods are
+    handed over at once (demo payment)."""
+    return await checkout.counter_sale(session, user, shop_id, data, idempotency_key, ip)
 
 
 @router.get("/payments/{intent_id}", response_model=PaymentOut)

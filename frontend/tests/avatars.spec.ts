@@ -1,8 +1,7 @@
 /**
  * Realistic avatars end to end (isolated stack): two players with different builds see
- * themselves and each other as realistic models, jog, sprint and jump, play an emote (seen by the other player),
- * switch to the classic style and back at runtime; the avatar editor previews the realistic
- * model. Screenshots go to test-results/avatars/ (not committed).
+ * themselves and each other as realistic models, jog, sprint and jump, play an emote (seen by the other player).
+ * The avatar is made in the city (tests/wardrobe.spec.ts). Screenshots go to test-results/avatars/ (not committed).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
@@ -66,7 +65,7 @@ async function closeUp(page: Page) {
 	await page.waitForTimeout(1500);
 }
 
-test('realistic avatars: builds, remote players, jog/sprint/jump, emotes and the classic switch', async ({ browser, baseURL }) => {
+test('realistic avatars: builds, remote players, jog/sprint/jump and emotes', async ({ browser, baseURL }) => {
 	test.setTimeout(600_000);
 	const id = Date.now().toString(36).slice(-6);
 	const a = await onboard(browser, baseURL!, `real_${id}`, { body: 'a', top_color: '#e9e9ee', accent_color: '#2b4ea0', bottom_color: '#1b1b1e' });
@@ -123,39 +122,8 @@ test('realistic avatars: builds, remote players, jog/sprint/jump, emotes and the
 	await b.page.waitForTimeout(800);
 	await b.page.screenshot({ path: `${SHOTS}/realistic-sampeah.png` });
 
-	// Switch to classic and back at runtime (Settings → Avatars).
-	await a.page.getByRole('button', { name: 'Settings' }).click();
-	const styles = a.page.getByTestId('avatar-style');
-	await styles.getByRole('radio', { name: 'Classic' }).click();
-	await expect.poll(async () => (await avatar(a.page)).style, { timeout: 30_000 }).toBe('classic');
-	await expect.poll(() => remoteModel(a.page, `realb_${id}`), { timeout: 30_000 }).not.toBe('realistic:female');
-	await a.page.screenshot({ path: `${SHOTS}/classic-switch.png` });
-	await styles.getByRole('radio', { name: 'Realistic' }).click();
-	await expect.poll(async () => (await avatar(a.page)).model, { timeout: 30_000 }).toBe('realistic:male');
-	await expect.poll(() => remoteModel(a.page, `realb_${id}`), { timeout: 30_000 }).toBe('realistic:female');
-	// The choice is remembered for the next visit.
-	expect(await ev<string>(a.page, `localStorage.getItem('ppw.avatarStyle')`)).toBe('realistic');
-
 	expect(a.errors, a.errors.join('\n')).toEqual([]);
 	expect(b.errors, b.errors.join('\n')).toEqual([]);
 	await a.context.close();
 	await b.context.close();
-});
-
-test('the avatar editor previews the realistic model and can switch to classic', async ({ browser, baseURL }) => {
-	test.setTimeout(240_000);
-	const id = Date.now().toString(36).slice(-6);
-	const { page, errors, context } = await account(browser, baseURL!, `prev_${id}`);
-	await page.goto('/onboarding/avatar');
-	const preview = page.getByTestId('avatar-preview');
-	await expect(preview).toHaveAttribute('data-ready', 'true', { timeout: 120_000 });
-	await expect(preview).toHaveAttribute('data-style', 'realistic');
-	await page.waitForTimeout(800);
-	await preview.screenshot({ path: `${SHOTS}/editor-realistic.png` });
-	await preview.getByRole('radio', { name: 'Classic' }).click();
-	await expect(preview).toHaveAttribute('data-style', 'classic', { timeout: 60_000 });
-	await preview.getByRole('radio', { name: 'Realistic' }).click();
-	await expect(preview).toHaveAttribute('data-style', 'realistic', { timeout: 60_000 });
-	expect(errors, errors.join('\n')).toEqual([]);
-	await context.close();
 });

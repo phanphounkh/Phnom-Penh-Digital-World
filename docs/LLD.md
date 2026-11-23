@@ -36,15 +36,20 @@
 ## Onboarding state machine
 
 ```text
-verify ──▶ avatar ──▶ role ──▶ location ──▶ complete ──▶ world
- (contact      (avatar     (roles_chosen_at   (spawn + explicit visibility
-  verified)     saved)      set; visitor-only  + address if buyer)
-                            is valid)
+verify ──▶ location ("your place") ──▶ complete ──▶ world (the wardrobe opens: make the avatar)
+ (contact    (a private place anywhere in Phnom Penh, the public start area (the nearest one
+  verified)   unless picked) and an explicit visibility choice)
 ```
 
 `GET /auth/me` reports `onboarding.next_step`. `POST /me/onboarding/complete` returns 409 with
-`details.next_step` if a step is missing. The web app's onboarding layout lets users revisit
-earlier steps but never skip ahead.
+`details.next_step` if a step is missing. A new player (no roles chosen yet) gives an address
+(everyone can buy) and gets `visitor` + `buyer` on completing; work roles (seller, driver) are
+registered after that. There is no avatar step: until a player saves one,
+`onboarding.avatar` is false, the world bootstrap and the world socket use the default look
+(`schemas/me.py: default_avatar`, the same values as the client's `DEFAULT_AVATAR`), and the
+city opens the wardrobe in its welcome mode (no Cancel; "Enter the city" saves). The start is a
+public spawn area, never the home itself (other players would see where the player lives).
+The web app's onboarding layout lets users revisit earlier steps but never skip ahead.
 
 ## Roles
 
@@ -53,6 +58,25 @@ becomes active immediately (verified contact required). `seller` and `driver` st
 and an admin approves or rejects them (`/admin/role-requests/{id}/approve|reject`, audited).
 A rejected role can be requested again. Unticking a role sets it to `revoked`. `admin` cannot
 be requested.
+
+## System Office and work roles (`services/work_roles.py`, `SystemOffice.svelte`)
+
+Work roles (seller, driver) are registered in the city, at the System Office: OSM building
+1518 (`placements.ts SYSTEM_OFFICE_ID`, `multiplayer/buildings.py SYSTEM_OFFICE`, the same id in
+every import), 30 m south of the Central Market spawn, with a generated `office` interior: a
+service hall (the counter with the "Register a Work Role" service, waiting chairs, a ticket
+machine, the notice board) and a records room; one floor. Places lists it with a route.
+
+* E at the counter opens the office panel (`Buildings.onService`). `POST /me/work-role
+  {role, note?, business?}` registers: a seller sends their business (the merchant application,
+  `merchants.apply`: the seller role pending), a driver a note (the driver role pending). An
+  administrator approves either, as before. `POST /me/work-role/leave` withdraws the role (a
+  pending seller application leaves the admin queue as "withdrawn"; a seller holding a shop
+  spot releases it first).
+* The server accepts both only while the player is in the world at the office
+  (`hub.at_building`: within 15 m of its footprint, from their live position), and keeps one
+  work role at a time: `ONE_WORK_ROLE` (409) for a second one, also on `POST /me/roles` and
+  `POST /merchant` (which stay for tools and tests).
 
 ## World chunk payload (`GET /world/chunks/{ix}_{iz}`)
 
@@ -81,8 +105,8 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/api/*` | Typed client (CSRF echo, error envelope → `ApiError` with `fieldErrors`), endpoint functions, types |
 | `lib/stores/session.svelte.ts` | Session store: request-scoped `page.data.user` during SSR (no cross-request leaks), client override after mutations; routing helpers |
 | `lib/geo/projection.ts` | proj4 mirror of the backend projection; chunk keys; compass/yaw helpers |
-| `lib/game/avatar/avatar.ts` | Classic avatar: loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
-| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider) for either style; `realistic` (default) or `classic`, a local display preference in `localStorage` (`ppw.avatarStyle`); falls back to classic if the realistic models cannot load |
+| `lib/game/avatar/avatar.ts` | Classic avatar (the fallback only): loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching; the colour palettes and their names |
+| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider, in-place `update`): the realistic avatar, or the classic one if the realistic models cannot load |
 | `lib/game/avatar/realistic.ts` | Realistic avatars (`avatar-generator/`): loads `characters/realistic/{male,female}.glb` + `manifest.json`, clones with `SkeletonUtils`, recolours per player (skin tint, hair factor, repainted palette cells), adds a `RightWrist` socket for held products |
 | `lib/game/avatar/RealisticAnimations.ts` | Gait clips (Idle/Walk/Run with hysteresis, stride phase kept, speed-matched playback), emote clips (Wave, Greet = sampeah, Cheer, Dance), IK carry pose; `RealisticEmotes` facade |
 | `lib/game/avatar/ik.ts` | Rig-agnostic bone aiming and two-bone IK (any bone orientation) |
@@ -322,7 +346,7 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 | Client → server | Server → client |
 |---|---|
 | `move {x,z,yaw,s,l?}` (10 Hz while it changes; `l`: storey, absent on the ground floor) | `welcome {you, room, tick, x, z, yaw, online}` |
-| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}`, `despawn {id, why}` |
+| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}` (again when they save a new outfit), `despawn {id, why}` |
 | `mount {v}`, `dismount` (Phase 5) | `ride {id, v: {id,k,c} \| null, x?, z?, yaw?}` (position only in your own), `vspawn {v: {id,k,c,x,z,yaw,mine?,name?}}`, `vdespawn {id}` |
 | `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s,l?],…]}`, changed players only |
 | `bset {b, k: door\|light\|app, id, on}`, `bget {b}` | `bstate {b, s: {"door:front": true, …}, mine?, all?}` |
@@ -393,9 +417,69 @@ frontage, n inward). The doorway is a 5 m gap: the collision world ignores wall 
 the 16 nearest doors), so no chunk geometry is rebuilt. `Storefronts.ts` builds the interior
 (inward-facing walls, floor, ceiling, Blender shelves and table, CampusEats counter and cart),
 the sign (canvas, EN + KM) and the awning, loads products within 45 m (several facings each,
-price tags) and resolves the E-key interaction: pick up (held at the right wrist, carry pose),
-put in the cart (`POST /cart/items`), put back, pay at the counter, browse at the door.
-The server allows positions on an open shop's floor (`MovementValidator.set_open_zones`).
+price tags) and resolves the E-key interaction: at a shelf, into the basket
+(`POST /cart/items` with the shop); at the counter, the counter panel; at the door, browse.
+The basket is the cart lines from the shop's merchant: while the player stands in that shop the
+avatar carries a red shopping basket with up to six of the picks in it, and after paying a kraft
+paper bag in the shop's colours for a minute (both hang upright from the right hand, carry pose;
+put away while riding). The cart by the door is decoration. The server allows positions on an
+open shop's floor (`MovementValidator.set_open_zones`).
+
+**Paying at the counter (`POST /shops/{id}/counter`, `checkout.counter_sale`).** Buying in
+person needs nothing from the seller. One transaction takes the buyer's cart lines from this
+shop's merchant, creates the payment intent and order (`fulfillment` pickup at this shop), takes
+the demo payment, and completes the order at once (`paid → completed` is a system move used only
+here; the history notes "Sold in person at the counter"; the seller's wallet is settled). Lines
+from other shops stay in the cart. It is accepted only while the player stands on that shop's
+floor in the world (`hub.in_shop`: the unit's footprint, 1 m margin for the doorway, from their
+live position) and the shop is open. Errors: `403 AT_THE_COUNTER`, `409 SHOP_CLOSED`,
+`BASKET_EMPTY`, `PRICE_CHANGED`, `ITEMS_UNAVAILABLE`, `INSUFFICIENT_FUNDS` (then nothing changes:
+basket, stock and wallet stay as they were). The `Idempotency-Key` makes a retry return the same
+receipt. Orders report `in_person`. The seller's world session gets
+`{"t": "order", "sold": true, "total"}` ("Sold in person at your counter"). Orders placed ahead
+for pickup are collected at the same counter (`POST /orders/{id}/received`).
+
+**Shopkeepers (`game/shop/Shopkeepers.ts`).** A person stands behind each open shop's counter
+(between the counter and the back wall, facing the door) and serves walk-in customers on the
+seller's behalf. Who it is follows from the shop's id (`keeperFor`: body, a Khmer name, skin, hair,
+clothes; FNV-1a hash), so every player sees the same shopkeeper; the realistic character is the
+players' own pipeline (`createCharacter`), with an apron in the shop's colours fitted in front of
+the clothes (measured on the skinned outfit in the idle pose; bib on Spine2, skirt on the hips,
+neck straps). Name tag over the counter. Behaviour, all local to each player's client (nothing on
+the network): a sampeah and "សួស្តី! Welcome to …" when the player walks in (again after 45 s),
+turning to face them (at most 75° from the door, 4 rad/s), talking at the counter (the counter
+panel's lines: the price, an order ready to collect, thanks with a sampeah after paying), speech
+bubbles drawn over the shop's walls (they only come while the player is inside). Cost: one
+character (~26–30k triangles, one mixer) per shopkeeper, so only at the nearest open shops within
+30 m (kept to 40 m; a shopkeeper gives its place to a shop at least 3 m nearer: `planKeepers`),
+at most 2, 1 on the low graphics setting; one out of the camera's view is neither drawn nor
+animated (skinned meshes are not culled by three.js).
+
+**My shop (the seller's panel, in the city: `components/myshop/`).** Sellers run their shop
+without leaving the game: the toolbar's shop button or **B** (also ☰ → My shop, the System
+Office's counter after registering, and `/world?panel=shop`, where the old `/seller` address now
+redirects) opens a dark glass panel over the city (a bottom sheet on a phone; opaque on the low
+quality setting). Walking still works while it is open. Tabs:
+
+* **Today** (`TodayTab`): a checklist until the shop is ready (approved, a spot, name and
+  tagline, three products with photos, open), sales today / orders to do / last 30 days, and new
+  (paid) orders with Accept.
+* **Orders** (`OrdersBoard`): columns New, Preparing, Ready (Done with "All"); each order shows
+  its next move from `allowed` as one button; cancel-and-refund sits behind "More", with a
+  reason and a confirmation. It reloads on the world's `order` message (`ordersVersion`).
+* **Products** (`ProductsGrid`): cards (photo, price tag, stock, status), filters (on the shelf,
+  low stock, hidden or checked), one editor (name EN/KM, price, stock, category with its policy,
+  the shelf model as tiles, description, photo upload, hide/show, remove with a confirmation).
+* **Shop** (`ShopLook`): name EN/KM, tagline, theme, colour pairs or own colours, open; a live
+  sign-and-awning preview. A seller with several spots picks the shop in the header.
+* **Spot** (`SpotsTab`): the spots held (renew, hand over to another seller, give up, with a
+  confirmation; route there), handovers to accept, decline or withdraw, and the 12 free spots
+  nearest the player (`GET /market/units` within ±0.004° of their position, distance and compass
+  direction from the city's projection). A spot is claimed in person: Go there draws the route;
+  Claim appears within 25 m of it. This is a client rule: the claim API does not check position.
+* **Business** (`BusinessForm`): the merchant details.
+
+Customer messages are in People (**P**), as for every player.
 
 ## Transport (Phase 5)
 
@@ -447,9 +531,56 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   grey with mean 0.5), measured foot-sliding-free walk/run speeds, height.
 * Colour choices map to cells in `RECOLOR` (`realistic.ts`): top → jacket (male) or hoodie
   (female); bottom → pants; shoes → shoe upper; accent → panels, backpack and shoe accents.
-  Hair style, garment styles and accessories apply to the classic style only.
+  Hair style, garment styles and accessories are stored but not drawn: the realistic avatar is
+  the game's only look. The classic avatar (`avatar.ts`) is drawn only if the realistic models
+  cannot load (`createCharacter` falls back to it), so the game never ends up without avatars.
 * `realistic.test.ts` fails if a GLB lacks a bone, clip, recolourable material or palette cell
   the game uses.
+
+## Wardrobe (in the game: `Wardrobe.svelte`, `Drum.svelte`, `wardrobe.ts`)
+
+* Opened with **O** or the shirt button. The camera turns to face the player
+  (`CityController.setShowcase`: beside a glass panel on wide screens, above a glass sheet on
+  phones), movement keys are ignored, the HUD and other players' name tags hide.
+* What the realistic avatar shows, as wheels (`wardrobe.ts`): top (style: the original hoodie,
+  under a jacket on build A; a t-shirt; a short-sleeved button shirt; and a colour), bottoms
+  (joggers, jeans, shorts; colour), shoes (sneakers, sandals; colour), hat (none, cap, bucket
+  hat; the backpack's colour), backpack (on or off; its colour also trims the jacket's panels,
+  the shoes and the hat), hair colour, and body (build, skin tone). Turned with the mouse wheel or
+  touchpad (one choice per notch), the arrow keys, a drag, or a click; `[` and `]` change
+  category. "Surprise me" is a random outfit (`randomOutfit`).
+* Garments and old avatars: an avatar's `model` is "avatar" for avatars saved before garments
+  existed (and new players until they save): the realistic character wears the original outfit
+  (hoodie, joggers, sneakers, backpack) whatever its old style fields say (`realistic.outfitOf`),
+  so nobody's look changed. The wardrobe opens such an avatar `dressed()` in that outfit and
+  saves `model: "outfit"`, after which `top_style` (hoodie | tee | shirt), `bottom_style`
+  (trousers | jeans | shorts), `shoe_style` (sneakers | sandals) and the accessories `cap`/`hat`
+  (a bucket hat, one hat at a time) and `backpack` are worn.
+* The realistic GLB holds every garment as its own mesh; the manifest's `wardrobe` says which
+  mesh is which choice (`slot`, `variant`, `with`: backpack straps, prints and the flag patch are
+  fitted per top) or which `region` of skin it is (arms, legs, ankles, feet: kept only where some
+  choice shows them) and the hair on top of the head (and head-worn sunglasses) that hides under a
+  hat; `hidden_when` lists the garments that hide each region. `realistic.meshShown` applies it:
+  a change of garment is a visibility change in place, never a rebuild. About 20–30k triangles
+  and 14–16 draw calls per character, whatever is worn.
+* Every turn is worn at once (`CityController.setAvatar`: colours in place, another build is a
+  rebuild, `GameCharacter.update` says which; a product held in a shop moves to the new hands).
+  Save → `PUT /me/avatar`, then the hub sends the player's card again (`spawn`) to everyone who
+  sees them, so they see the new outfit without reconnecting. Cancel or Escape puts back what
+  was worn.
+* Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
+* The toolbar's pop-ups (People, Places, vehicles, Cart, Settings, Controls, ☰ and the wallet,
+  delivery jobs and shop pages it opens) and My shop use the same dark glass: `.glass-sheet` in `app.css`,
+  over an undimmed city. Inside it the light palette is remapped (text light; white and paper
+  surfaces faint glass tiles; the selected tab a light chip; primary buttons saffron), so the
+  panel components are unchanged; `.solid` on `low` quality.
+* The HUD's bottom row in the same glass: bottom left a round see-through minimap (136 px, north
+  up; `drawMinimap` paints a light teal tint, light roads with saffron main roads, faint
+  buildings, a heading cone and arrow; the scale bar is a true 100 m) and the chat beside it (a
+  slim bar: channel, message, Send; key hints Enter and Tab inside it; the log only shows once
+  someone talks). Bottom right the greetings dock (👋 🙏 🎉 💃, keys 1–4, names on hover) over the
+  network and frame-rate chips, the speedometer above it when riding. On a phone the minimap is
+  96 px (tap to expand), and the greetings, named, open with the chat.
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

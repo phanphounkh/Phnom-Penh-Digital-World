@@ -88,6 +88,14 @@ async def apply(session: AsyncSession, user: User, data: MerchantIn, ip: str) ->
         raise AppError(
             status.HTTP_403_FORBIDDEN, "VERIFY_FIRST", "Verify your e-mail or phone first."
         )
+    driving = any(
+        r.role == RoleName.DRIVER and r.status in (RoleStatus.ACTIVE, RoleStatus.PENDING)
+        for r in user.roles
+    )
+    if driving:
+        raise conflict(
+            "ONE_WORK_ROLE", "You are a driver. One work role at a time: leave it first."
+        )
     merchant = await merchant_of(session, user, lock=True)
     fields = data.model_dump()
     if merchant is not None and merchant.status != "rejected":

@@ -53,6 +53,7 @@ from app.schemas.market import (
     CartLineOut,
     CartOut,
     CheckoutIn,
+    CounterIn,
     OrderEventOut,
     OrderItemOut,
     OrderOut,
@@ -66,12 +67,13 @@ from app.utils.time import utcnow
 MAX_LINES = 30
 MAX_QUANTITY = 20
 IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_\-]{8,64}$")
+IN_PERSON = "Sold in person at the counter"
 
 # Explicit order state machine (Part 8.3). Delivery states are driven by Phase 6.
 TRANSITIONS: dict[str, set[str]] = {
     "draft": {"pending_payment", "cancelled"},
     "pending_payment": {"paid", "cancelled"},
-    "paid": {"merchant_accepted", "refunded"},
+    "paid": {"merchant_accepted", "completed", "refunded"},
     "merchant_accepted": {"preparing", "refunded"},
     "preparing": {"ready_for_pickup", "refunded"},
     "ready_for_pickup": {"completed", "assigned_to_driver", "refunded"},
@@ -103,6 +105,7 @@ ACTOR_MOVES: dict[str, set[tuple[str, str]]] = {
     "system": {
         ("pending_payment", "paid"),
         ("pending_payment", "cancelled"),
+        ("paid", "completed"),  # bought in person at the counter: handed over at once
         ("delivered", "completed"),
     },
     "driver": {
@@ -304,10 +307,13 @@ async def remove_item(session: AsyncSession, user: User, product_id: uuid.UUID |
 # ── checkout ─────────────────────────────────────────────────────────────────────────
 
 
-def _request_hash(data: CheckoutIn) -> str:
+def _request_hash(data: CheckoutIn, scope: str = "") -> str:
     """Fingerprint of the checkout request body. A retry with the same Idempotency-Key must
-    send the same body (the cart is consumed by the first attempt, so it is not included)."""
+    send the same body (the cart is consumed by the first attempt, so it is not included).
+    `scope` tells a counter sale (its shop) from an ordinary checkout."""
     body = data.model_dump(mode="json")
+    if scope:
+        body["scope"] = scope
     return hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
 
 
@@ -320,12 +326,12 @@ async def _intent_for_key(session: AsyncSession, user: User, key: str) -> Paymen
 
 
 async def _replay(
-    session: AsyncSession, user: User, key: str, data: CheckoutIn
+    session: AsyncSession, user: User, key: str, data: CheckoutIn, scope: str = ""
 ) -> PaymentOut | None:
     intent = await _intent_for_key(session, user, key)
     if intent is None:
         return None
-    if intent.request_hash != _request_hash(data):
+    if intent.request_hash != _request_hash(data, scope):
         raise conflict(
             "IDEMPOTENCY_KEY_REUSED",
             "This Idempotency-Key was used for a different checkout request.",
@@ -333,28 +339,18 @@ async def _replay(
     return await payment_out(session, intent, user)
 
 
-async def checkout(
-    session: AsyncSession, user: User, data: CheckoutIn, key: str | None, ip: str
-) -> PaymentOut:
-    require_buyer(user)
-    if not key or not IDEMPOTENCY_KEY.fullmatch(key):
-        raise bad_request(
-            "IDEMPOTENCY_KEY_REQUIRED", "Send an Idempotency-Key header (8–64 letters/digits)."
-        )
-    if not settings.demo_payments_enabled:
-        raise AppError(status.HTTP_403_FORBIDDEN, "PAYMENTS_DISABLED", "Checkout is disabled.")
-    replay = await _replay(session, user, key, data)
-    if replay is not None:
-        return replay  # same key and body: the same checkout, no new orders
-
-    cart = await _cart(session, user, lock=True)  # one checkout at a time per buyer
-    replay = await _replay(session, user, key, data)  # a concurrent twin may have won
-    if replay is not None:
-        return replay
-    items = list(cart.items) if cart else []
-    if not items:
-        raise conflict("CART_EMPTY", "Your cart is empty.")
-
+async def _create_orders(
+    session: AsyncSession,
+    user: User,
+    items: list[CartItem],
+    data: CheckoutIn,
+    key: str,
+    *,
+    scope: str = "",
+    shop_id: uuid.UUID | None = None,
+) -> tuple[PaymentIntent, list[Order]]:
+    """Check and price these cart lines under row locks, reserve their stock, and create one
+    payment intent with one order per merchant (not committed; the cart is left as it is)."""
     # Lock stock rows in a fixed order (no deadlocks between concurrent checkouts).
     product_ids = sorted({i.product_id for i in items})
     inventory = {
@@ -450,7 +446,7 @@ async def checkout(
     intent = PaymentIntent(
         buyer_id=user.id,
         idempotency_key=key,
-        request_hash=_request_hash(data),
+        request_hash=_request_hash(data, scope),
         amount_minor=total,
         status="requires_confirmation",
         expires_at=utcnow() + timedelta(minutes=settings.payment_expiry_minutes),
@@ -461,9 +457,11 @@ async def checkout(
     except IntegrityError as exc:
         await session.rollback()
         raise conflict("IDEMPOTENCY_CONFLICT", "This checkout is already being processed.") from exc
+    orders: list[Order] = []
     for merchant_id, lines in by_merchant.items():
         subtotal = sum(products[i.product_id].price_minor * i.quantity for i in lines)
-        pickup = next((i.shop_id for i in lines if i.shop_id), None) or await session.scalar(
+        pickup = shop_id or next((i.shop_id for i in lines if i.shop_id), None)
+        pickup = pickup or await session.scalar(
             select(Shop.id)
             .where(Shop.merchant_id == merchant_id, Shop.status == "active")
             .order_by(Shop.created_at)
@@ -500,9 +498,36 @@ async def checkout(
             )
         )
         session.add(order)
+        orders.append(order)
         if destination:
             await session.flush()
             await delivery.create_job(session, order, *destination)
+    return intent, orders
+
+
+async def checkout(
+    session: AsyncSession, user: User, data: CheckoutIn, key: str | None, ip: str
+) -> PaymentOut:
+    require_buyer(user)
+    if not key or not IDEMPOTENCY_KEY.fullmatch(key):
+        raise bad_request(
+            "IDEMPOTENCY_KEY_REQUIRED", "Send an Idempotency-Key header (8–64 letters/digits)."
+        )
+    if not settings.demo_payments_enabled:
+        raise AppError(status.HTTP_403_FORBIDDEN, "PAYMENTS_DISABLED", "Checkout is disabled.")
+    replay = await _replay(session, user, key, data)
+    if replay is not None:
+        return replay  # same key and body: the same checkout, no new orders
+
+    cart = await _cart(session, user, lock=True)  # one checkout at a time per buyer
+    replay = await _replay(session, user, key, data)  # a concurrent twin may have won
+    if replay is not None:
+        return replay
+    items = list(cart.items) if cart else []
+    if not items:
+        raise conflict("CART_EMPTY", "Your cart is empty.")
+
+    intent, orders = await _create_orders(session, user, items, data, key)
     await session.execute(delete(CartItem).where(CartItem.cart_id == cart.id))
     audit.record(
         session,
@@ -511,8 +536,8 @@ async def checkout(
         target_type="payment_intent",
         target_id=intent.id,
         ip=ip,
-        amount_minor=total,
-        orders=len(by_merchant),
+        amount_minor=intent.amount_minor,
+        orders=len(orders),
     )
     await session.commit()
     return await payment_out(session, await _reload_intent(session, intent.id), user)
@@ -671,14 +696,7 @@ async def confirm_payment(
         await session.commit()
         raise conflict("PAYMENT_EXPIRED", "This checkout expired. Your items were released.")
     orders = await _locked_orders(session, intent)
-    if sum(o.total_minor for o in orders) != intent.amount_minor:
-        raise conflict("AMOUNT_MISMATCH", "The payment does not match the orders.")
-    await wallet.pay(session, user, intent.id, intent.amount_minor)
-    intent.status = "succeeded"
-    intent.succeeded_at = utcnow()
-    intent.reference = "DEMO-" + secrets.token_hex(6).upper()
-    for order in orders:
-        await _move(session, order, "paid", actor=user.id, role="system", note="Demo payment")
+    await _take_payment(session, user, intent, orders)
     audit.record(
         session,
         "payment.succeeded",
@@ -694,13 +712,123 @@ async def confirm_payment(
     return await payment_out(session, await _reload_intent(session, intent.id), user)
 
 
-def _notify_merchants(session: AsyncSession, orders: list[Order]) -> None:
+async def _take_payment(
+    session: AsyncSession, user: User, intent: PaymentIntent, orders: list[Order]
+) -> None:
+    """The demo payment: the buyer's wallet pays the intent and its orders are paid."""
+    if sum(o.total_minor for o in orders) != intent.amount_minor:
+        raise conflict("AMOUNT_MISMATCH", "The payment does not match the orders.")
+    await wallet.pay(session, user, intent.id, intent.amount_minor)
+    intent.status = "succeeded"
+    intent.succeeded_at = utcnow()
+    intent.reference = "DEMO-" + secrets.token_hex(6).upper()
+    for order in orders:
+        await _move(session, order, "paid", actor=user.id, role="system", note="Demo payment")
+
+
+async def counter_sale(
+    session: AsyncSession,
+    user: User,
+    shop_id: uuid.UUID,
+    data: CounterIn,
+    key: str | None,
+    ip: str,
+) -> PaymentOut:
+    """Pay at a walk-in shop's counter for the basket (the cart lines from this shop's
+    merchant), in person: one transaction creates the order, takes the demo payment and hands
+    the goods over (completed at once, the seller paid). Nothing waits for the seller.
+
+    Only for a player standing in that shop in the city (from their live position). Other
+    shops' lines stay in the cart. If anything fails (stock, price, funds), nothing changes.
+    """
+    from app.multiplayer.hub import hub
+
+    require_buyer(user)
+    if not key or not IDEMPOTENCY_KEY.fullmatch(key):
+        raise bad_request(
+            "IDEMPOTENCY_KEY_REQUIRED", "Send an Idempotency-Key header (8–64 letters/digits)."
+        )
+    if not settings.demo_payments_enabled:
+        raise AppError(status.HTTP_403_FORBIDDEN, "PAYMENTS_DISABLED", "Checkout is disabled.")
+    as_checkout = CheckoutIn(
+        expected_total_minor=data.expected_total_minor,
+        fulfillment="pickup",
+        age_confirmed=data.age_confirmed,
+    )
+    scope = f"counter:{shop_id}"
+    replay = await _replay(session, user, key, as_checkout, scope)
+    if replay is not None:
+        return replay  # the same sale (a retried request): the same receipt
+    shop = await session.get(Shop, shop_id)
+    if shop is None or shop.status != "active":
+        raise not_found("Shop")
+    if not hub.in_shop(user.id, shop.id):
+        raise AppError(
+            status.HTTP_403_FORBIDDEN,
+            "AT_THE_COUNTER",
+            f"Pay at the counter: walk into {shop.name} in the city first.",
+        )
+    if not shop.is_open:
+        raise conflict("SHOP_CLOSED", f"{shop.name} is closed.")
+
+    cart = await _cart(session, user, lock=True)  # one checkout at a time per buyer
+    replay = await _replay(session, user, key, as_checkout, scope)
+    if replay is not None:
+        return replay
+    lines = list(cart.items) if cart else []
+    owners = dict(
+        (
+            await session.execute(
+                select(Product.id, Product.merchant_id).where(
+                    Product.id.in_([i.product_id for i in lines])
+                )
+            )
+        ).all()
+    )
+    basket = [i for i in lines if owners.get(i.product_id) == shop.merchant_id]
+    if not basket:
+        raise conflict("BASKET_EMPTY", "Your basket is empty: pick something from the shelves.")
+
+    intent, orders = await _create_orders(
+        session, user, basket, as_checkout, key, scope=scope, shop_id=shop.id
+    )
+    await session.flush()
+    orders = await _locked_orders(session, intent)  # loaded with their merchant and history
+    await _take_payment(session, user, intent, orders)
+    for order in orders:
+        await _move(session, order, "completed", actor=user.id, role="system", note=IN_PERSON)
+    await session.execute(
+        delete(CartItem).where(
+            CartItem.cart_id == cart.id, CartItem.product_id.in_([i.product_id for i in basket])
+        )
+    )
+    audit.record(
+        session,
+        "counter.sale",
+        actor=user.id,
+        target_type="payment_intent",
+        target_id=intent.id,
+        ip=ip,
+        amount_minor=intent.amount_minor,
+        shop=str(shop.id),
+        demo=True,
+    )
+    await session.commit()
+    _notify_merchants(session, orders, sold=True)
+    hub.catalog_changed()  # the shelves around show the new stock (sold out, fewer left)
+    return await payment_out(session, await _reload_intent(session, intent.id), user)
+
+
+def _notify_merchants(session: AsyncSession, orders: list[Order], sold: bool = False) -> None:
     from app.multiplayer.hub import hub
 
     for order in orders:
         owner = order.merchant.owner_id if order.merchant else None
         if owner:
-            hub.notify_user(owner, {"t": "order", "number": order.number, "status": order.status})
+            message = {"t": "order", "number": order.number, "status": order.status}
+            if sold:  # sold in person at the counter: nothing for the seller to do
+                message |= {"sold": True, "total": order.total_minor}
+            hub.notify_user(owner, message)
 
 
 async def cancel_payment(session: AsyncSession, user: User, intent_id: uuid.UUID) -> PaymentOut:
@@ -811,6 +939,7 @@ async def order_out(
         items=[OrderItemOut.model_validate(i) for i in order.items],
         events=[OrderEventOut.model_validate(e) for e in order.events],
         refunded_minor=int(refunded or 0),
+        in_person=any(e.note == IN_PERSON for e in order.events),
         allowed=sorted(
             b
             for a, b in ACTOR_MOVES.get(viewer, set())

@@ -21,7 +21,7 @@ function planFor(w: number, d: number, h = 7): Plan {
 }
 
 describe('generated interiors', () => {
-	for (const type of ['cafe', 'shop', 'house'] as const)
+	for (const type of ['cafe', 'shop', 'house', 'office'] as const)
 		for (const [w, d] of [[6, 7], [9, 11], [13, 9]])
 			it(`${type} in a ${w} x ${d} m building: furnished, lit, reachable`, () => {
 				const plan = planFor(w, d);
@@ -59,7 +59,27 @@ describe('generated interiors', () => {
 				}
 				if (type === 'shop') expect(spec.items.map((i) => i.id)).toEqual(expect.arrayContaining(['fridge', 'rice']));
 				if (type === 'house') expect(spec.lights[0].switches.length).toBe(1);
+				if (type === 'office') {
+					// The registration counter, walked to from the door like any seat.
+					const service = spec.services?.find((x) => x.id === 'roles');
+					expect(service).toBeTruthy();
+					const area = { bounds: [x0, x1, z0, z1] as [number, number, number, number], obstacles: [...spec.walls, ...spec.blockers], radius: R };
+					expect(findPath(area, [plan.doorX, z1 - 0.5], [service!.x, service!.z])).not.toBeNull();
+					expect(spec.items.map((i) => i.id)).toContain('notice');
+				}
 			});
+
+	it('the System Office (9.3 x 12 m, 17 m tall): a hall with the counter and waiting chairs, files behind, one floor', () => {
+		const plan = planFor(9.3, 12, 17);
+		const { spec } = buildInterior('office', plan, 1518, { value: 0 }, 'System Office');
+		expect(spec.levels).toBeUndefined(); // tall, but an office keeps to one floor
+		expect(spec.rooms.map((r) => r.name)).toEqual(['Service Hall', 'Records Room']);
+		expect(spec.services).toEqual([expect.objectContaining({ id: 'roles', label: 'Register a Work Role' })]);
+		expect(spec.seats.filter((x) => x.id.startsWith('wait')).length).toBeGreaterThanOrEqual(6);
+		expect(spec.items.map((i) => i.id)).toEqual(expect.arrayContaining(['notice', 'ticket', 'archive']));
+		// The chairs face the counter (at the back, -z).
+		for (const seat of spec.seats.filter((x) => x.id.startsWith('wait'))) expect(Math.cos(seat.yaw)).toBeCloseTo(-1);
+	});
 
 	it('walls face into the room, the floor up and the ceiling down', () => {
 		const plan = planFor(9, 11);

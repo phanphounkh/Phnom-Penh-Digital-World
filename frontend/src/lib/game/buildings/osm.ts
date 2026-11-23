@@ -6,7 +6,9 @@
 import type { ChunkPayload } from '$lib/api/types';
 import { area, planInterior, pointInRing, type Plan, type Reason, type XZ } from './footprint';
 
-export type InteriorType = 'house' | 'shop' | 'cafe';
+/** What a building is inside: a home, a shop, a café, or an office (the System Office, placed by
+ * id: never chosen by OSM kind). */
+export type InteriorType = 'house' | 'shop' | 'cafe' | 'office';
 
 export interface Candidate {
 	/** OSM building id. */

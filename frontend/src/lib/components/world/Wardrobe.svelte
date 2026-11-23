@@ -1,0 +1,218 @@
+<script lang="ts">
+	/**
+	 * The wardrobe, in the game: a glass panel over the city while the camera faces the player.
+	 * Pick what to change, turn its wheel; the avatar in the world changes as you go (`onPreview`).
+	 * Save keeps the outfit (others see it at once); Cancel or Escape puts the old one back.
+	 * `first`: a new player's first visit: a welcome, no Cancel, and saving enters the city.
+	 */
+	import { Backpack, Footprints, PersonStanding, Scissors, Shirt, Shuffle, X } from 'lucide-svelte';
+	import type { Avatar } from '$lib/api/types';
+	import { CATEGORIES, describe, dressed, randomOutfit, wheels, type CategoryId } from '$lib/game/avatar/wardrobe';
+	import { untrack } from 'svelte';
+	import Drum from './Drum.svelte';
+
+	let {
+		outfit,
+		first = false,
+		solid = false,
+		onPreview,
+		onSave,
+		onClose
+	}: {
+		outfit: Avatar;
+		first?: boolean;
+		/** No frosted glass (slow graphics): a more opaque panel instead. */
+		solid?: boolean;
+		onPreview: (avatar: Avatar) => void;
+		onSave: (avatar: Avatar) => Promise<void>;
+		onClose: () => void;
+	} = $props();
+
+	// What was worn when the wardrobe opened (Cancel goes back to it), dressed in garments (an
+	// avatar saved before garments existed shows the outfit it wears now).
+	const saved = untrack(() => dressed($state.snapshot(outfit) as Avatar));
+	let draft = $state<Avatar>(untrack(() => dressed($state.snapshot(outfit) as Avatar)));
+	let category = $state<CategoryId>('top');
+	let busy = $state(false);
+	let error = $state('');
+	/** A phone or a narrow window: the panel is a sheet under the avatar, with shorter wheels. */
+	let narrow = $state(typeof window !== 'undefined' && window.innerWidth < 900);
+
+	const current = $derived(CATEGORIES.find((c) => c.id === category)!);
+	const turning = $derived(wheels(category, draft));
+	const changed = $derived(JSON.stringify(draft) !== JSON.stringify(saved));
+
+	// Show every change on the avatar in the world (a short pause first: wheels turn fast, and a
+	// classic avatar is rebuilt for other parts).
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	function wear(next: Avatar) {
+		draft = next;
+		clearTimeout(timer);
+		timer = setTimeout(() => onPreview($state.snapshot(draft) as Avatar), 90);
+	}
+
+	function cancel() {
+		clearTimeout(timer);
+		if (changed) onPreview(saved);
+		onClose();
+	}
+
+	async function save() {
+		if (busy) return;
+		if (draft.avatar_name.trim().length < 2) return (error = 'Give your avatar a name of at least 2 characters.');
+		clearTimeout(timer);
+		busy = true;
+		error = '';
+		try {
+			await onSave($state.snapshot(draft) as Avatar);
+			onClose();
+		} catch (e) {
+			error = e instanceof Error && e.message ? e.message : 'Your outfit could not be saved. Try again.';
+		} finally {
+			busy = false;
+		}
+	}
+
+	function keydown(e: KeyboardEvent) {
+		const typing = (e.target as HTMLElement | null)?.tagName === 'INPUT';
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			e.stopPropagation();
+			if (!first) cancel();
+		} else if (!typing && (e.key === '[' || e.key === ']')) {
+			const i = CATEGORIES.findIndex((c) => c.id === category);
+			category = CATEGORIES[(i + (e.key === ']' ? 1 : CATEGORIES.length - 1)) % CATEGORIES.length].id;
+		}
+	}
+</script>
+
+<svelte:window onkeydown={keydown} onresize={() => (narrow = window.innerWidth < 900)} />
+
+<div class="wardrobe" data-testid="wardrobe" data-category={category}>
+	<div class="glass panel" class:solid aria-label="Wardrobe" role="dialog" aria-modal="false">
+		<header class="head">
+			{#if first}
+				<div class="welcome">
+					<p>Welcome to Phnom Penh</p>
+					<h2>Make your avatar</h2>
+				</div>
+			{:else}
+				<h2>Wardrobe</h2>
+				<button type="button" class="icon" aria-label="Close without saving" onclick={cancel}><X size={18} /></button>
+			{/if}
+		</header>
+		{#if first}<p class="intro">This is how other players see you. Turn the wheels, then enter the city. You can change it any time with <kbd>O</kbd>.</p>{/if}
+
+		<div class="cats" role="tablist" aria-label="What to change">
+			{#each CATEGORIES as c (c.id)}
+				<button type="button" role="tab" aria-selected={category === c.id} class:on={category === c.id} onclick={() => (category = c.id)} data-testid={`cat-${c.id}`}>
+					<span class="cat-icon" aria-hidden="true">
+						{#if c.id === 'top'}<Shirt size={18} />
+						{:else if c.id === 'bottom'}<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 3h10l1 18h-4l-2-11-2 11H6z" /></svg>
+						{:else if c.id === 'shoes'}<Footprints size={18} />
+						{:else if c.id === 'bag'}<Backpack size={18} />
+						{:else if c.id === 'hair'}<Scissors size={18} />
+						{:else}<PersonStanding size={18} />{/if}
+					</span>
+					<span>{c.label}</span>
+				</button>
+			{/each}
+		</div>
+
+		<div class="now">
+			<p class="now-cat">{current.label}</p>
+			<p class="now-what" data-testid="wardrobe-now">{describe(category, draft)}</p>
+		</div>
+
+		<div class="wheels" class:single={turning.length === 1}>
+			{#each turning as wheel (`${category}-${wheel.kind}`)}
+				<Drum id={`${category}-${wheel.kind}`} rows={narrow ? 3 : turning.length === 1 ? 7 : 5} label={wheel.label} choices={wheel.choices} value={wheel.value} onchange={(id) => wear(wheel.pick(draft, id))} />
+			{/each}
+		</div>
+		{#if current.note}<p class="note">{current.note}</p>{/if}
+
+		{#if category === 'body'}
+			<label class="name">
+				<span>Avatar name</span>
+				<input class="glass-input" maxlength="32" value={draft.avatar_name} oninput={(e) => (draft = { ...draft, avatar_name: e.currentTarget.value })} />
+			</label>
+		{/if}
+
+		{#if error}<p class="error" role="alert">{error}</p>{/if}
+		<footer class="foot">
+			<button type="button" class="ghost" onclick={() => wear(randomOutfit(draft.avatar_name))}><Shuffle size={15} /> Surprise me</button>
+			<span class="grow"></span>
+			{#if !first}<button type="button" class="ghost" onclick={cancel}>Cancel</button>{/if}
+			<button type="button" class="save" disabled={busy} onclick={save} data-testid="wardrobe-save">{busy ? 'Saving…' : first ? 'Enter the city' : changed ? 'Save outfit' : 'Done'}</button>
+		</footer>
+	</div>
+	<p class="glass hint" class:solid>Scroll a wheel to choose · drag the city to turn around · <kbd>[</kbd> <kbd>]</kbd> change what to wear{#if !first} · <kbd>Esc</kbd> cancel{/if}</p>
+</div>
+
+<style>
+	.wardrobe { position: absolute; inset: 0; pointer-events: none; z-index: 30; color: #f6f1e6; }
+	.glass {
+		pointer-events: auto;
+		background: rgba(11, 37, 36, 0.38);
+		-webkit-backdrop-filter: blur(18px) saturate(150%);
+		backdrop-filter: blur(18px) saturate(150%);
+		border: 1px solid rgba(255, 255, 255, 0.24);
+		box-shadow: 0 24px 60px -24px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+	}
+	.glass.solid { background: rgba(11, 37, 36, 0.86); -webkit-backdrop-filter: none; backdrop-filter: none; }
+	.panel {
+		position: absolute;
+		top: max(16px, env(safe-area-inset-top, 0px));
+		bottom: 16px;
+		right: max(16px, env(safe-area-inset-right, 0px));
+		width: min(400px, calc(100vw - 32px));
+		border-radius: 26px;
+		padding: 18px;
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		overflow-y: auto;
+	}
+	.panel > * { flex-shrink: 0; } /* the panel scrolls; its rows keep their height */
+	.head { display: flex; align-items: center; gap: 10px; }
+	h2 { margin: 0; flex: 1; font-family: var(--font-display); font-size: 24px; font-weight: 700; color: #fffaf0; }
+	.welcome { display: grid; gap: 2px; flex: 1; }
+	.welcome p { font-size: 12px; font-weight: 700; color: var(--color-saffron-300); }
+	.intro { font-size: 13px; line-height: 1.45; opacity: 0.9; }
+	.icon { padding: 6px; border-radius: 10px; }
+	.icon:hover, .ghost:hover { background: rgba(255, 255, 255, 0.14); }
+	.cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+	.cats button { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 12px; font-size: 12px; font-weight: 600; background: rgba(255, 255, 255, 0.08); border: 1px solid transparent; color: inherit; }
+	.cats button:hover { background: rgba(255, 255, 255, 0.16); }
+	.cats button.on { background: rgba(255, 255, 255, 0.92); color: #123b3a; }
+	.cat-icon { display: grid; place-items: center; }
+	.now { display: grid; gap: 2px; }
+	.now-cat { font-size: 12px; font-weight: 600; opacity: 0.75; }
+	.now-what { font-family: var(--font-display); font-size: 22px; font-weight: 600; color: #fffaf0; }
+	.wheels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+	.wheels.single { grid-template-columns: 1fr; }
+	.note { font-size: 12px; opacity: 0.8; }
+	.name { display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
+	.glass-input { border-radius: 12px; padding: 9px 12px; font-size: 15px; color: #fffaf0; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.3); }
+	.glass-input:focus { outline: 2px solid var(--color-saffron-500); }
+	.error { font-size: 13px; font-weight: 600; color: #ffd4c4; }
+	.foot { margin-top: auto; display: flex; align-items: center; gap: 8px; padding-top: 6px; position: sticky; bottom: -18px; margin-bottom: -4px; padding-bottom: 4px; background: linear-gradient(to bottom, transparent, rgba(11, 37, 36, 0.55) 35%); }
+	.grow { flex: 1; }
+	.ghost { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; border-radius: 12px; font-size: 13px; font-weight: 600; color: inherit; }
+	.save { padding: 10px 18px; border-radius: 12px; font-size: 14px; font-weight: 700; background: var(--color-saffron-500); color: #0b2524; box-shadow: 0 5px 0 -2px var(--color-saffron-600); }
+	.save:disabled { opacity: 0.6; }
+	.hint { position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); bottom: 16px; max-width: calc(100vw - 448px); border-radius: 999px; padding: 8px 14px; font-size: 12px; }
+	kbd { font-family: inherit; font-size: 11px; font-weight: 700; padding: 0 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.85); color: #123b3a; }
+	button:focus-visible { outline: 3px solid var(--color-saffron-500); outline-offset: 2px; }
+
+	/* Phones and narrow windows: the panel is a sheet over the lower part of the screen, the
+	   camera keeps the avatar in the upper part (see the world page). */
+	@media (max-width: 899px) {
+		.panel { top: auto; left: max(10px, env(safe-area-inset-left, 0px)); right: max(10px, env(safe-area-inset-right, 0px)); bottom: max(10px, env(safe-area-inset-bottom, 0px)); width: auto; max-height: 52dvh; padding: 14px; gap: 10px; border-radius: 22px; }
+		.cats { display: flex; overflow-x: auto; scrollbar-width: none; }
+		.cats button { flex: none; }
+		.now-what { font-size: 18px; }
+		.foot { bottom: -14px; }
+		.hint { display: none; }
+	}
+</style>

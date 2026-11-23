@@ -60,7 +60,7 @@
 		<div class="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-saffron-100 text-saffron-600">
 			{#if channel === 'email'}<MailCheck />{:else}<Smartphone />{/if}
 		</div>
-		<p class="eyebrow">Step 1 of 4</p>
+		<p class="eyebrow">Step 1 of 2</p>
 		<h1 class="display mt-1 text-3xl font-bold">Verify your {channel === 'email' ? 'email' : 'phone'}</h1>
 
 		{#if verified}

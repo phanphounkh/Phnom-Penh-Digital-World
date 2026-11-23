@@ -265,7 +265,11 @@ export class WorldSession {
 					refunded: 'cancelled and refunded (demo)'
 				};
 				this.toast(
-					m.status === 'paid' ? `New order ${m.number} (demo payment)` : `Order ${m.number} is ${what[m.status] ?? m.status}.`,
+					m.sold
+						? `Sold in person at your counter: ${m.number}${m.total ? `, $${(m.total / 100).toFixed(2)}` : ''} (demo)`
+						: m.status === 'paid'
+							? `New order ${m.number} (demo payment)`
+							: `Order ${m.number} is ${what[m.status] ?? m.status}.`,
 					'info'
 				);
 				this.ordersVersion++;

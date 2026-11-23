@@ -30,6 +30,10 @@ def _forbidden(code: str, message: str) -> AppError:
     return AppError(status.HTTP_403_FORBIDDEN, code, message)
 
 
+# Work roles: a player holds at most one at a time (registered at the System Office).
+WORK_ROLES = {RoleName.SELLER, RoleName.DRIVER}
+
+
 def wants_buyer(user: User) -> bool:
     return any(r.role == RoleName.BUYER and r.status in ("active", "pending") for r in user.roles)
 
@@ -49,17 +53,20 @@ async def onboarding_state(session: AsyncSession, user: User) -> OnboardingOut:
         )
     ) > 0
     roles_done = bool(profile and profile.roles_chosen_at)
-    needs_address = wants_buyer(user)
+    # Every new player can buy (they get the buyer role on finishing), so they give a private
+    # address; players who chose to be visitors only (earlier accounts) do not need one.
+    needs_address = wants_buyer(user) or not roles_done
     location_done = bool(
         profile
         and profile.spawn_point_id
         and profile.world_visible is not None
         and (has_address or not needs_address)
     )
+    # Two steps before the city: verify, then choose your place. The avatar is made in the
+    # game (the wardrobe opens on the first visit: `avatar` false until one is saved), and work
+    # roles are registered in the game too.
     steps = [
         ("verify", user.contact_verified),
-        ("avatar", has_avatar),
-        ("role", roles_done),
         ("location", location_done),
     ]
     completed = user.onboarding_completed_at is not None
@@ -111,6 +118,12 @@ async def select_roles(session: AsyncSession, user: User, data: RoleSelection) -
     if not user.contact_verified:
         raise _forbidden("VERIFY_FIRST", "Verify your email or phone number first.")
     wanted = {RoleName(r) for r in data.roles} | {RoleName.VISITOR}
+    if len(wanted & WORK_ROLES) > 1:
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "ONE_WORK_ROLE",
+            "Choose one work role at a time: seller or driver.",
+        )
     now = utcnow()
     existing = {r.role: r for r in user.roles}
     for role in wanted:
@@ -292,6 +305,10 @@ async def complete(session: AsyncSession, user: User) -> OnboardingOut:
             f"Finish the '{state.next_step}' step first.",
             details={"next_step": state.next_step},
         )
+    if not (user.profile and user.profile.roles_chosen_at):
+        # A new player: visitor and buyer, active at once (seller and driver are registered
+        # in the game, one at a time).
+        await select_roles(session, user, RoleSelection(roles=["buyer"]))
     if user.onboarding_completed_at is None:
         user.onboarding_completed_at = utcnow()
         audit.record(

@@ -11,15 +11,67 @@
  *   colours are changed by repainting cells), plus shared eyes/teeth/brows/decals.
  * - Clips: Idle Walk Run Wave Sit Talk Dance Greet Cheer; morphs: Smile Excited Surprised
  *   Thinking Wink Blink MouthOpen.
- * Build A uses the male model and Build B the female one. Hair style, garment styles and
- * accessories belong to the classic avatar; the realistic outfits are fixed, but every colour
- * choice (skin, hair, top, bottom, shoes, accent) applies.
+ * - Wardrobe (manifest `wardrobe`): the file holds every garment the wardrobe offers; each mesh
+ *   is a choice (`slot`/`variant`, sometimes only `with` another choice, e.g. backpack straps
+ *   fitted over the t-shirt) or a `region` of skin (or hair) hidden by the garments in
+ *   `hidden_when`. One outfit shows at a time (outfitOf, meshShown).
+ * Build A uses the male model and Build B the female one. Avatars saved before garments existed
+ * (`model` "avatar") wear the original outfit: hoodie (with the jacket on build A), joggers,
+ * sneakers and the backpack. Every colour choice (skin, hair, top, bottom, shoes, accent) applies.
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { Avatar } from '$lib/api/types';
+
+/** What the realistic character wears, slot by slot (see avatar-generator/scripts/outfits.py). */
+export interface Outfit {
+	top: 'hoodie' | 'tee' | 'shirt';
+	bottom: 'trousers' | 'jeans' | 'shorts';
+	shoes: 'sneakers' | 'sandals';
+	hat: 'none' | 'cap' | 'bucket';
+	bag: 'backpack' | 'none';
+}
+
+/** The original outfit: what avatars saved before garments existed keep wearing. */
+export const ORIGINAL_OUTFIT: Outfit = { top: 'hoodie', bottom: 'trousers', shoes: 'sneakers', hat: 'none', bag: 'backpack' };
+
+export function outfitOf(avatar: Avatar): Outfit {
+	if (avatar.model !== 'outfit') return ORIGINAL_OUTFIT;
+	const acc = avatar.accessories;
+	return {
+		top: avatar.top_style,
+		bottom: avatar.bottom_style,
+		shoes: avatar.shoe_style ?? 'sneakers',
+		hat: acc.includes('cap') ? 'cap' : acc.includes('hat') ? 'bucket' : 'none',
+		bag: acc.includes('backpack') ? 'backpack' : 'none'
+	};
+}
+
+export interface WardrobeMesh {
+	slot?: keyof Outfit;
+	variant?: string;
+	with?: string | null;
+	region?: string;
+}
+
+export interface WardrobeManifest {
+	hidden_when: Record<string, string[][]>;
+	meshes: Record<string, WardrobeMesh>;
+}
+
+/** Is this wardrobe mesh shown in `outfit`? A garment when its choice is worn (and the choice it
+ * goes `with`); a region of skin or hair unless a clause of garments hiding it is all worn. */
+export function meshShown(info: WardrobeMesh, outfit: Outfit, hiddenWhen: Record<string, string[][]>): boolean {
+	const worn = (choice: string) => {
+		const [slot, variant] = choice.split('.');
+		return outfit[slot as keyof Outfit] === variant;
+	};
+	if (info.region) return !(hiddenWhen[info.region] ?? []).some((clause) => clause.every(worn));
+	if (!info.slot) return true;
+	return outfit[info.slot] === info.variant && (!info.with || worn(info.with));
+}
 
 export const REALISTIC_BASE = '/models/characters/realistic/';
 export type RealisticKind = 'male' | 'female';
@@ -38,6 +90,8 @@ export interface RealisticEntry {
 	run_speed: number;
 	/** Absent in models built before the Sprint clip existed. */
 	sprint_speed?: number;
+	/** Absent in models built before the wardrobe had garments (one fixed outfit). */
+	wardrobe?: WardrobeManifest;
 }
 
 export interface RealisticManifest {
@@ -48,16 +102,16 @@ export interface RealisticManifest {
 /** Which palette cells (original material names) each avatar colour choice repaints. */
 export const RECOLOR: Record<RealisticKind, Record<'top' | 'bottom' | 'shoe' | 'accent', string[]>> = {
 	male: {
-		top: ['Jacket'],
-		bottom: ['Pants', 'PantsRib'],
-		shoe: ['ShoeUpper'],
-		accent: ['JacketPanel', 'BackpackAccent', 'ShoeAccent']
+		top: ['Jacket', 'Tee', 'TeeRib', 'Shirt'],
+		bottom: ['Pants', 'PantsRib', 'Jeans', 'Shorts', 'ShortsRib'],
+		shoe: ['ShoeUpper', 'SandalStrap'],
+		accent: ['JacketPanel', 'BackpackAccent', 'ShoeAccent', 'Cap', 'Bucket']
 	},
 	female: {
-		top: ['Hoodie', 'HoodieRib'],
-		bottom: ['Pants', 'PantsRib'],
-		shoe: ['ShoeUpper'],
-		accent: ['BackpackAccent', 'ShoeAccent']
+		top: ['Hoodie', 'HoodieRib', 'Tee', 'TeeRib', 'Shirt'],
+		bottom: ['Pants', 'PantsRib', 'Jeans', 'Shorts', 'ShortsRib'],
+		shoe: ['ShoeUpper', 'SandalStrap'],
+		accent: ['BackpackAccent', 'ShoeAccent', 'Cap', 'Bucket']
 	}
 };
 
@@ -198,7 +252,20 @@ export async function createRealisticAvatar(avatar: Avatar): Promise<RealisticIn
 		hand.add(socket);
 	}
 
+	// The wardrobe: which mesh is which choice (names as Three.js sanitises them).
+	const wardrobe = entry.wardrobe;
+	const worn: [THREE.Object3D, WardrobeMesh][] = [];
+	if (wardrobe) {
+		const byName = new Map(Object.entries(wardrobe.meshes).map(([n, info]) => [THREE.PropertyBinding.sanitizeNodeName(n), info]));
+		root.traverse((o) => {
+			const info = (o as THREE.Mesh).isMesh ? byName.get(o.name) : undefined;
+			if (info) worn.push([o, info]);
+		});
+	}
+
 	const apply = (a: Avatar) => {
+		const outfit = outfitOf(a);
+		for (const [o, info] of worn) o.visible = meshShown(info, outfit, wardrobe!.hidden_when);
 		if (skin) (skin as THREE.MeshStandardMaterial).color.setRGB(...skinFactor(entry.skin_tone, a.skin_tone), THREE.LinearSRGBColorSpace);
 		if (hair) (hair as THREE.MeshStandardMaterial).color.setRGB(...hairFactor(a.hair_color, entry.hair_texture_mean), THREE.LinearSRGBColorSpace);
 		if (palette) {

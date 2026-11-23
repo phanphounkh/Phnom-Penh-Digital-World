@@ -17,7 +17,7 @@ async def test_correct_code_verifies_contact(client: httpx.AsyncClient):
     r = await client.post("/auth/verification/confirm", json={"code": code})
     assert r.status_code == 200
     assert r.json()["email_verified"] is True
-    assert r.json()["onboarding"]["next_step"] == "avatar"
+    assert r.json()["onboarding"]["next_step"] == "location"  # then the city (avatar made there)
 
 
 async def test_code_cannot_be_reused(client: httpx.AsyncClient):

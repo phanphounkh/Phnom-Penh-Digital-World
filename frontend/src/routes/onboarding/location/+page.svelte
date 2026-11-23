@@ -93,7 +93,24 @@
 		}
 	}
 
+	/** Where the player starts: the public spawn area nearest their place, unless they pick one
+	 * (never their home itself: other players would see where they live). */
+	let pickedSpawn = $state(false);
+	const metres = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+		const k = Math.PI / 180;
+		const x = (b.lon - a.lon) * k * Math.cos(((a.lat + b.lat) / 2) * k);
+		return Math.hypot(x, (b.lat - a.lat) * k) * 6_371_000;
+	};
+	const home = $derived(pin ?? addresses.find((a) => a.is_default) ?? addresses[0] ?? null);
+	const nearest = $derived(home && spawnPoints.length ? [...spawnPoints].sort((a, b) => metres(home, a) - metres(home, b))[0] : null);
+	$effect(() => {
+		if (!pickedSpawn && nearest) spawnId = nearest.id;
+	});
+	const startAt = $derived(spawnPoints.find((sp) => sp.id === spawnId) ?? null);
+	const away = (km: number) => (km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`);
+
 	function chooseSpawn(id: string) {
+		pickedSpawn = true;
 		spawnId = id;
 		const sp = spawnPoints.find((s) => s.id === id);
 		if (sp) focus = { lat: sp.lat, lon: sp.lon, zoom: 16.5 };
@@ -184,8 +201,9 @@
 
 	<section class="space-y-5">
 		<div>
-			<p class="eyebrow">Step 4 of 4</p>
-			<h1 class="display mt-1 text-3xl font-bold">Choose your location</h1>
+			<p class="eyebrow">Step 2 of 2</p>
+			<h1 class="display mt-1 text-3xl font-bold">Choose your place</h1>
+			<p class="mt-1 text-sm text-ink-soft">Anywhere in Phnom Penh: search or tap the map. Then you enter the city and make your avatar there.</p>
 		</div>
 
 		<div class="card space-y-4">
@@ -193,11 +211,10 @@
 				<span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brick-500/10 text-brick-600"><Lock size={18} /></span>
 				<div>
 					<h2 class="font-semibold">
-						Private delivery address {#if needsAddress}<span class="text-brick-600">*</span>{:else}<span class="text-xs font-normal text-ink-soft">(optional)</span>{/if}
+						Where you live {#if needsAddress}<span class="text-brick-600">*</span>{:else}<span class="text-xs font-normal text-ink-soft">(optional)</span>{/if}
 					</h2>
 					<p class="text-xs text-ink-soft">
-						Only you can see it. It is never shown in the 3D world and never sets your avatar's
-						position.{needsAddress ? ' Buyers need one for deliveries.' : ''}
+						Private: only you see it. Deliveries come to it, and it is never shown in the city.
 					</p>
 				</div>
 			</div>
@@ -223,10 +240,7 @@
 							<CircleCheck size={16} /> Inside Phnom Penh{place.area ? ` · ${place.area}` : ''}
 						</p>
 					{/if}
-					<div class="grid grid-cols-[7rem_1fr] gap-2">
-						<input class="input" aria-label="Address label" maxlength="40" bind:value={label} />
-						<input class="input" aria-label="Address line" placeholder="House no., street" maxlength="200" bind:value={addressLine} />
-					</div>
+					<input class="input" aria-label="Address line" placeholder="House no., street" maxlength="200" bind:value={addressLine} />
 					<input class="input" aria-label="Address details" placeholder="Floor, apartment, landmark (optional)" maxlength="500" bind:value={details} />
 					<button class="btn-quiet text-xs" onclick={() => { pin = null; place = null; }}>Remove pin</button>
 				</div>
@@ -237,10 +251,17 @@
 			<div class="flex items-start gap-3">
 				<span class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-saffron-100 text-saffron-600"><MapPin size={18} /></span>
 				<div>
-					<h2 class="font-semibold">Public spawn area <span class="text-brick-600">*</span></h2>
-					<p class="text-xs text-ink-soft">Where your avatar appears in the 3D city. Always a public place.</p>
+					<h2 class="font-semibold">Where you start in the city</h2>
+					<p class="text-xs text-ink-soft">A public place, the one nearest you unless you pick another. The 3D city covers Daun Penh for now.</p>
 				</div>
 			</div>
+			{#if startAt}
+				<p class="rounded-xl bg-river-200/40 px-3 py-2 text-sm" data-testid="start-at">
+					You start at <strong>{startAt.name}</strong>{#if home && !pickedSpawn}, {away(metres(home, startAt) / 1000)} from your place{/if}.
+				</p>
+			{:else}
+				<p class="rounded-xl border border-dashed border-river-900/20 px-3 py-2 text-sm text-ink-soft">Choose your place first, or pick a start below.</p>
+			{/if}
 			<div class="grid gap-2" role="radiogroup" aria-label="Spawn area">
 				{#each spawnPoints as sp (sp.id)}
 					<button
@@ -277,7 +298,7 @@
 		</button>
 		{#if !canFinish}
 			<p class="text-center text-xs text-ink-soft">
-				{!spawnId ? 'Choose a spawn area. ' : ''}{visible === null ? 'Choose your visibility. ' : ''}{needsAddress && !hasAddress ? 'Add a delivery address inside Phnom Penh.' : ''}
+				{needsAddress && !hasAddress ? 'Choose your place in Phnom Penh. ' : ''}{!spawnId ? 'Pick where you start. ' : ''}{visible === null ? 'Choose whether others can see you.' : ''}
 			</p>
 		{/if}
 	</section>
