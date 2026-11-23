@@ -83,7 +83,7 @@ services:
       PUBLIC_MAP_STYLE_URL: ${PUBLIC_MAP_STYLE_URL:-https://tiles.openfreemap.org/styles/liberty}
       PORT: "3000"
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:3000:3000"
 
 volumes:
   postgres_data:

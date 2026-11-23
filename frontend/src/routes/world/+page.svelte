@@ -545,7 +545,7 @@
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office || !!counterShop} class:myshop-open={myShop} data-panel-open={!!panel} data-chat-open={chatOpen}>
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:map-expanded={mapExpanded} class:wardrobe-open={wardrobe} class:office-open={office || !!counterShop} class:myshop-open={myShop} data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -589,14 +589,14 @@
 		<!-- Toolbar -->
 		<nav class="world-toolbar absolute top-3 right-3 flex flex-col gap-2" aria-label="World controls">
 			{#each [['people', Users, 'People (P)'], ['places', MapPin, 'Places & shops (M)'], ['garage', Bike, 'My vehicles (V)'], ['cart', ShoppingCart, 'Cart (C)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
-				<button class="relative grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800 {id === 'settings' || id === 'help' ? 'secondary-control' : ''} {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={preferKhmer && id in labels ? labels[id as keyof typeof labels] : label} aria-expanded={panel === id} title={id in labels ? labels[id as keyof typeof labels] : label} onclick={() => (panel = panel === id ? '' : id)}>
+				<button class="relative grid h-11 w-11 place-items-center tool rounded-xl text-paper {id === 'settings' || id === 'help' ? 'secondary-control' : ''} {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={preferKhmer && id in labels ? labels[id as keyof typeof labels] : label} aria-expanded={panel === id} title={id in labels ? labels[id as keyof typeof labels] : label} onclick={() => (panel = panel === id ? '' : id)}>
 					<Icon size={19} />
 					{#if id === 'cart' && cart?.item_count}<span class="absolute -mt-7 ml-7 rounded-full bg-saffron-500 px-1.5 text-[10px] font-bold text-river-950" data-testid="cart-count">{cart.item_count}</span>{/if}
 				</button>
 			{/each}
-			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={() => openWardrobe()}><Shirt size={19} /></button>
-			{#if isSeller}<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="My shop (B)" title="My shop (B)" data-testid="open-my-shop" onclick={openMyShop}><Store size={19} /></button>{/if}
-			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
+			<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={() => openWardrobe()}><Shirt size={19} /></button>
+			{#if isSeller}<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="My shop (B)" title="My shop (B)" data-testid="open-my-shop" onclick={openMyShop}><Store size={19} /></button>{/if}
+			<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
 		</nav>
 
 		{#snippet greetings()}
@@ -636,7 +636,7 @@
 		</div>
 
 		{#if net}
-			{#if compact}<button class="chat-toggle absolute grid h-11 w-11 place-items-center rounded-full bg-river-950/85 shadow-lg" aria-label={chatOpen ? 'Close chat' : 'Open chat'} aria-expanded={chatOpen} onclick={() => chatOpen = !chatOpen}>{#if chatOpen}<X size={20} />{:else}<MessageCircle size={20} />{/if}</button>{/if}
+			{#if compact}<button class="chat-toggle absolute grid h-11 w-11 place-items-center rounded-full shadow-lg" aria-label={chatOpen ? 'Close chat' : 'Open chat'} aria-expanded={chatOpen} onclick={() => { chatOpen = !chatOpen; if (chatOpen) mapExpanded = false; }}>{#if chatOpen}<X size={20} />{:else}<MessageCircle size={20} />{/if}</button>{/if}
 			{#if !compact || chatOpen}
 			<div class="world-chat pointer-events-none absolute flex flex-col gap-2">
 				{#if compact}{@render greetings()}{/if}
@@ -969,6 +969,9 @@
 	/* Clicking the city closes a panel; it stays undimmed behind the glass. */
 	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: transparent; }
 	.map-toggle { display: none; }
+	/* The toolbar's buttons: glass, like the rest of the HUD. */
+	.tool { background: rgb(11 37 36 / .5); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgb(255 255 255 / .16); box-shadow: 0 10px 24px -12px rgb(0 0 0 / .6); transition: background-color 120ms; }
+	.tool:hover { background: rgb(24 80 77 / .75); }
 	/* Bottom left: a small round glass minimap, north up, the chat beside it. Bottom right: the
 	   greetings dock over the status chips. */
 	.world-minimap { left: var(--hud-left); bottom: 40px; }
@@ -995,8 +998,9 @@
 	.compact .world-toolbar { flex-direction: row; gap: 6px; }
 	.compact .secondary-control { display: none; }
 	.compact .world-minimap { left: var(--hud-left); bottom: var(--hud-bottom); }
-	.compact .minimap-disc { width: 96px; height: 96px; }
-	.compact .world-minimap.expanded .minimap-disc { width: min(230px, 50vw); height: min(230px, 50vw); }
+	.compact { --disc: 96px; --disc-big: min(230px, 50vw); }
+	.compact .minimap-disc { width: var(--disc); height: var(--disc); }
+	.compact .world-minimap.expanded .minimap-disc { width: var(--disc-big); height: var(--disc-big); }
 	.compact .map-toggle { display: grid; }
 	.compact :is(.minimap-north, .minimap-scale) { font-size: 8px; }
 	.compact .minimap-scale { bottom: 9px; }
@@ -1009,15 +1013,29 @@
 	.compact .performance-status { display: none; }
 	.compact .world-touch { right: var(--hud-right); bottom: var(--hud-bottom); gap: 4px; }
 	.compact .pad { width: 42px; height: 42px; border: 1px solid rgb(255 255 255 / .14); border-radius: 13px; }
-	.compact .chat-toggle { z-index: 21; bottom: var(--hud-bottom); left: 50%; transform: translateX(-50%); border: 1px solid rgb(255 255 255 / .15); }
-	.compact .world-chat { z-index: 22; left: var(--hud-left); bottom: calc(var(--hud-bottom) + 54px); max-width: calc(100vw - var(--hud-left) - var(--hud-right)); }
-	.compact .world-chat :global([data-testid='chat']) { width: min(24rem, calc(100vw - var(--hud-left) - var(--hud-right))); }
+	.compact .chat-toggle { z-index: 21; bottom: var(--hud-bottom); left: calc(var(--hud-left) + var(--disc) + 10px); color: #fffaf0; background: rgb(11 37 36 / .5); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgb(255 255 255 / .18); }
+	.compact.map-expanded .chat-toggle { left: calc(var(--hud-left) + var(--disc-big) + 10px); }
+	@media (orientation: portrait) {
+		/* No room beside the big map on a narrow screen: the chat button goes above it. */
+		.compact.map-expanded .chat-toggle { left: var(--hud-left); bottom: calc(var(--hud-bottom) + var(--disc-big) + 10px); }
+	}
+	.compact[data-chat-open='true'] .chat-toggle { border-color: var(--color-saffron-500); }
+	.compact[data-chat-open='true'] .map-toggle { display: none; }
+	/* Portrait: the chat opens above the bottom row, across the screen. */
+	.compact { --chat-left: var(--hud-left); }
+	.compact .world-chat { z-index: 22; left: var(--chat-left); bottom: calc(var(--hud-bottom) + var(--disc) + 10px); }
+	.compact .world-chat :global([data-testid='chat']) { width: min(24rem, calc(100vw - var(--chat-left) - var(--hud-right))); }
 	.compact .world-chat :global([data-testid='chat-log']) { max-height: min(8rem, 26dvh); }
-	.compact[data-chat-open='true'] .world-minimap { visibility: hidden; }
-	.compact .world-attribution { padding-top: 0; font-size: 8px; line-height: 12px; }
+	/* Landscape: on the bottom row, beside its button (the touch pad hides while it is open). */
+	@media (orientation: landscape) {
+		.compact { --chat-left: calc(var(--hud-left) + var(--disc) + 62px); }
+		.compact .world-chat { bottom: var(--hud-bottom); }
+	}
+	.compact .world-attribution { left: var(--hud-left); right: auto; padding: 0 0 max(4px, calc(env(safe-area-inset-bottom) - 4px)); background: none; text-align: left; font-size: 8px; line-height: 12px; text-shadow: 0 1px 2px rgb(11 37 36 / .9); }
 	.compact .attribution-detail { display: none; }
 	.compact .world-guidance { top: calc(var(--hud-top) + 54px); right: var(--hud-right); left: auto; width: min(24rem, calc(100vw - 22rem)); transform: none; padding: 10px 12px; }
-	.compact .world-action { bottom: calc(var(--hud-bottom) + 64px); max-width: calc(100vw - 19rem); text-align: center; }
+	/* Centred between the minimap and chat button (left) and the touch pad (right). */
+	.compact .world-action { bottom: var(--hud-bottom); max-width: calc(100vw - 2 * (max(var(--hud-left), var(--hud-right)) + var(--disc) + 64px)); text-align: center; }
 	.compact .world-action > button { min-height: 44px; font-size: 12px; }
 	.compact .world-speed { right: calc(var(--hud-right) + 144px); bottom: calc(var(--hud-bottom) + 54px); }
 	.compact .world-speed > :global(div) { padding: 6px 10px; }
@@ -1048,9 +1066,7 @@
 		.compact .world-speed { right: var(--hud-right); bottom: calc(var(--hud-bottom) + 145px); }
 	}
 	@media (max-height: 400px) and (min-width: 601px) {
-		.compact .minimap-disc { width: 84px; height: 84px; }
-		.compact .world-minimap.expanded .minimap-disc { width: 180px; height: 180px; }
-		.compact .world-action { bottom: calc(var(--hud-bottom) + 36px); }
+		.compact { --disc: 84px; --disc-big: 180px; }
 	}
 	.pad {
 		display: grid;

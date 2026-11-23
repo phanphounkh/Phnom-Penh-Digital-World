@@ -81,7 +81,7 @@
 </div>
 
 <style>
-	.chat { display: grid; gap: 6px; width: min(23rem, calc(100vw - 1.5rem)); }
+	.chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; width: min(23rem, calc(100vw - 1.5rem)); }
 	.chat-log {
 		max-height: 11rem;
 		overflow-y: auto;
