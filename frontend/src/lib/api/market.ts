@@ -246,6 +246,8 @@ export interface Order {
 	events: { from_status: string | null; to_status: string; actor_role: string; note: string | null; at: string }[];
 	refunded_minor: number;
 	allowed: OrderStatus[];
+	/** Bought and handed over at the shop's counter. */
+	in_person: boolean;
 }
 
 export interface Payment {
@@ -362,6 +364,9 @@ export const shopping = {
 	remove: (product_id: string) => api<Cart>(`/cart/items/${product_id}`, { method: 'DELETE' }),
 	checkout: (key: string, body: { expected_total_minor: number; note?: string; age_confirmed?: boolean; fulfillment?: 'pickup' | 'delivery'; dropoff_spawn_id?: string }) =>
 		api<Payment>('/checkout', { method: 'POST', body: { fulfillment: 'pickup', ...body }, headers: { 'Idempotency-Key': key } }),
+	/** Pay for the basket at a shop's counter, standing in it: handed over at once. */
+	counter: (shopId: string, key: string, body: { expected_total_minor: number; age_confirmed?: boolean }) =>
+		api<Payment>(`/shops/${shopId}/counter`, { method: 'POST', body, headers: { 'Idempotency-Key': key } }),
 	payment: (id: string) => api<Payment>(`/payments/${id}`),
 	confirm: (id: string) => api<Payment>(`/payments/${id}/confirm`, { method: 'POST' }),
 	cancelPayment: (id: string) => api<Payment>(`/payments/${id}/cancel`, { method: 'POST' }),

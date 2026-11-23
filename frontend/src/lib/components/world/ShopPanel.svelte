@@ -65,7 +65,7 @@
 		</p>
 	</div>
 	{#if error}<p class="alert-error mt-2 text-sm">{error}</p>{/if}
-	{#if added}<p class="mt-2 rounded-lg bg-river-200/40 px-3 py-1.5 text-xs">Added {added} to your cart.</p>{/if}
+	{#if added}<p class="mt-2 rounded-lg bg-river-200/40 px-3 py-1.5 text-xs">{added} is in your basket. Walk in and pay at the counter, or order ahead for pickup or delivery from your cart (C).</p>{/if}
 	{#if !canBuy}<p class="mt-2 rounded-lg bg-saffron-300/30 px-3 py-1.5 text-xs">Browsing only: choose the buyer role to shop.</p>{/if}
 	<div class="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="shop-products">
 		{#if !detail && !error}<p class="text-sm text-ink-soft">Loading products…</p>{/if}

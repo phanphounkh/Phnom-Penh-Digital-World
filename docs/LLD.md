@@ -417,9 +417,27 @@ frontage, n inward). The doorway is a 5 m gap: the collision world ignores wall 
 the 16 nearest doors), so no chunk geometry is rebuilt. `Storefronts.ts` builds the interior
 (inward-facing walls, floor, ceiling, Blender shelves and table, CampusEats counter and cart),
 the sign (canvas, EN + KM) and the awning, loads products within 45 m (several facings each,
-price tags) and resolves the E-key interaction: pick up (held at the right wrist, carry pose),
-put in the cart (`POST /cart/items`), put back, pay at the counter, browse at the door.
-The server allows positions on an open shop's floor (`MovementValidator.set_open_zones`).
+price tags) and resolves the E-key interaction: at a shelf, into the basket
+(`POST /cart/items` with the shop); at the counter, the counter panel; at the door, browse.
+The basket is the cart lines from the shop's merchant: while the player stands in that shop the
+avatar carries a red shopping basket with up to six of the picks in it, and after paying a kraft
+paper bag in the shop's colours for a minute (both hang upright from the right hand, carry pose;
+put away while riding). The cart by the door is decoration. The server allows positions on an
+open shop's floor (`MovementValidator.set_open_zones`).
+
+**Paying at the counter (`POST /shops/{id}/counter`, `checkout.counter_sale`).** Buying in
+person needs nothing from the seller. One transaction takes the buyer's cart lines from this
+shop's merchant, creates the payment intent and order (`fulfillment` pickup at this shop), takes
+the demo payment, and completes the order at once (`paid → completed` is a system move used only
+here; the history notes "Sold in person at the counter"; the seller's wallet is settled). Lines
+from other shops stay in the cart. It is accepted only while the player stands on that shop's
+floor in the world (`hub.in_shop`: the unit's footprint, 1 m margin for the doorway, from their
+live position) and the shop is open. Errors: `403 AT_THE_COUNTER`, `409 SHOP_CLOSED`,
+`BASKET_EMPTY`, `PRICE_CHANGED`, `ITEMS_UNAVAILABLE`, `INSUFFICIENT_FUNDS` (then nothing changes:
+basket, stock and wallet stay as they were). The `Idempotency-Key` makes a retry return the same
+receipt. Orders report `in_person`. The seller's world session gets
+`{"t": "order", "sold": true, "total"}` ("Sold in person at your counter"). Orders placed ahead
+for pickup are collected at the same counter (`POST /orders/{id}/received`).
 
 **My shop (the seller's panel, in the city: `components/myshop/`).** Sellers run their shop
 without leaving the game: the toolbar's shop button or **B** (also ☰ → My shop, the System

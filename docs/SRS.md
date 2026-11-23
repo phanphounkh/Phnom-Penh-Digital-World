@@ -42,7 +42,7 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-CAT-1 | Products with price (integer cents), currency, stock, images (EXIF stripped), display model, availability, fulfilment | ✅ | B: test_catalogue_rules_and_storefront, test_image_upload_strips_metadata |
 | F-CAT-2 | Regulated categories: prohibited (refused) and restricted (admin review, 18+ confirmation) | ✅ | B: test_catalogue_rules_and_storefront, test_age_restricted_items_need_confirmation |
 | F-SHOP-1 | Walk-in 3D storefronts at the real frontage: sign, awning, shelves, products with price tags, cart, counter | ✅ | U: layout.test.ts, collision doorway tests; B: test_shop_floor_is_walkable…; E: phase4 |
-| F-SHOP-2 | Press E to pick up a product (held in hand), put it in the cart (server cart), pay at the counter | ✅ | E: phase4.spec.ts |
+| F-SHOP-2 | E at a shelf puts a product in the basket (server cart, carried in hand); at the counter one Pay completes the sale at once, in person only (no seller step); ready pickup orders are collected at the counter | ✅ | B: test_counter.py; E: phase4.spec.ts |
 | F-CART-1 | Server cart (product, merchant, quantity, quoted price, owner); repriced on every view; stock checks | ✅ | B: test_cart_reprices_and_checks_stock |
 | F-ORD-1 | One checkout → one order per merchant; server recalculates prices (PRICE_CHANGED on mismatch) | ✅ | B: test_multi_merchant_checkout_is_server_priced_and_idempotent |
 | F-ORD-2 | Explicit order state machine (13 states) with actor rules and history | ✅ | B: test_order_lifecycle_refunds_and_revenue; E: phase4 |

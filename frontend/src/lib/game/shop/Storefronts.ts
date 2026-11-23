@@ -6,12 +6,13 @@
  * awning, and build the interior on the unit's floor: shelves and an island table showing the
  * merchant's products (with price tags), a shopping cart by the door and a checkout counter.
  *
- * The player walks in, presses E at a product to pick it up (it appears in the avatar's hand),
- * carries it to the cart and presses E again to put it in (the server cart records it), and
- * pays at the counter. Product data always comes from the server; nothing here sets a price.
+ * The player walks in and presses E at a product: it goes into their basket (the server cart
+ * records it), and the basket appears in their hand with what they picked. At the counter E
+ * opens the one-step payment; once paid they carry a paper bag out. Product data always comes
+ * from the server; nothing here sets a price.
  */
 import * as THREE from 'three';
-import { market, money, type Cart, type Product, type Shop, type ShopDetail } from '$lib/api/market';
+import { market, money, type Cart, type CartLine, type Product, type Shop, type ShopDetail } from '$lib/api/market';
 import type { CollisionWorld } from '$lib/game/city/collision';
 import type { CityMaterials } from '$lib/game/city/materials';
 import { SHOP_DOORS } from '$lib/game/city/materials';
@@ -34,15 +35,74 @@ import {
 const BUILD_RADIUS = 110; // m: build exterior + interior
 const PRODUCT_RADIUS = 45; // m: fetch and show products
 const REACH = 1.5; // m: products within reach
-const CART_REACH = 1.7;
 const COUNTER_REACH = 2.2;
+/** How long the paper bag stays in hand after paying (ms). */
+const BAG_MS = 60_000;
 
 export type Interaction =
 	| { kind: 'browse'; shop: Shop; label: string }
-	| { kind: 'pickup'; shop: Shop; product: Product; label: string }
-	| { kind: 'cart'; shop: Shop; product: Product; label: string }
-	| { kind: 'putback'; shop: Shop; product: Product; label: string }
+	| { kind: 'take'; shop: Shop; product: Product; label: string }
 	| { kind: 'counter'; shop: Shop; label: string };
+
+/** What the player picked in the shop they stand in (the cart lines from its merchant). */
+export interface Basket {
+	shop: Shop;
+	lines: CartLine[];
+	count: number;
+	total_minor: number;
+}
+
+/** A mesh with its own geometry and material (freed with the carried object). */
+function owned(parent: THREE.Object3D, geometry: THREE.BufferGeometry, color: string, x: number, y: number, z: number, roughness = 0.6) {
+	const mesh = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness }));
+	mesh.position.set(x, y, z);
+	mesh.userData.ownsGeometry = true;
+	mesh.userData.ownsMaterial = true;
+	mesh.castShadow = true;
+	parent.add(mesh);
+	return mesh;
+}
+
+/** A red plastic shopping basket (open box with a handle) holding up to six of the picks.
+ *  Its origin is the top of the handle, where the hand holds it; it hangs below. */
+async function basketModel(lines: CartLine[]): Promise<THREE.Group> {
+	const root = new THREE.Group();
+	const g = new THREE.Group();
+	const W = 0.34, D = 0.22, H = 0.15, T = 0.01, HANDLE = 0.12;
+	g.position.y = -(H + HANDLE);
+	root.add(g);
+	const part = (geometry: THREE.BufferGeometry, x: number, y: number, z: number) => owned(g, geometry, '#c8322b', x, y, z, 0.55);
+	part(new THREE.BoxGeometry(W, T, D), 0, T / 2, 0);
+	part(new THREE.BoxGeometry(W, H, T), 0, H / 2, D / 2);
+	part(new THREE.BoxGeometry(W, H, T), 0, H / 2, -D / 2);
+	part(new THREE.BoxGeometry(T, H, D), W / 2, H / 2, 0);
+	part(new THREE.BoxGeometry(T, H, D), -W / 2, H / 2, 0);
+	part(new THREE.TorusGeometry(HANDLE, 0.008, 6, 18, Math.PI), 0, H, 0); // the handle, over the long side
+	const picks = lines.flatMap((l) => Array.from({ length: Math.min(l.quantity, 3) }, () => l)).slice(0, 6);
+	for (const [i, line] of picks.entries()) {
+		const mesh = await productModel(line.model, 0.085);
+		if (line.image_url) applyPhoto(mesh, line.image_url);
+		mesh.position.set(((i % 3) - 1) * 0.1, T, (Math.floor(i / 3) - 0.5) * 0.09);
+		mesh.rotation.y = i * 0.9;
+		g.add(mesh);
+	}
+	return root;
+}
+
+/** A kraft paper shopping bag with a band in the shop's colours, hanging from its handle
+ *  (the origin is the top of the handle). */
+function bagModel(colors: { primary: string; accent: string }): THREE.Group {
+	const g = new THREE.Group();
+	const W = 0.26, D = 0.12, H = 0.3, HANDLE = 0.07;
+	const top = -HANDLE;
+	owned(g, new THREE.BoxGeometry(W, H, D), '#b98a56', 0, top - H / 2, 0, 0.9);
+	owned(g, new THREE.BoxGeometry(W + 0.004, 0.08, D + 0.004), colors.primary, 0, top - H * 0.42, 0, 0.8);
+	owned(g, new THREE.BoxGeometry(W + 0.006, 0.014, D + 0.006), colors.accent, 0, top - H * 0.42 - 0.047, 0, 0.8);
+	for (const z of [-0.025, 0.025]) owned(g, new THREE.TorusGeometry(HANDLE, 0.005, 6, 16, Math.PI), '#7a5634', 0, top, z, 0.9);
+	return g;
+}
+
+const upright = { parent: new THREE.Quaternion(), facing: new THREE.Quaternion() };
 
 const THEMES: Record<string, { floor: string; wall: string; ceiling: string }> = {
 	market: { floor: '#c9b08a', wall: '#f1e6cf', ceiling: '#fbf6ea' },
@@ -66,7 +126,6 @@ interface Built {
 	ground: number;
 	group: THREE.Group;
 	products: THREE.Group;
-	cartContents: THREE.Group;
 	slots: Slot[];
 	cart: { x: number; z: number; y: number };
 	counter: { x: number; z: number };
@@ -85,6 +144,8 @@ export interface StorefrontOptions {
 	avatar: THREE.Object3D;
 	setHolding(holding: boolean): void;
 	onInteraction?(interaction: Interaction | null): void;
+	/** The basket of the shop the player stands in changed (entered, left, picked, paid). */
+	onBasket?(basket: Basket | null): void;
 }
 
 function canvasTexture(width: number, height: number, draw: (g: CanvasRenderingContext2D) => void) {
@@ -161,7 +222,14 @@ export class Storefronts {
 	private shops = new Map<string, Shop>();
 	private built = new Map<string, Built>();
 	private building = new Set<string>();
-	private held: { product: Product; shop: Shop; mesh: THREE.Object3D } | null = null;
+	/** What the avatar carries: the basket (in a shop, with picks) or the paper bag (paid). */
+	private carried: { key: string; mesh: THREE.Object3D } | null = null;
+	private carryKey = '';
+	private carryToken = 0;
+	private bagUntil = 0;
+	private bagColors = { primary: '#123b3a', accent: '#e8a33d' };
+	private stowed = false;
+	private insideId: string | null = null;
 	private current: Interaction | null = null;
 	private doorsKey = '';
 	private token = 0;
@@ -177,8 +245,16 @@ export class Storefronts {
 		return [...this.shops.values()];
 	}
 
-	get holding(): Product | null {
-		return this.held?.product ?? null;
+	/** The basket for the shop the player stands in (null outside a shop). */
+	get basket(): Basket | null {
+		const shop = this.insideId ? this.shops.get(this.insideId) : undefined;
+		return shop ? this.basketFor(shop) : null;
+	}
+
+	private basketFor(shop: Shop): Basket {
+		const group = this.cart?.groups.find((g) => g.merchant_id === shop.merchant_id);
+		const lines = group?.lines ?? [];
+		return { shop, lines, count: lines.reduce((n, l) => n + l.quantity, 0), total_minor: group?.subtotal_minor ?? 0 };
 	}
 
 	/** The shop the player stands in (or at the door of). */
@@ -230,19 +306,48 @@ export class Storefronts {
 		}
 		this.o.collision.doors = doors;
 		this.doorsKey = '';
-		if (this.held && !next.has(this.held.shop.id)) this.drop();
 	}
 	private collisionOwners: string[] = [];
 
-	/** Show the buyer's cart lines for each merchant inside that merchant's 3D cart. */
+	/** The buyer's cart: each shop's lines are the basket carried in that shop. */
 	setCart(cart: Cart | null): void {
 		this.cart = cart;
-		for (const b of this.built.values()) void this.fillCart(b);
+		this.basketChanged();
+	}
+
+	private basketChanged(): void {
+		this.o.onBasket?.(this.basket);
+		void this.refreshCarry();
+	}
+
+	/** Paid at the counter: the basket becomes a paper bag in the shop's colours, carried for a
+	 *  minute. */
+	handOver(shop: Shop): void {
+		this.bagColors = { primary: shop.primary_color, accent: shop.accent_color };
+		this.bagUntil = performance.now() + BAG_MS;
+		void this.refreshCarry();
+	}
+
+	/** Riding (or otherwise busy): put what is carried away until walking again. */
+	stow(stowed: boolean): void {
+		if (stowed === this.stowed) return;
+		this.stowed = stowed;
+		void this.refreshCarry();
 	}
 
 	/** Per frame, after the player moved. */
 	update(px: number, pz: number, yaw: number): void {
 		if (this.disposed) return;
+		const inside = this.shopAt(px, pz, 0.2)?.id ?? null;
+		if (inside !== this.insideId) {
+			this.insideId = inside;
+			this.basketChanged();
+		}
+		if (this.bagUntil && performance.now() > this.bagUntil) {
+			this.bagUntil = 0;
+			void this.refreshCarry();
+		}
+		this.keepUpright();
 		const nearby: { shop: Shop; d: number }[] = [];
 		for (const shop of this.shops.values()) {
 			const d = Math.hypot(shop.unit.door_x - px, shop.unit.door_z - pz);
@@ -283,33 +388,29 @@ export class Storefronts {
 				const d = Math.hypot(dx, dz);
 				return d <= reach && (d < close || (dx * fx + dz * fz) / d > facing) ? d : Infinity;
 			};
-			if (this.held) {
-				if (near(inside.cart.x, inside.cart.z, CART_REACH, -0.2, 1.2) < Infinity && this.held.shop.merchant_id === shop.merchant_id)
-					found = { kind: 'cart', shop, product: this.held.product, label: `Put ${this.held.product.name} in the cart` };
-				else found = { kind: 'putback', shop, product: this.held.product, label: `Put ${this.held.product.name} back` };
-			} else {
-				let best: Slot | null = null;
-				let bestD = Infinity;
-				for (const slot of inside.slots) {
-					const d = near(slot.x, slot.z, REACH, 0.25);
-					if (d < bestD) {
-						bestD = d;
-						best = slot;
-					}
+			let best: Slot | null = null;
+			let bestD = Infinity;
+			for (const slot of inside.slots) {
+				const d = near(slot.x, slot.z, REACH, 0.25);
+				if (d < bestD) {
+					bestD = d;
+					best = slot;
 				}
-				if (best)
-					found = {
-						kind: 'pickup',
-						shop,
-						product: best.product,
-						label: best.product.in_stock
-							? `Pick up ${best.product.name} · ${money(best.product.price_minor)}`
+			}
+			if (best)
+				found = {
+					kind: 'take',
+					shop,
+					product: best.product,
+					label: !shop.is_open
+						? `${shop.name} is closed`
+						: best.product.in_stock
+							? `Put ${best.product.name} in your basket · ${money(best.product.price_minor)}`
 							: `${best.product.name} is sold out`
-					};
-				else if (near(inside.counter.x, inside.counter.z, COUNTER_REACH, -0.2, 1.4) < Infinity)
-					found = { kind: 'counter', shop, label: 'Pay at the counter (demo checkout)' };
-				else if (near(inside.cart.x, inside.cart.z, CART_REACH, -0.2, 1.2) < Infinity)
-					found = { kind: 'counter', shop, label: 'Review your cart' };
+				};
+			else if (near(inside.counter.x, inside.counter.z, COUNTER_REACH, -0.2, 1.4) < Infinity) {
+				const basket = this.basketFor(shop);
+				found = { kind: 'counter', shop, label: basket.count ? `Pay at the counter · ${money(basket.total_minor)}` : 'The counter' };
 			}
 		} else {
 			for (const b of this.built.values()) {
@@ -334,41 +435,82 @@ export class Storefronts {
 		return this.current;
 	}
 
-	/** Take a product off the shelf: it appears in the avatar's hand. */
-	async hold(shop: Shop, product: Product): Promise<void> {
-		this.drop();
-		const mesh = await productModel(product.model, 0.22);
-		if (product.image_url) applyPhoto(mesh, product.image_url);
-		this.held = { product, shop, mesh };
-		this.attachHeld(mesh);
-		this.o.setHolding(true);
-		this.current = null; // re-evaluate the prompt next frame
+	/** Carry what the moment calls for: the basket with the picks, the paper bag, or nothing. */
+	private async refreshCarry(): Promise<void> {
+		if (this.disposed) return;
+		const shop = this.insideId ? this.shops.get(this.insideId) : undefined;
+		const basket = shop ? this.basketFor(shop) : null;
+		let key = '';
+		let make: (() => Promise<THREE.Object3D>) | null = null;
+		if (this.stowed) key = '';
+		else if (basket?.count) {
+			const lines = basket.lines;
+			key = `basket:${lines.map((l) => `${l.product_id}x${l.quantity}`).join(',')}`;
+			make = () => basketModel(lines);
+		} else if (performance.now() < this.bagUntil) {
+			key = 'bag';
+			const colors = this.bagColors;
+			make = async () => bagModel(colors);
+		}
+		if (key === this.carryKey) return;
+		this.carryKey = key;
+		const token = ++this.carryToken;
+		const mesh = make ? await make() : null;
+		if (token !== this.carryToken || this.disposed) {
+			if (mesh) disposeOwned(mesh);
+			return;
+		}
+		this.removeCarried();
+		if (mesh) {
+			this.carried = { key, mesh };
+			this.attachCarried();
+		}
+		this.o.setHolding(!!mesh);
 	}
 
-	private attachHeld(mesh: THREE.Object3D): void {
+	private attachCarried(): void {
+		if (!this.carried) return;
+		const { mesh } = this.carried;
+		// The handle sits in the palm; the rest hangs below it (see keepUpright).
 		if (this.wrist) {
-			mesh.position.set(0, -0.12, 0.06);
+			mesh.position.set(0, -0.08, 0.03);
 			this.wrist.add(mesh);
 		} else {
-			mesh.position.set(0.25, 1.0, 0.35);
+			mesh.position.set(0.25, 0.95, 0.2);
 			this.o.avatar.add(mesh);
+		}
+		this.keepUpright();
+	}
+
+	/** Whatever the hand's angle, a carried basket or bag hangs straight down, facing the way the
+	 *  player faces. */
+	private keepUpright(): void {
+		const mesh = this.carried?.mesh;
+		if (!mesh?.parent) return;
+		mesh.parent.getWorldQuaternion(upright.parent);
+		this.o.avatar.getWorldQuaternion(upright.facing);
+		mesh.quaternion.copy(upright.parent.invert().multiply(upright.facing));
+	}
+
+	private removeCarried(): void {
+		if (!this.carried) return;
+		this.carried.mesh.removeFromParent();
+		disposeOwned(this.carried.mesh);
+		this.carried = null;
+	}
+
+	/** The avatar model was swapped (a new outfit): find the wrist again and move what is carried. */
+	rebindAvatar(): void {
+		this.wrist = this.o.avatar.getObjectByName('RightWrist') ?? null;
+		if (this.carried) {
+			this.carried.mesh.removeFromParent();
+			this.attachCarried();
 		}
 	}
 
-	/** The avatar model was swapped (avatar style): find the wrist again and move a held product. */
-	rebindAvatar(): void {
-		this.wrist = this.o.avatar.getObjectByName('RightWrist') ?? null;
-		if (this.held) this.attachHeld(this.held.mesh);
-	}
-
-	/** Put the held product back (or drop it after it went into the cart). */
-	drop(): void {
-		if (!this.held) return;
-		this.held.mesh.removeFromParent();
-		disposeOwned(this.held.mesh);
-		this.held = null;
-		this.o.setHolding(false);
-		this.current = null;
+	/** Test and debug inspection: what the avatar carries ('basket:…', 'bag' or ''). */
+	get carrying(): string {
+		return this.carried?.key ?? '';
 	}
 
 	private async build(shop: Shop): Promise<void> {
@@ -454,13 +596,8 @@ export class Storefronts {
 			tint(table, shop.primary_color, shop.accent_color);
 			place(table, { ...layout.table, fa: 1, fn: 0 });
 			place(await fitting('counter'), layout.counter);
-			const cart = await fitting('cart');
-			place(cart, layout.cart);
-			const cartContents = new THREE.Group();
+			place(await fitting('cart'), layout.cart); // by the door, for the look of a shop
 			const [cx, cz] = toWorld(f, layout.cart.a, layout.cart.n);
-			cartContents.position.set(cx, ground + 0.62, cz);
-			cartContents.rotation.y = yawFacing(f, layout.cart.fa, layout.cart.fn);
-			group.add(cartContents);
 			const [kx, kz] = toWorld(f, layout.counter.a, layout.counter.n - 0.6);
 
 			if (this.disposed || !this.shops.has(shop.id)) {
@@ -476,7 +613,6 @@ export class Storefronts {
 				ground,
 				group,
 				products,
-				cartContents,
 				slots: [],
 				cart: { x: cx, z: cz, y: ground },
 				counter: { x: kx, z: kz },
@@ -486,7 +622,6 @@ export class Storefronts {
 				token
 			};
 			this.built.set(shop.id, b);
-			void this.fillCart(b);
 		} catch (error) {
 			console.warn('Storefront failed to build', shop.unit.code, error);
 		} finally {
@@ -555,23 +690,6 @@ export class Storefronts {
 		}
 	}
 
-	private async fillCart(b: Built): Promise<void> {
-		for (const child of [...b.cartContents.children]) {
-			child.removeFromParent();
-			disposeOwned(child);
-		}
-		const group = this.cart?.groups.find((g) => g.merchant_id === b.shop.merchant_id);
-		if (!group) return;
-		const lines = group.lines.flatMap((l) => Array.from({ length: Math.min(l.quantity, 3) }, () => l)).slice(0, 8);
-		for (const [i, line] of lines.entries()) {
-			const mesh = await productModel(line.model, 0.16);
-			if (line.image_url) applyPhoto(mesh, line.image_url);
-			mesh.position.set(((i % 2) - 0.5) * 0.18, Math.floor(i / 4) * 0.12, ((Math.floor(i / 2) % 2) - 0.5) * 0.22);
-			mesh.rotation.y = i * 0.7;
-			b.cartContents.add(mesh);
-		}
-	}
-
 	private unbuild(id: string): void {
 		const b = this.built.get(id);
 		if (!b) return;
@@ -605,7 +723,7 @@ export class Storefronts {
 
 	dispose(): void {
 		this.disposed = true;
-		this.drop();
+		this.removeCarried();
 		for (const id of [...this.built.keys()]) this.unbuild(id);
 		for (const key of this.collisionOwners) this.o.collision.removeOwner(key);
 		this.o.collision.doors = [];

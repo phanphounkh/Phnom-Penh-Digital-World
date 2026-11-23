@@ -109,7 +109,7 @@
 	{#if step === 'cart'}
 		<div class="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
 			{#if !cart || !cart.item_count}
-				<p class="text-sm text-ink-soft">Your cart is empty. Walk into a shop, pick up a product (E) and put it in the shop's cart (E).</p>
+				<p class="text-sm text-ink-soft">Your cart is empty. In a shop, E at a shelf puts things in your basket and you pay at the counter. To order ahead for pickup or delivery, browse a shop at its door.</p>
 			{/if}
 			{#each cart?.groups ?? [] as g (g.merchant_id)}
 				<div class="rounded-xl border border-river-900/10 bg-white p-3">

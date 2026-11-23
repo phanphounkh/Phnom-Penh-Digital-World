@@ -410,6 +410,13 @@ class CheckoutIn(BaseModel):
     _clean = field_validator("note")(classmethod(lambda cls, v: _text(v)))
 
 
+class CounterIn(BaseModel):
+    """Paying at a shop's counter for the basket: the total the buyer saw on the counter."""
+
+    expected_total_minor: int = Field(ge=1)
+    age_confirmed: bool = False
+
+
 class OrderItemOut(Schema):
     product_id: uuid.UUID | None
     name: str
@@ -452,6 +459,7 @@ class OrderOut(BaseModel):
     events: list[OrderEventOut]
     refunded_minor: int = 0
     allowed: list[str] = []  # statuses the caller may move this order to
+    in_person: bool = False  # bought and handed over at the shop's counter
 
 
 class PaymentOut(BaseModel):

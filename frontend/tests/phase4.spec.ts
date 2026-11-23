@@ -2,8 +2,9 @@
  * Phase 4 end-to-end, on the isolated E2E stack (API :8001 with its own database):
  * a seller applies, an administrator approves, the seller walks to a real shop unit in the city
  * and claims it there, then stocks it from My shop (the in-game panel); a buyer walks into the
- * shop in 3D, picks a product up (E), puts it in the cart (E), pays at the counter with the demo
- * checkout; the seller fulfils the order in My shop as it arrives.
+ * shop in 3D, puts products in the basket at the shelf (E), and pays at the counter in one step:
+ * handed over at once, nothing for the seller to do. Then an order placed ahead for pickup: the
+ * seller prepares it in My shop as it arrives, and the buyer collects it at the same counter.
  * Two sellers racing for one unit: exactly one wins.
  */
 import { crc32, deflateSync } from 'node:zlib';
@@ -113,7 +114,8 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	await expect(sp.getByTestId('hud-net')).toHaveAttribute('data-status', 'open', { timeout: 30_000 });
 	const myShop = sp.getByTestId('my-shop');
 	await expect(myShop).toBeVisible({ timeout: 15_000 });
-	await expect(myShop.getByTestId('merchant-status')).toHaveAttribute('data-status', 'pending');
+	// (Loading is slow while software rendering keeps the page busy.)
+	await expect(myShop.getByTestId('merchant-status')).toHaveAttribute('data-status', 'pending', { timeout: 20_000 });
 	await expect(myShop.getByTestId('myshop-tab-spot')).toBeDisabled(); // nothing to claim before approval
 	await sp.keyboard.press('Escape');
 	await expect(myShop).toHaveCount(0);
@@ -130,7 +132,7 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 
 	// ── Approved: My shop (toolbar) shows what to do next; Spot lists free spots nearby. ──
 	await sp.getByTestId('open-my-shop').click();
-	await expect(myShop.getByTestId('merchant-status')).toHaveAttribute('data-status', 'approved');
+	await expect(myShop.getByTestId('merchant-status')).toHaveAttribute('data-status', 'approved', { timeout: 20_000 });
 	await expect(myShop.getByText('Get your shop open')).toBeVisible();
 	await myShop.getByTestId('myshop-tab-spot').click();
 	await expect(myShop.getByTestId('free-spot').first()).toBeVisible({ timeout: 15_000 });
@@ -219,32 +221,61 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 		await buyer.page.evaluate(`new Promise((done) => { const p = __ppwShops.points('${shop.id}'); const t = ${target}; __ppwNet.city.walkTo([[t.x, t.z]], done); })`);
 	};
 	await canvas.click({ position: { x: 20, y: 300 } }); // keyboard focus on the game
+	const carrying = () => ev<string>(buyer.page, `__ppwShops.carrying`);
+	const basket = buyer.page.getByTestId('basket');
+
+	// ── E at the shelf puts it in the basket, which appears in the buyer's hand. ─────────
 	await walk(`p.slots.find((s) => s.product === 'Num pang')`);
-	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'pickup', { timeout: 20_000 });
+	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'take', { timeout: 20_000 });
+	await expect(buyer.page.getByTestId('shop-prompt')).toContainText('Put Num pang in your basket · $2.50');
 	await buyer.page.screenshot({ path: 'artifacts/phase4-shelf.png' });
 	await buyer.page.keyboard.press('e');
-	await expect(buyer.page.getByTestId('held-product')).toContainText('Num pang');
-	await walk('p.cart');
-	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'cart', { timeout: 20_000 });
-	await buyer.page.screenshot({ path: 'artifacts/phase4-shop-interior.png' });
-	await buyer.page.keyboard.press('e');
-	await expect(buyer.page.getByTestId('cart-count')).toHaveText('1', { timeout: 15_000 });
-	await expect(buyer.page.getByTestId('held-product')).toHaveCount(0);
+	await expect(basket).toHaveAttribute('data-count', '1', { timeout: 15_000 });
+	await buyer.page.keyboard.press('e'); // one more
+	await expect(basket).toHaveAttribute('data-count', '2', { timeout: 15_000 });
+	await expect(basket).toContainText('$5.00');
+	await expect.poll(carrying, { timeout: 15_000 }).toMatch(/^basket:/);
 
-	// ── Pay at the counter with the demo checkout. ───────────────────────────────────────
+	// ── At the counter: one screen, one Pay. It is handed over at once. ─────────────────
 	await walk('p.counter');
 	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'counter', { timeout: 20_000 });
+	await expect(buyer.page.getByTestId('shop-prompt')).toContainText('Pay at the counter · $5.00');
+	await buyer.page.screenshot({ path: 'artifacts/phase4-shop-interior.png' });
 	await buyer.page.keyboard.press('e');
-	await expect(buyer.page.getByTestId('cart-total')).toHaveText('$2.50');
+	const counter = buyer.page.getByTestId('counter');
+	await expect(counter.getByTestId('counter-total')).toHaveText('$5.00');
+	await counter.getByRole('button', { name: 'One less Num pang' }).click();
+	await expect(counter.getByTestId('counter-total')).toHaveText('$2.50');
+	await counter.getByTestId('counter-pay').click();
+	await expect(counter.getByTestId('counter-receipt')).toContainText("Paid. It's yours.");
+	await expect(counter.getByTestId('counter-receipt')).toContainText('1 × Num pang');
+	await expect.poll(carrying, { timeout: 15_000 }).toBe('bag');
+	await expect(basket).toHaveCount(0);
+	await buyer.page.screenshot({ path: 'artifacts/phase4-checkout.png' });
+	await counter.getByTestId('counter-done').click();
+	await expect(counter).toHaveCount(0);
+
+	// The seller did nothing: the sale is done, and their figures show it.
+	await sp.getByTestId('open-my-shop').click();
+	await expect(myShop.getByTestId('revenue')).toContainText('$2.50', { timeout: 15_000 });
+	await myShop.getByTestId('myshop-tab-orders').click();
+	await myShop.getByRole('radio', { name: 'All' }).click();
+	await expect(myShop.getByTestId('merchant-order').filter({ hasText: buyerName })).toHaveAttribute('data-status', 'completed');
+
+	// ── Ordering ahead still works: browse, order for pickup, the seller prepares it, and
+	// the buyer collects it at the same counter. ─────────────────────────────────────────
+	await buyer.page.getByLabel('Places & shops (M)').click();
+	await buyer.page.getByTestId(`shop-row-${unit!.code}`).getByRole('button', { name: 'Browse' }).click();
+	await buyer.page.getByTestId('add-Iced coffee').click();
+	await expect(buyer.page.getByTestId('shop-panel')).toContainText('Iced coffee is in your basket');
+	await buyer.page.keyboard.press('c'); // the cart: order ahead
+	await expect(buyer.page.getByTestId('cart-total')).toHaveText('$1.50');
 	await buyer.page.getByTestId('place-order').click();
 	await buyer.page.getByTestId('pay-demo').click();
 	await expect(buyer.page.getByTestId('checkout-done')).toContainText('Paid (demo)');
-	await buyer.page.screenshot({ path: 'artifacts/phase4-checkout.png' });
+	await buyer.page.keyboard.press('Escape');
 
-	// ── The seller fulfils the order in My shop (it arrives live); the buyer collects it. ──
-	await sp.getByTestId('open-my-shop').click();
-	await myShop.getByTestId('myshop-tab-orders').click();
-	const order = myShop.getByTestId('merchant-order').filter({ hasText: buyerName });
+	const order = myShop.getByTestId('merchant-order').filter({ hasText: 'Iced coffee' });
 	await expect(order).toHaveAttribute('data-status', 'paid', { timeout: 15_000 });
 	for (const step of ['merchant_accepted', 'preparing', 'ready_for_pickup']) {
 		await order.getByTestId(`order-${step}`).click();
@@ -252,11 +283,18 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	}
 	await sp.screenshot({ path: 'artifacts/phase4-seller-orders.png' });
 	await myShop.getByTestId('myshop-tab-today').click();
-	await expect(myShop.getByTestId('revenue')).toContainText('$2.50');
+	await expect(myShop.getByTestId('revenue')).toContainText('$4.00');
 
-	await buyer.page.goto('/orders');
-	await buyer.page.getByTestId('order-received').click();
-	await expect(buyer.page.getByTestId('buyer-order').first()).toHaveAttribute('data-status', 'completed');
+	await canvas.click({ position: { x: 20, y: 300 } });
+	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'counter', { timeout: 20_000 });
+	await buyer.page.keyboard.press('e');
+	await counter.getByTestId('counter-collect').click();
+	await expect(counter.getByTestId('counter-notice')).toContainText('is yours');
+	const mine = (await (await buyer.api.get('/api/v1/orders')).json()) as { status: string; in_person: boolean }[];
+	expect(mine.map((o) => [o.status, o.in_person]).sort()).toEqual([
+		['completed', false],
+		['completed', true]
+	]);
 
 	// Leave the units free for the next run (the isolated stack also resets on start).
 	for (const who of [seller, rival])

@@ -4,7 +4,7 @@
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
-		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
+		ShoppingCart, ShoppingBasket, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
 		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt
 	} from 'lucide-svelte';
 	import ChatBox from '$lib/components/world/ChatBox.svelte';
@@ -16,6 +16,7 @@
 	import WalletPanel from '$lib/components/world/WalletPanel.svelte';
 	import Wardrobe from '$lib/components/world/Wardrobe.svelte';
 	import SystemOffice from '$lib/components/world/SystemOffice.svelte';
+	import CounterPanel from '$lib/components/world/CounterPanel.svelte';
 	import MyShop from '$lib/components/myshop/MyShop.svelte';
 	import type { Here } from '$lib/components/myshop/types';
 	import { SYSTEM_OFFICE_DOOR, SYSTEM_OFFICE_ID } from '$lib/game/buildings/placements';
@@ -23,8 +24,8 @@
 	import { transport, type Vehicle } from '$lib/api/transport';
 	import { formatDistance, formatDuration } from '$lib/game/vehicles/route';
 	import { MODES, type TravelMode } from '$lib/game/vehicles/specs';
-	import { market, money, shopping, type Cart, type Product, type Shop } from '$lib/api/market';
-	import type { Interaction, Storefronts } from '$lib/game/shop/Storefronts';
+	import { market, money, shopping, type Cart, type Shop } from '$lib/api/market';
+	import type { Basket, Interaction, Storefronts } from '$lib/game/shop/Storefronts';
 	import type { BuildingInteraction, Buildings, Inspection } from '$lib/game/buildings/Buildings';
 	import type { WorldSession } from '$lib/game/net/WorldSession.svelte';
 	import type { EmoteName } from '$lib/game/net/protocol';
@@ -68,7 +69,10 @@
 	let inspection = $state<Inspection | null>(null);
 	let shopList = $state<Shop[]>([]);
 	let prompt = $state<Interaction | null>(null);
-	let held = $state<Product | null>(null);
+	/** What the player picked in the shop they stand in (carried in a basket). */
+	let basket = $state<Basket | null>(null);
+	/** The shop whose counter is open. */
+	let counterShop = $state<Shop | null>(null);
 	let cart = $state<Cart | null>(null);
 	let browsing = $state<Shop | null>(null);
 	let insideShop = $state<Shop | null>(null);
@@ -137,7 +141,8 @@
 					terrain: created.terrain,
 					avatar: created.avatar,
 					setHolding: (h) => created.setHolding(h),
-					onInteraction: (i) => (prompt = i)
+					onInteraction: (i) => (prompt = i),
+					onBasket: (b) => (basket = b)
 				});
 				(globalThis as { __ppwShops?: unknown }).__ppwShops = shops;
 				const [{ Buildings }, { ENTERABLE, AUTO_ENTERABLE }] = await Promise.all([import('$lib/game/buildings/Buildings'), import('$lib/game/buildings/placements')]);
@@ -184,8 +189,10 @@
 					if (created.riding) {
 						if (prompt) prompt = null;
 						if (housePrompt) housePrompt = null;
+						shops?.stow(true); // the basket or bag waits until walking again
 						return; // no shopping from the saddle
 					}
+					shops?.stow(false);
 					houses?.update(dt, me.x, me.z, me.yaw);
 					if (office && houses?.insideOf !== `osm:${SYSTEM_OFFICE_ID}`) office = false; // walked out
 					const named = houses?.insideName ?? null;
@@ -193,6 +200,7 @@
 					shops?.update(me.x, me.z, me.yaw);
 					const here = shops?.shopAt(me.x, me.z) ?? null;
 					if (here?.id !== insideShop?.id) insideShop = here;
+					if (counterShop && shops?.shopAt(me.x, me.z, 0.5)?.id !== counterShop.id) counterShop = null; // walked out
 				});
 				await loadShops();
 				if (canBuy) shopping.cart().then(setCart).catch(() => {});
@@ -209,7 +217,7 @@
 		geo.spawnPoints().then((p) => (places = p)).catch(() => {});
 		const onKey = (e: KeyboardEvent) => {
 			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-			if (wardrobe || office) return; // they have their own keys (Escape closes them)
+			if (wardrobe || office || counterShop) return; // they have their own keys (Escape closes them)
 			if (myShop) {
 				// Walking still works (the city reads its own keys); B or Escape (in the panel) closes it.
 				if (!typing && e.key.toLowerCase() === 'b') myShop = false;
@@ -278,33 +286,28 @@
 		shops?.setCart(c);
 	}
 
-	/** E: the action the prompt shows (pick up, put in the cart, put back, pay, browse). */
+	/** E: the action the prompt shows (into the basket, the counter, browse the shop). */
 	async function interact() {
 		const i = shops?.interaction;
 		if (!i || !shops) return;
 		if (i.kind === 'browse') {
 			browsing = i.shop;
 			panel = 'shop';
-		} else if (i.kind === 'pickup') {
-			if (!i.product.in_stock) return net?.say(`${i.product.name} is sold out.`);
+		} else if (i.kind === 'take') {
 			if (!i.shop.is_open) return net?.say(`${i.shop.name} is closed.`);
-			await shops.hold(i.shop, i.product);
-			held = i.product;
-		} else if (i.kind === 'putback') {
-			shops.drop();
-			held = null;
-		} else if (i.kind === 'cart') {
+			if (!i.product.in_stock) return net?.say(`${i.product.name} is sold out.`);
 			if (!canBuy) return net?.say('Choose the buyer role to shop.', 'warning');
 			try {
 				setCart(await shopping.add(i.product.id, 1, i.shop.id));
-				net?.say(`${i.product.name} is in your cart.`);
-				shops.drop();
-				held = null;
+				const b = shops.basket;
+				net?.say(`${i.product.name} is in your basket${b?.count ? ` (${b.count} item${b.count === 1 ? '' : 's'}, ${money(b.total_minor)})` : ''}.`);
 			} catch (e) {
-				net?.say(e instanceof Error ? e.message : 'Could not add to the cart.', 'warning');
+				net?.say(e instanceof Error ? e.message : 'Could not put it in the basket.', 'warning');
 			}
 		} else if (i.kind === 'counter') {
-			panel = 'cart';
+			panel = '';
+			chatOpen = false;
+			counterShop = i.shop;
 		}
 	}
 
@@ -317,7 +320,6 @@
 		}
 		const v = net.reachable;
 		if (!v) return net.say('Walk up to one of your vehicles to ride it (V lists them).');
-		if (held) return net.say('Put the product back or in the cart first.', 'warning');
 		net.mount(v.id);
 	}
 
@@ -474,7 +476,7 @@
 		city?.setShowcase(null);
 		if (net) net.remotes.hideTags = false;
 	}
-	/** Wear it now (a product held in a shop moves to the new model's hand if it was rebuilt). */
+	/** Wear it now (a carried basket or bag moves to the new model's hand if it was rebuilt). */
 	async function wearOutfit(next: Avatar) {
 		await city?.setAvatar(next);
 		shops?.rebindAvatar();
@@ -531,7 +533,7 @@
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office} class:myshop-open={myShop} data-panel-open={!!panel} data-chat-open={chatOpen}>
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office || !!counterShop} class:myshop-open={myShop} data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -706,16 +708,13 @@
 					</button>
 				{/if}
 			</div>
-		{:else if prompt || held}
+		{:else if prompt || basket?.count}
 			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
-				{#if held}
-					<div class="flex items-center gap-3 rounded-2xl bg-paper px-3 py-2 text-ink shadow-xl" data-testid="held-product">
-						{#if held.image_url}<img src={held.image_url} alt="" class="h-12 w-12 rounded-lg object-cover" />{:else}<Package size={28} class="text-ink-soft" />{/if}
-						<div class="max-w-56">
-							<p class="truncate text-sm font-semibold">{held.name}</p>
-							<p class="text-xs text-ink-soft">{money(held.price_minor)} · {held.stock} in stock{held.min_age ? ` · ${held.min_age}+` : ''}</p>
-							{#if held.description}<p class="line-clamp-2 text-[11px] text-ink-soft">{held.description}</p>{/if}
-						</div>
+				{#if basket?.count}
+					<div class="basket-chip" data-testid="basket" data-count={basket.count}>
+						<ShoppingBasket size={16} />
+						<span>Basket · {basket.count} item{basket.count === 1 ? '' : 's'} · {money(basket.total_minor)}</span>
+						{#if prompt?.kind !== 'counter'}<span class="muted">Pay at the counter</span>{/if}
 					</div>
 				{/if}
 				{#if prompt}
@@ -749,6 +748,17 @@
 
 	{#if office}
 		<SystemOffice solid={quality === 'low'} onClose={() => (office = false)} onMyShop={openMyShop} />
+	{/if}
+
+	{#if counterShop}
+		<CounterPanel
+			shop={counterShop}
+			{cart}
+			solid={quality === 'low'}
+			onCart={setCart}
+			onPaid={() => counterShop && shops?.handOver(counterShop)}
+			onClose={() => (counterShop = null)}
+		/>
 	{/if}
 
 	{#if myShop}
@@ -906,7 +916,7 @@
 					<dt class="font-mono font-semibold">P</dt><dd>People: friends, messages, blocking</dd>
 					<dt class="font-mono font-semibold">Enter</dt><dd>Chat (Tab: nearby ↔ world)</dd>
 					<dt class="font-mono font-semibold">1 – 4</dt><dd>Wave · Sampeah · Cheer · Dance</dd>
-					<dt class="font-mono font-semibold">E</dt><dd>In a shop: pick up, put in the cart, pay at the counter · in the house: doors, light switches, the TV and stove, sit down, look at things</dd>
+					<dt class="font-mono font-semibold">E</dt><dd>In a shop: at a shelf, into your basket · at the counter, pay (it's yours at once) or collect an order · in the house: doors, light switches, the TV and stove, sit down, look at things</dd>
 					<dt class="font-mono font-semibold">C</dt><dd>Cart and demo checkout</dd>
 					<dt class="font-mono font-semibold">V</dt><dd>My vehicles: get a bicycle or motorbike, find it, bring it</dd>
 					<dt class="font-mono font-semibold">F</dt><dd>Ride your vehicle when next to it · park it (at the kerb, a car park or an alley)</dd>
@@ -970,6 +980,10 @@
 	.hud-glass { background: rgba(11, 37, 36, 0.4); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgba(255, 255, 255, 0.14); text-shadow: 0 1px 2px rgba(11, 37, 36, 0.6); }
 	/* At the System Office's counter: its panel takes the top right. */
 	.office-open :is(.world-toolbar, .world-action, .world-guidance) { display: none; }
+	.compact.office-open :is(.world-touch, .world-chat, .chat-toggle) { display: none; }
+	/* The basket in hand, above the action prompt. */
+	.basket-chip { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #fffaf0; background: rgba(11, 37, 36, 0.55); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.5); }
+	.basket-chip .muted { font-weight: 500; opacity: 0.75; }
 	/* My shop takes the right side (a sheet on a phone). */
 	.myshop-open :is(.world-toolbar, .world-action, .world-guidance, .chat-toggle) { display: none; }
 	.compact.myshop-open :is(.world-touch, .world-chat, .world-status, .world-minimap) { display: none; }
