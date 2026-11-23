@@ -5,7 +5,7 @@
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
 		ShoppingCart, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
-		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2
+		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt
 	} from 'lucide-svelte';
 	import ChatBox from '$lib/components/world/ChatBox.svelte';
 	import PeoplePanel from '$lib/components/world/PeoplePanel.svelte';
@@ -14,6 +14,7 @@
 	import GaragePanel from '$lib/components/world/GaragePanel.svelte';
 	import DriverPanel from '$lib/components/world/DriverPanel.svelte';
 	import WalletPanel from '$lib/components/world/WalletPanel.svelte';
+	import Wardrobe from '$lib/components/world/Wardrobe.svelte';
 	import VehicleIcon from '$lib/components/world/VehicleIcon.svelte';
 	import { transport, type Vehicle } from '$lib/api/transport';
 	import { formatDistance, formatDuration } from '$lib/game/vehicles/route';
@@ -23,8 +24,8 @@
 	import type { BuildingInteraction, Buildings, Inspection } from '$lib/game/buildings/Buildings';
 	import type { WorldSession } from '$lib/game/net/WorldSession.svelte';
 	import type { EmoteName } from '$lib/game/net/protocol';
-	import { geo } from '$lib/api/endpoints';
-	import type { SpawnPoint } from '$lib/api/types';
+	import { geo, me } from '$lib/api/endpoints';
+	import type { Avatar, SpawnPoint } from '$lib/api/types';
 	import { compassLabel } from '$lib/geo/projection';
 	import type { CityController, CityState, Quality, TimeMode } from '$lib/game/city/CityEngine';
 	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
@@ -194,6 +195,8 @@
 		geo.spawnPoints().then((p) => (places = p)).catch(() => {});
 		const onKey = (e: KeyboardEvent) => {
 			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+			if (wardrobe) return; // the wardrobe has its own keys (Escape closes it)
+			if (!typing && e.key.toLowerCase() === 'o' && !panel) return openWardrobe();
 			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
 			if (typing) return;
@@ -398,6 +401,34 @@
 		city?.setQuality(q);
 	}
 
+	// ── wardrobe ─────────────────────────────────────────────────────────────────────
+	let wardrobe = $state(false);
+	/** What the player wore when the wardrobe opened. */
+	let wardrobeOutfit = $state<Avatar | null>(null);
+	/** Room for the glass panel: beside the avatar on a wide screen, below it on a narrow one. */
+	const showcaseView = () => (window.innerWidth >= 900 ? { right: 0.75 } : { down: 1.2, distance: 4.3, pitch: 0.28 });
+	function openWardrobe() {
+		if (!city || city.riding || wardrobe) return;
+		panel = '';
+		chatOpen = false;
+		wardrobeOutfit = city.outfit;
+		wardrobe = true;
+		city.setShowcase(showcaseView());
+		if (net) net.remotes.hideTags = true;
+	}
+	function closeWardrobe() {
+		wardrobe = false;
+		city?.setShowcase(null);
+		if (net) net.remotes.hideTags = false;
+	}
+	function previewOutfit(next: Avatar) {
+		void city?.setAvatar(next);
+	}
+	async function saveOutfit(next: Avatar) {
+		await me.saveAvatar(next);
+		await city?.setAvatar(next);
+	}
+
 	async function setAvatarStyle(style: AvatarStyle) {
 		if (!city || avatarSwitching || style === avatarStyle) return;
 		avatarSwitching = true;
@@ -455,7 +486,7 @@
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact data-panel-open={!!panel} data-chat-open={chatOpen}>
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -504,6 +535,7 @@
 					{#if id === 'cart' && cart?.item_count}<span class="absolute -mt-7 ml-7 rounded-full bg-saffron-500 px-1.5 text-[10px] font-bold text-river-950" data-testid="cart-count">{cart.item_count}</span>{/if}
 				</button>
 			{/each}
+			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={openWardrobe}><Shirt size={19} /></button>
 			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
 		</nav>
 
@@ -667,6 +699,18 @@
 				<span></span><button class="pad" aria-label="Back" {...pad('s')}><ChevronDown /></button><button class="pad" aria-label="Jump" {...pad(' ')}><ArrowBigUp size={18} /></button>
 			</div>
 		{/if}
+	{/if}
+
+	{#if wardrobe && wardrobeOutfit}
+		<Wardrobe
+			outfit={wardrobeOutfit}
+			look={avatarStyle}
+			solid={quality === 'low'}
+			onLook={(style) => void setAvatarStyle(style)}
+			onPreview={previewOutfit}
+			onSave={saveOutfit}
+			onClose={closeWardrobe}
+		/>
 	{/if}
 
 	{#if panel}
@@ -855,6 +899,8 @@
 	.compact .world-speed > :global(div) { padding: 6px 10px; }
 	.compact .world-panel { top: var(--hud-top); right: var(--hud-right); width: min(27rem, calc(100vw - var(--hud-left) - var(--hud-right))); padding: 20px; }
 	.compact[data-panel-open='true'] .world-toolbar, .compact[data-panel-open='true'] .chat-toggle { visibility: hidden; }
+	/* The wardrobe: only the city, the avatar and the glass panel. */
+	.wardrobe-open :is(.world-location, .world-toolbar, .world-minimap, .world-status, .world-chat, .world-speed, .world-guidance, .world-action, .world-touch, .chat-toggle) { display: none; }
 	@media (max-width: 600px) {
 		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }

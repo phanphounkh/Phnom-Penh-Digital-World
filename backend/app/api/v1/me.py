@@ -57,6 +57,7 @@ async def put_avatar(data: AvatarIn, user: CurrentUser, session: SessionDep) -> 
         setattr(avatar, field, value)
     await session.commit()
     await session.refresh(avatar)
+    hub.avatar_changed(user.id, data.model_dump())  # players around see the new outfit at once
     return avatar
 
 

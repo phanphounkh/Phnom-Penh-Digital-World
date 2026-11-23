@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
-import type { ChunkPayload, WorldBootstrap } from '$lib/api/types';
+import type { Avatar, ChunkPayload, WorldBootstrap } from '$lib/api/types';
 import { WorldProjection, compassHeading, yawForHeading } from '$lib/geo/projection';
 import { createCharacter, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { EmoteName } from '$lib/game/net/protocol';
@@ -145,6 +145,15 @@ export interface CityController {
 	playEmote(name: EmoteName): void;
 	/** Realistic or classic avatars (a local display preference; rebuilds the player's model). */
 	setAvatarStyle(style: AvatarStyle): Promise<void>;
+	/** What the player's avatar wears (the avatar description). */
+	readonly outfit: Avatar;
+	/** Wear another avatar: in place where the model can, else rebuilt (the wardrobe's live
+	 * preview; saving it is up to the caller). */
+	setAvatar(avatar: Avatar): Promise<void>;
+	/** The camera turns to face the player, who stands still (movement keys are ignored), with
+	 * the avatar framed `right` metres left of centre and `down` metres higher (room for a panel
+	 * beside or below), from `distance` metres at `pitch` (radians); null: back behind the player. */
+	setShowcase(view: { right?: number; down?: number; distance?: number; pitch?: number } | null): void;
 	/** The avatar style in use (realistic falls back to classic if its models cannot load). */
 	readonly avatarStyle: AvatarStyle;
 	/** Current graphics preset (may start at 'low' on software rendering, see softwareRenderer). */
@@ -291,6 +300,9 @@ export async function createCity(
 	const player = new THREE.Group();
 	player.name = 'player';
 	let character: GameCharacter = await createCharacter(boot.player.avatar, options.avatarStyle ?? 'realistic');
+	/** The wardrobe's view (see setShowcase), and the camera to go back to. */
+	let showcase: { right: number; down: number } | null = null;
+	let beforeShowcase: { pitch: number; distance: number } | null = null;
 	let styleToken = 0;
 	const wear = (c: GameCharacter) => {
 		// The avatar uses the contact blob below instead of the cached shadow map.
@@ -298,6 +310,23 @@ export async function createCity(
 		player.add(c.root);
 	};
 	wear(character);
+	/** Build the player's model again (another style, or parts the current one cannot change),
+	 * and put it on the vehicle if they are riding. The newest request wins. */
+	async function rebuild(style: AvatarStyle): Promise<void> {
+		const token = ++styleToken;
+		const next = await createCharacter(boot.player.avatar, style);
+		if (token !== styleToken || disposed) return next.dispose();
+		const mounted = rider && vehicle ? vehicle : null;
+		rider?.detach(scene);
+		rider = null;
+		character.dispose();
+		character = next;
+		wear(next);
+		if (mounted) {
+			player.rotation.set(0, 0, 0);
+			rider = character.mount(mounted, player);
+		}
+	}
 	scene.add(player);
 	const frameCallbacks = new Set<(dt: number) => void>();
 	const shadowBlob = new THREE.Mesh(
@@ -386,7 +415,7 @@ export async function createCity(
 		return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
 	};
 	const onKeyDown = (e: KeyboardEvent) => {
-		if (typing(e)) return;
+		if (typing(e) || showcase) return;
 		const k = e.key.toLowerCase();
 		if (k === ' ') {
 			e.preventDefault(); // no page scroll, no click on a focused HUD button
@@ -645,10 +674,14 @@ export async function createCity(
 		viewDistance = Number.isNaN(viewDistance) ? limit : viewDistance + (limit - viewDistance) * ease;
 		viewPitch = Number.isNaN(viewPitch) ? pitchLimit : viewPitch + (pitchLimit - viewPitch) * ease;
 		const distance = viewDistance;
+		// Showcase: aim at the chest, beside the avatar (it then sits off centre, clear of a panel).
+		const ox = showcase ? Math.cos(camYaw) * showcase.right : 0,
+			oz = showcase ? -Math.sin(camYaw) * showcase.right : 0;
+		const aim = showcase ? head - 0.5 - showcase.down : head;
 		desired.set(
-			px + Math.sin(camYaw) * Math.cos(viewPitch) * distance,
-			head + Math.sin(viewPitch) * distance,
-			pz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
+			px + ox + Math.sin(camYaw) * Math.cos(viewPitch) * distance,
+			aim + Math.sin(viewPitch) * distance,
+			pz + oz + Math.cos(camYaw) * Math.cos(viewPitch) * distance
 		);
 		// Camera collision: the centre ray, and indoors two more at the sides of the near plane,
 		// so a wall just beside the camera is never seen through.
@@ -686,7 +719,7 @@ export async function createCity(
 		if (interior) camera.position.y = Math.min(camera.position.y, interior.ceiling - 0.25);
 		const over = ceilingProvider?.(camera.position.x, camera.position.y, camera.position.z) ?? null;
 		if (over !== null) camera.position.y = Math.min(camera.position.y, over - 0.25);
-		cameraTarget.set(px, head, pz);
+		cameraTarget.set(px + ox, aim, pz + oz);
 		camera.lookAt(cameraTarget);
 		// Small rooms: a short near plane (no wall clipping); outdoors the usual one (depth precision).
 		const near = interior ? 0.1 : 0.3;
@@ -1100,19 +1133,32 @@ export async function createCity(
 			if (!riding) character.emotes.play(name);
 		},
 		async setAvatarStyle(style) {
-			const token = ++styleToken;
-			const next = await createCharacter(boot.player.avatar, style);
-			if (token !== styleToken || disposed) return next.dispose();
-			const mounted = rider && vehicle ? vehicle : null;
-			rider?.detach(scene);
-			rider = null;
-			character.dispose();
-			character = next;
-			wear(next);
-			if (mounted) {
-				player.rotation.set(0, 0, 0);
-				rider = character.mount(mounted, player);
+			await rebuild(style);
+		},
+		get outfit() {
+			return boot.player.avatar;
+		},
+		async setAvatar(avatar) {
+			boot.player.avatar = avatar;
+			if (!character.update(avatar)) await rebuild(character.style);
+		},
+		setShowcase(view) {
+			if (view && !showcase) {
+				beforeShowcase = { pitch: camPitch, distance: camDistance };
+				keys.clear();
+				if (route.length) endRoute(false);
+				camYaw = yaw; // in front, facing the player
+			} else if (!view && showcase) {
+				camYaw = yaw + Math.PI;
+				camPitch = beforeShowcase?.pitch ?? 0.38;
+				camDistance = beforeShowcase?.distance ?? 7.5;
+				beforeShowcase = null;
 			}
+			if (view) {
+				camPitch = view.pitch ?? 0.1;
+				camDistance = view.distance ?? 3.3;
+			}
+			showcase = view ? { right: view.right ?? 0, down: view.down ?? 0 } : null;
 		},
 		get quality() {
 			return quality;

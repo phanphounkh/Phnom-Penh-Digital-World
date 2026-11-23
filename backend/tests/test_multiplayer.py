@@ -486,3 +486,24 @@ async def test_buildings_go_back_to_default_when_everyone_has_left(client: httpx
         await expect(ws, "welcome")
         await send(ws, t="bget", b=building)
         assert (await expect(ws, "bstate"))["s"] == {}
+
+
+async def test_a_new_outfit_reaches_players_around_at_once(client: httpx.AsyncClient):
+    await onboard(client, "sokha")
+    async with make_client() as other:
+        await onboard(other, "dara")
+        async with world_socket(client) as a, world_socket(other) as b:
+            ya = (await expect(a, "welcome"))["you"]["id"]
+            await expect(b, "welcome")
+            first = await expect(b, "spawn", where=lambda m: m["p"]["id"] == ya)
+            outfit = {
+                **first["p"]["av"],
+                "top_style": "hoodie",
+                "top_color": "#e8a33d",
+                "accessories": ["cap"],
+            }
+            assert (await client.put("/me/avatar", json=outfit)).status_code == 200
+            again = await expect(b, "spawn", where=lambda m: m["p"]["id"] == ya)
+            assert again["p"]["av"]["top_style"] == "hoodie"
+            assert again["p"]["av"]["accessories"] == ["cap"]
+            await never(a, "spawn", where=lambda m: m["p"]["id"] == ya)  # not to themselves

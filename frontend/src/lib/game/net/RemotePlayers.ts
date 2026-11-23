@@ -235,6 +235,9 @@ export class RemotePlayers {
 		remote.bubble = { sprite, until: performance.now() + BUBBLE_MS };
 	}
 
+	/** No name tags (the wardrobe: a close view of the player's own avatar). */
+	hideTags = false;
+
 	/** Floors that differ from the terrain (enterable buildings, on a storey): a height, or null. */
 	groundAt: ((x: number, z: number, storey: number) => number | null) | null = null;
 
@@ -281,7 +284,7 @@ export class RemotePlayers {
 				}
 			}
 			remote.yaw = snap.yaw;
-			remote.tag.visible = remote.group.position.distanceTo(viewer) < TAG_DISTANCE;
+			remote.tag.visible = !this.hideTags && remote.group.position.distanceTo(viewer) < TAG_DISTANCE;
 			if (remote.bubble && now > remote.bubble.until) {
 				disposeSprite(remote.bubble.sprite);
 				remote.bubble = undefined;

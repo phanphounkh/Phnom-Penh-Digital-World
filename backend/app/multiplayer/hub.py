@@ -1124,6 +1124,18 @@ class Hub:
                 self._announce_ride(player)
 
     # ── relationships & moderation (called by REST endpoints) ───────────────────────────
+    def avatar_changed(self, user_id: uuid.UUID, avatar: dict[str, Any]) -> None:
+        """A player saved a new outfit: they wear it at once for everyone who sees them (their
+        card is sent again; clients replace the avatar)."""
+        player = self.by_user.get(user_id)
+        if player is None:
+            return
+        player.avatar = avatar
+        card = player.card()
+        for other in player.room.players.values():
+            if player.sid in other.known:
+                self.send(other, {"t": "spawn", "p": card})
+
     def update_relations(self, user_id: uuid.UUID, relations: dict[str, set[uuid.UUID]]) -> None:
         player = self.by_user.get(user_id)
         if player:

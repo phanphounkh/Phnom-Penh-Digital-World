@@ -322,7 +322,7 @@ JSON messages, field `t` = type (full list in `backend/app/multiplayer/protocol.
 | Client → server | Server → client |
 |---|---|
 | `move {x,z,yaw,s,l?}` (10 Hz while it changes; `l`: storey, absent on the ground floor) | `welcome {you, room, tick, x, z, yaw, online}` |
-| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}`, `despawn {id, why}` |
+| `chat {ch: nearby\|world, text}` | `spawn {p: {id,u,n,av,x,z,yaw,v?,l?}}` (again when they save a new outfit), `despawn {id, why}` |
 | `mount {v}`, `dismount` (Phase 5) | `ride {id, v: {id,k,c} \| null, x?, z?, yaw?}` (position only in your own), `vspawn {v: {id,k,c,x,z,yaw,mine?,name?}}`, `vdespawn {id}` |
 | `emote {e: wave\|sampeah\|cheer\|dance}` | `state {ts, p: [[id,x,z,yaw,s,l?],…]}`, changed players only |
 | `bset {b, k: door\|light\|app, id, on}`, `bget {b}` | `bstate {b, s: {"door:front": true, …}, mine?, all?}` |
@@ -450,6 +450,24 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   Hair style, garment styles and accessories apply to the classic style only.
 * `realistic.test.ts` fails if a GLB lacks a bone, clip, recolourable material or palette cell
   the game uses.
+
+## Wardrobe (in the game: `Wardrobe.svelte`, `Drum.svelte`, `wardrobe.ts`)
+
+* Opened with **O** or the shirt button. The camera turns to face the player
+  (`CityController.setShowcase`: beside a glass panel on wide screens, above a glass sheet on
+  phones), movement keys are ignored, the HUD and other players' name tags hide.
+* Categories: top, bottom, shoes, hat, glasses, bag, scarf, hair, body. Each has one or two
+  wheels (`wardrobe.ts`: the item, then its colour), turned with the mouse wheel or touchpad (one
+  choice per notch), the arrow keys, a drag, or a click; `[` and `]` change category. At most 3
+  extras (hat, glasses, bag, scarf): a fourth is shown crossed out. The hat, bag and scarf share
+  the accent colour.
+* Every turn is worn at once (`CityController.setAvatar`: colours in place; a classic avatar is
+  rebuilt for other parts, `GameCharacter.update` says which). Save → `PUT /me/avatar`, then the
+  hub sends the player's card again (`spawn`) to everyone who sees them, so they see the new
+  outfit without reconnecting. Cancel or Escape puts back what was worn.
+* In the realistic look, item wheels marked "shows in the Classic look" change nothing visible
+  (it wears one outfit in your colours); new garments for it need the avatar generator.
+* Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

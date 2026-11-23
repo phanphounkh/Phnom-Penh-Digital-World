@@ -64,6 +64,9 @@ export interface GameCharacter {
 	readonly emotes: Emotes;
 	/** Seat `holder` (the object that carries this avatar in the world) on a vehicle. */
 	mount(vehicle: VehicleInstance, holder: THREE.Object3D): Mount;
+	/** Wear a changed avatar in place (colours, and parts where the model can); false when it
+	 * has to be built again (another realistic build, or other classic parts). */
+	update(avatar: Avatar): boolean;
 	dispose(): void;
 }
 
@@ -82,6 +85,7 @@ async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
 		animations,
 		emotes: new RealisticEmotes(animations),
 		mount: (vehicle, holder) => new RealisticRider(holder, animations, vehicle),
+		update: (next) => instance.update(next),
 		dispose() {
 			animations.dispose();
 			instance.dispose();
@@ -90,7 +94,7 @@ async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
 }
 
 async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
-	const [{ createAvatar }, { PlayerAnimations }, { EmotePlayer }, { Rider }] = await Promise.all([
+	const [{ createAvatar, selectedOptions }, { PlayerAnimations }, { EmotePlayer }, { Rider }] = await Promise.all([
 		import('./avatar'),
 		import('$lib/game/player/PlayerAnimations.js'),
 		import('./emotes'),
@@ -98,12 +102,21 @@ async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
 	]);
 	const instance = await createAvatar(avatar, { batch: true });
 	const animations = new PlayerAnimations(instance.root);
+	// The world's classic avatar keeps only the parts it wears (merged per joint): colours
+	// change in place, other parts need a new build.
+	const parts = (a: Avatar) => [...selectedOptions(a)].sort().join(',');
+	const wearing = parts(avatar);
 	return {
 		style: 'classic',
 		root: instance.root,
 		animations,
 		emotes: new EmotePlayer(instance.root),
 		mount: (vehicle, holder) => new Rider(holder, animations, vehicle),
+		update(next) {
+			if (parts(next) !== wearing) return false;
+			instance.update(next);
+			return true;
+		},
 		dispose() {
 			animations.dispose();
 			instance.dispose();
