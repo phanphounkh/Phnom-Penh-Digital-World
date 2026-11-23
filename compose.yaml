@@ -41,8 +41,8 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-ppw}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ppw}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      # Accept both local browser addresses; PUBLIC_ORIGIN sets a custom deployment origin.
-      ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
+      # Both local browser addresses always work; PUBLIC_ORIGIN adds another (a LAN address or a domain).
+      ALLOWED_ORIGINS: http://localhost:3000,http://127.0.0.1:3000${PUBLIC_ORIGIN:+,${PUBLIC_ORIGIN}}
       TRUST_PROXY_HEADERS: "true"
       EXPOSE_DEV_VERIFICATION_CODES: ${EXPOSE_DEV_VERIFICATION_CODES:-true}
       OSM_DATA_DIR: /app/tools/gis/data/osm
@@ -78,7 +78,8 @@ services:
         condition: service_healthy
     environment:
       API_INTERNAL_URL: http://backend:8000
-      ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3000}
+      # The same addresses; server.js answers each at the one it was opened at (PUBLIC_ORIGIN first).
+      ORIGINS: ${PUBLIC_ORIGIN:+${PUBLIC_ORIGIN},}http://localhost:3000,http://127.0.0.1:3000
       PUBLIC_MAP_STYLE_URL: ${PUBLIC_MAP_STYLE_URL:-https://tiles.openfreemap.org/styles/liberty}
       PORT: "3000"
     ports:

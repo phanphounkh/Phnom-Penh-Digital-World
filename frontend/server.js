@@ -1,16 +1,40 @@
 // Production entry: the SvelteKit app (adapter-node) plus a WebSocket pass-through for the
 // world socket. SvelteKit's /api proxy uses fetch, which cannot carry WebSocket upgrades.
 //   node server.js   (PORT, HOST, ORIGIN, API_INTERNAL_URL as for adapter-node)
+// ORIGINS (comma-separated, instead of ORIGIN) lets one server be opened at several addresses,
+// e.g. http://localhost:3000 on this machine and its LAN address from a phone: each request
+// gets the listed origin whose host it was sent to (the first one otherwise), so SvelteKit's
+// same-origin check on uploads passes at each of them.
 import { createServer } from 'node:http';
 import net from 'node:net';
-import { handler } from './build/handler.js';
+
+const origins = (process.env.ORIGINS || '')
+	.split(',')
+	.map((o) => o.trim())
+	.filter(Boolean)
+	.map((o) => new URL(o));
+if (origins.length) {
+	delete process.env.ORIGIN;
+	process.env.PROTOCOL_HEADER = 'x-ppw-origin-proto';
+	process.env.HOST_HEADER = 'x-ppw-origin-host';
+}
+// After the environment above: adapter-node reads it when its handler loads.
+const { handler } = await import('./build/handler.js');
 
 const api = new URL(process.env.API_INTERNAL_URL || 'http://127.0.0.1:8000');
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '0.0.0.0';
 const WS_PATH = '/api/v1/world/ws';
 
-const server = createServer(handler);
+const server = createServer((req, res) => {
+	if (origins.length) {
+		const origin = origins.find((o) => o.host === req.headers.host) ?? origins[0];
+		// Always set here, never taken from the client.
+		req.headers['x-ppw-origin-proto'] = origin.protocol.slice(0, -1);
+		req.headers['x-ppw-origin-host'] = origin.host;
+	}
+	handler(req, res);
+});
 
 server.on('upgrade', (req, socket, head) => {
 	if (!req.url || !req.url.startsWith(WS_PATH)) {

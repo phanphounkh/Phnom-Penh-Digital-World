@@ -95,9 +95,10 @@ docker compose --profile full up -d --build   # http://localhost:3000
 ```
 
 The API container migrates, imports the OSM snapshot if the database has none, then serves.
-Both `http://localhost:3000` and `http://127.0.0.1:3000` are allowed locally. For a custom
-address, set `PUBLIC_ORIGIN` in `.env` to the exact browser origin (scheme, hostname and port),
-then rerun the command above to apply it to the backend and frontend.
+`http://localhost:3000` and `http://127.0.0.1:3000` always work. To open it at one more address
+(a domain, or the machine's LAN address for another device), set `PUBLIC_ORIGIN` in `.env` to that
+exact browser origin (scheme, hostname and port), then rerun the command above to apply it to the
+backend and frontend; the local addresses keep working.
 `infrastructure/nginx/ppw.conf` is an example TLS front proxy.
 
 To create the administrator and an optional local demo shop:
