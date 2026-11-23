@@ -86,7 +86,7 @@
 
 <svelte:window onkeydown={keydown} />
 
-<div class="myshop" class:solid role="dialog" aria-label="My shop" data-testid="my-shop">
+<div class="myshop glass-sheet" class:solid role="dialog" aria-label="My shop" data-testid="my-shop">
 	<header class="head">
 		{#if shop}
 			<div class="sign" style:background={shop.primary_color} style:border-color={shop.accent_color}>
@@ -166,40 +166,34 @@
 		gap: 12px;
 		padding: 18px;
 		border-radius: 24px;
-		color: var(--color-ink);
-		background: rgba(250, 247, 240, 0.86);
-		-webkit-backdrop-filter: blur(16px) saturate(140%);
-		backdrop-filter: blur(16px) saturate(140%);
-		border: 1px solid rgba(255, 255, 255, 0.6);
-		box-shadow: 0 24px 60px -24px rgba(11, 37, 36, 0.55);
+		/* Dark glass over the city, like the other pop-ups (`.glass-sheet` in app.css). */
 	}
-	.myshop.solid { background: rgba(250, 247, 240, 0.97); -webkit-backdrop-filter: none; backdrop-filter: none; }
 	.myshop > * { flex-shrink: 0; }
 	.head { display: flex; align-items: center; gap: 10px; }
 	.sign { border-radius: 12px; padding: 6px 14px; border-bottom: 5px solid; color: #fff; max-width: 60%; }
 	.sign-name { font-family: var(--font-display); font-size: 20px; font-weight: 700; line-height: 1.15; }
 	.sign-km { font-size: 13px; opacity: 0.9; }
 	.title { display: grid; gap: 2px; }
-	.kicker { font-size: 12px; font-weight: 700; color: var(--color-saffron-600); }
-	h2 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--color-river-950); }
+	.kicker { font-size: 12px; font-weight: 700; color: var(--color-saffron-300); }
+	h2 { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--color-ink); }
 	.grow { flex: 1; }
-	.open { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--color-river-900); cursor: pointer; }
-	.open input { appearance: none; width: 42px; height: 24px; border-radius: 999px; background: #c9c3b6; position: relative; transition: background 150ms; cursor: pointer; }
+	.open { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--color-ink); cursor: pointer; }
+	.open input { appearance: none; width: 42px; height: 24px; border-radius: 999px; background: rgba(255, 255, 255, 0.25); position: relative; transition: background 150ms; cursor: pointer; }
 	.open input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform 150ms; }
-	.open input:checked { background: #3d7a4f; }
+	.open input:checked { background: #4c9a63; }
 	.open input:checked::after { transform: translateX(18px); }
 	.open input:focus-visible { outline: 3px solid var(--color-saffron-500); outline-offset: 2px; }
-	.pick { max-width: 11rem; padding: 6px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: rgba(255, 255, 255, 0.8); border: 1px solid rgba(18, 59, 58, 0.15); }
+	.pick { max-width: 11rem; padding: 6px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; color: inherit; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.26); }
 	.icon { padding: 6px; border-radius: 10px; color: var(--color-ink-soft); }
-	.icon:hover { background: rgba(18, 59, 58, 0.08); }
-	.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(236, 228, 211, 0.8); overflow-x: auto; scrollbar-width: none; }
+	.icon:hover { background: rgba(255, 255, 255, 0.14); }
+	.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 14px; background: rgba(255, 255, 255, 0.1); overflow-x: auto; scrollbar-width: none; }
 	.tabs button { flex: 1 0 auto; padding: 7px 12px; border-radius: 10px; font-size: 13px; font-weight: 600; color: var(--color-ink-soft); }
-	.tabs button.on { background: #fff; color: var(--color-river-900); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
+	.tabs button.on { background: rgba(255, 255, 255, 0.92); color: var(--color-river-900); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2); }
 	.tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
 	.body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
 	.muted { font-size: 14px; color: var(--color-ink-soft); }
-	.status-note { font-size: 13px; padding: 10px 12px; border-radius: 12px; background: var(--color-saffron-100); }
-	.link { font-weight: 700; color: var(--color-river-700); text-decoration: underline; }
+	.status-note { font-size: 13px; padding: 10px 12px; border-radius: 12px; background: rgba(232, 163, 61, 0.16); }
+	.link { font-weight: 700; color: var(--color-saffron-300); text-decoration: underline; }
 	@media (max-width: 640px) {
 		.myshop { top: auto; left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); bottom: max(8px, env(safe-area-inset-bottom, 0px)); width: auto; height: 86dvh; padding: 14px; border-radius: 20px; }
 		.sign { max-width: 55%; }

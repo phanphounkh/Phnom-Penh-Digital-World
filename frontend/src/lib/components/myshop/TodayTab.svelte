@@ -106,22 +106,22 @@
 
 <style>
 	.today { display: grid; gap: 16px; }
-	h3 { margin: 0; font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--color-river-950); }
+	h3 { margin: 0; font-family: var(--font-display); font-size: 17px; font-weight: 700; color: var(--color-ink); }
 	.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-	.card-ish { padding: 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(18, 59, 58, 0.1); }
+	.card-ish { padding: 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.14); }
 	.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 	.steps li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 	.steps li.done { color: var(--color-ink-soft); }
-	.check { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; flex: none; border: 2px solid rgba(18, 59, 58, 0.2); }
+	.check { width: 22px; height: 22px; border-radius: 999px; display: grid; place-items: center; flex: none; border: 2px solid rgba(255, 255, 255, 0.3); }
 	.done .check { background: var(--color-river-700); border-color: var(--color-river-700); color: #fff; }
 	.grow { flex: 1; min-width: 0; }
 	.muted { font-size: 13px; color: var(--color-ink-soft); }
 	.figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-	.figures > div { padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(18, 59, 58, 0.1); }
-	.figure { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--color-river-950); font-variant-numeric: tabular-nums; }
+	.figures > div { padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.14); }
+	.figure { font-family: var(--font-display); font-size: 22px; font-weight: 700; color: var(--color-ink); font-variant-numeric: tabular-nums; }
 	.demo { font-size: 11px; color: var(--color-ink-soft); margin-top: -8px; }
 	.count { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--color-saffron-500); color: #0b2524; }
-	.order { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: #fff; border: 1px solid rgba(18, 59, 58, 0.1); margin-bottom: 6px; }
+	.order { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.14); margin-bottom: 6px; }
 	.strong { font-weight: 600; font-size: 14px; }
 	@media (max-width: 480px) { .figure { font-size: 18px; } }
 </style>

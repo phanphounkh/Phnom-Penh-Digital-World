@@ -122,9 +122,9 @@
 	.filters { display: flex; gap: 6px; }
 	.board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; align-items: start; }
 	.board.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-	.col { display: grid; gap: 8px; padding: 8px; border-radius: 14px; background: rgba(236, 228, 211, 0.7); }
+	.col { display: grid; gap: 8px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.06); }
 	h3 { margin: 0; display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: var(--color-ink-soft); }
-	.order { display: grid; gap: 6px; padding: 10px; border-radius: 12px; background: #fff; border: 1px solid rgba(18, 59, 58, 0.1); font-size: 13px; }
+	.order { display: grid; gap: 6px; padding: 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.14); font-size: 13px; }
 	.top { display: flex; align-items: center; gap: 6px; justify-content: space-between; flex-wrap: wrap; }
 	ul { margin: 0; padding: 0; list-style: none; color: var(--color-ink-soft); }
 	.total { font-variant-numeric: tabular-nums; }
@@ -133,7 +133,7 @@
 	.empty { font-size: 12px; color: var(--color-ink-soft); padding: 4px; }
 	.more { display: grid; gap: 6px; }
 	.more-link { justify-self: center; font-size: 12px; font-weight: 600; color: var(--color-ink-soft); }
-	.warn { font-size: 12px; font-weight: 600; color: var(--color-brick-600); }
+	.warn { font-size: 12px; font-weight: 600; color: #ffb59c; }
 	.row { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 	.refund { padding: 6px 10px; border-radius: 10px; font-size: 12px; font-weight: 700; background: var(--color-brick-600); color: #fff; }
 	@media (max-width: 760px) { .board, .board.four { grid-template-columns: 1fr; } }

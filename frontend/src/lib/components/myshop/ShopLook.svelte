@@ -106,7 +106,7 @@
 
 <style>
 	.look { display: grid; grid-template-columns: 15rem 1fr; gap: 16px; align-items: start; }
-	.preview { display: grid; border-radius: 16px; overflow: hidden; background: #fff; border: 1px solid rgba(18, 59, 58, 0.1); position: sticky; top: 0; }
+	.preview { display: grid; border-radius: 16px; overflow: hidden; background: rgba(255, 255, 255, 0.09); border: 1px solid rgba(255, 255, 255, 0.14); position: sticky; top: 0; }
 	.board { padding: 10px; text-align: center; color: #fff; border-bottom: 6px solid; }
 	.board-name { font-family: var(--font-display); font-size: 19px; font-weight: 700; line-height: 1.15; overflow-wrap: anywhere; }
 	.board-km { font-size: 13px; opacity: 0.9; }
@@ -121,12 +121,12 @@
 	label, fieldset { display: grid; gap: 4px; border: 0; margin: 0; padding: 0; min-width: 0; }
 	.lbl { font-size: 13px; font-weight: 600; color: var(--color-ink); }
 	.chips, .pairs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-	.pair { display: flex; width: 44px; height: 30px; border-radius: 10px; overflow: hidden; border: 2px solid transparent; box-shadow: 0 0 0 1px rgba(18, 59, 58, 0.15); }
+	.pair { display: flex; width: 44px; height: 30px; border-radius: 10px; overflow: hidden; border: 2px solid transparent; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
 	.pair span { flex: 1; }
-	.pair.on { border-color: var(--color-river-900); box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--color-river-900); }
-	.own input { width: 44px; height: 30px; border-radius: 10px; padding: 0; border: 1px solid rgba(18, 59, 58, 0.2); background: none; cursor: pointer; }
+	.pair.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(11, 37, 36, 0.9), 0 0 0 4px var(--color-saffron-300); }
+	.own input { width: 44px; height: 30px; border-radius: 10px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.3); background: none; cursor: pointer; }
 	.switch { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
-	.switch input { width: 18px; height: 18px; accent-color: #3d7a4f; }
-	.ok { font-size: 13px; padding: 8px 12px; border-radius: 12px; background: rgba(191, 224, 216, 0.6); }
+	.switch input { width: 18px; height: 18px; accent-color: #4c9a63; }
+	.ok { font-size: 13px; padding: 8px 12px; border-radius: 12px; background: rgba(191, 224, 216, 0.16); }
 	@media (max-width: 640px) { .look { grid-template-columns: 1fr; } .preview { position: static; } }
 </style>

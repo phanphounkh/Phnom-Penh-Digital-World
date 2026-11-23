@@ -458,7 +458,7 @@ animated (skinned meshes are not culled by three.js).
 **My shop (the seller's panel, in the city: `components/myshop/`).** Sellers run their shop
 without leaving the game: the toolbar's shop button or **B** (also ☰ → My shop, the System
 Office's counter after registering, and `/world?panel=shop`, where the old `/seller` address now
-redirects) opens a frosted panel over the city (a bottom sheet on a phone; opaque on the low
+redirects) opens a dark glass panel over the city (a bottom sheet on a phone; opaque on the low
 quality setting). Walking still works while it is open. Tabs:
 
 * **Today** (`TodayTab`): a checklist until the shop is ready (approved, a spot, name and
@@ -570,7 +570,7 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   was worn.
 * Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
 * The toolbar's pop-ups (People, Places, vehicles, Cart, Settings, Controls, ☰ and the wallet,
-  delivery jobs and shop pages it opens) use the same dark glass: `.glass-sheet` in `app.css`,
+  delivery jobs and shop pages it opens) and My shop use the same dark glass: `.glass-sheet` in `app.css`,
   over an undimmed city. Inside it the light palette is remapped (text light; white and paper
   surfaces faint glass tiles; the selected tab a light chip; primary buttons saffron), so the
   panel components are unchanged; `.solid` on `low` quality.
