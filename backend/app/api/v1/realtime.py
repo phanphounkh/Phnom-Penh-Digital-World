@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import AvatarCustomization
 from app.multiplayer.hub import hub
-from app.schemas.me import AvatarIn
+from app.schemas.me import AvatarIn, default_avatar
 from app.services import geo, social, world
 
 router = APIRouter(tags=["realtime"])
@@ -45,7 +45,7 @@ async def world_socket(ws: WebSocket) -> None:
         spawn = (
             await geo.spawn_point(session, user.profile.spawn_point_id) if user.profile else None
         )
-        if user.onboarding_completed_at is None or avatar is None or spawn is None:
+        if user.onboarding_completed_at is None or spawn is None:
             await ws.close(code=CLOSE_ONBOARDING)
             return
         start = await world.start_position(session, user, spawn)
@@ -55,7 +55,11 @@ async def world_socket(ws: WebSocket) -> None:
             "user_id": user.id,
             "username": user.username,
             "display_name": profile.display_name,
-            "avatar": AvatarIn.model_validate(avatar, from_attributes=True).model_dump(),
+            "avatar": (
+                AvatarIn.model_validate(avatar, from_attributes=True)
+                if avatar is not None
+                else default_avatar(profile.display_name)
+            ).model_dump(),
             "visible": bool(profile.world_visible),
             "region_slug": spawn.region,
             "x": start.x,

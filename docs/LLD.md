@@ -36,15 +36,21 @@
 ## Onboarding state machine
 
 ```text
-verify ──▶ avatar ──▶ role ──▶ location ──▶ complete ──▶ world
- (contact      (avatar     (roles_chosen_at   (spawn + explicit visibility
-  verified)     saved)      set; visitor-only  + address if buyer)
-                            is valid)
+verify ──▶ location ("your place") ──▶ complete ──▶ world (the wardrobe opens: make the avatar)
+ (contact    (a private place anywhere in Phnom Penh, the public start area (the nearest one
+  verified)   unless picked) and an explicit visibility choice)
 ```
 
 `GET /auth/me` reports `onboarding.next_step`. `POST /me/onboarding/complete` returns 409 with
-`details.next_step` if a step is missing. The web app's onboarding layout lets users revisit
-earlier steps but never skip ahead.
+`details.next_step` if a step is missing. A new player (no roles chosen yet) gives an address
+(everyone can buy) and gets `visitor` + `buyer` on completing; work roles (seller, driver) are
+registered after that. There is no avatar step: until a player saves one,
+`onboarding.avatar` is false, the world bootstrap and the world socket use the default look
+(`schemas/me.py: default_avatar`, the same values as the client's `DEFAULT_AVATAR`), and the
+city opens the wardrobe in its welcome mode (no Cancel; "Enter the city" saves). The start is a
+public spawn area, never the home itself (other players would see where the player lives).
+The web app's onboarding layout lets users revisit earlier steps but never skip ahead; the
+`role` page stays reachable once onboarding is complete.
 
 ## Roles
 

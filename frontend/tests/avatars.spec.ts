@@ -1,7 +1,7 @@
 /**
  * Realistic avatars end to end (isolated stack): two players with different builds see
- * themselves and each other as realistic models, jog, sprint and jump, play an emote (seen by the other player);
- * the avatar editor previews the realistic model (the only look: there is no Classic switch). Screenshots go to test-results/avatars/ (not committed).
+ * themselves and each other as realistic models, jog, sprint and jump, play an emote (seen by the other player).
+ * The avatar is made in the city (tests/wardrobe.spec.ts). Screenshots go to test-results/avatars/ (not committed).
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
@@ -126,24 +126,4 @@ test('realistic avatars: builds, remote players, jog/sprint/jump and emotes', as
 	expect(b.errors, b.errors.join('\n')).toEqual([]);
 	await a.context.close();
 	await b.context.close();
-});
-
-test('the avatar editor previews the realistic model, with no other look to pick', async ({ browser, baseURL }) => {
-	test.setTimeout(240_000);
-	const id = Date.now().toString(36).slice(-6);
-	const { page, errors, context } = await account(browser, baseURL!, `prev_${id}`);
-	await page.goto('/onboarding/avatar');
-	const preview = page.getByTestId('avatar-preview');
-	await expect(preview).toHaveAttribute('data-ready', 'true', { timeout: 120_000 });
-	await expect(preview).toHaveAttribute('data-style', 'realistic');
-	await page.waitForTimeout(800);
-	await preview.screenshot({ path: `${SHOTS}/editor-realistic.png` });
-	await expect(page.getByRole('radio', { name: 'Classic' })).toHaveCount(0);
-	await expect(page.getByText(/Classic/)).toHaveCount(0);
-	// Another build: the other realistic model.
-	await page.getByRole('radio', { name: 'Build B' }).click();
-	await expect(preview).toHaveAttribute('data-style', 'realistic');
-	await expect(preview).toContainText('hoodie', { timeout: 60_000 });
-	expect(errors, errors.join('\n')).toEqual([]);
-	await context.close();
 });

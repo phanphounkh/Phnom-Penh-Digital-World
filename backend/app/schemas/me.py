@@ -82,6 +82,26 @@ class ProfileUpdate(BaseModel):
     world_visible: bool | None = None
 
 
+def default_avatar(name: str) -> AvatarIn:
+    """The look a new player has until they choose one in the in-game wardrobe (the same
+    values as the client's DEFAULT_AVATAR)."""
+    name = name.strip()[:32]
+    return AvatarIn(
+        avatar_name=name if len(name) >= 2 else "Explorer",
+        body="a",
+        skin_tone="#c8946b",
+        hair_style="short",
+        hair_color="#2b2220",
+        top_style="tee",
+        top_color="#2f7d6d",
+        bottom_style="trousers",
+        bottom_color="#343b4a",
+        shoe_color="#eee5d5",
+        accent_color="#e8a33d",
+        accessories=[],
+    )
+
+
 class RoleSelection(BaseModel):
     """Onboarding role choice. Visitor is always included; seller/driver need approval."""
 

@@ -1,5 +1,6 @@
 /**
- * Phase 1 end-to-end: Welcome → Register → Verify → Avatar → Role → Location → 3D city.
+ * Phase 1 end-to-end: Welcome → Register → Verify → Your place → 3D city, where the wardrobe
+ * opens to make the avatar.
  * Needs the API on :8000 (with the OSM import) and the web app on :5173 (or :4173 with
  * CAMPUS_PRODUCTION_TEST=1). Uses software WebGL, so it is slower than real hardware.
  */
@@ -39,28 +40,7 @@ test('a new player registers, onboards and walks the real streets of Daun Penh',
 	await page.getByLabel('Verification code').fill(code);
 	await page.getByRole('button', { name: 'Verify' }).click();
 
-	// Screen 3 — avatar (Blender GLB preview)
-	await expect(page).toHaveURL(/\/onboarding\/avatar/);
-	await expect(page.getByTestId('avatar-preview')).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
-	await page.getByRole('radiogroup', { name: 'Top colour' }).getByRole('radio', { name: 'Saffron' }).click();
-	await page.getByRole('radiogroup', { name: 'Backpack colour' }).getByRole('radio', { name: 'Brick' }).click();
-	await expect(page.getByTestId('avatar-preview')).toContainText('a saffron jacket');
-	// The editor as a laptop shows it (the Save bar sticks to the window's foot, so a full-page
-	// capture would draw it mid-page).
-	const viewport = page.viewportSize()!;
-	await page.setViewportSize({ width: 1280, height: 800 });
-	await page.evaluate(() => window.scrollTo(0, 0));
-	await page.waitForTimeout(1500);
-	await page.screenshot({ path: `${shots}/phase1-avatar.png` });
-	await page.setViewportSize(viewport);
-	await page.getByRole('button', { name: /Save avatar/ }).click();
-
-	// Screen 4 — roles: buyer (immediate) + seller (needs approval)
-	await expect(page).toHaveURL(/\/onboarding\/role/);
-	await page.getByTestId('role-seller').click();
-	await page.getByRole('button', { name: /Save roles/ }).click();
-
-	// Screen 5 — location: private pin + public spawn + explicit visibility
+	// Your place: a private pin anywhere in Phnom Penh; the nearest public start is chosen for it.
 	await expect(page).toHaveURL(/\/onboarding\/location/);
 	const map = page.getByTestId('location-map');
 	await expect(map).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
@@ -71,14 +51,34 @@ test('a new player registers, onboards and walks the real streets of Daun Penh',
 	const box = (await map.boundingBox())!;
 	await page.mouse.click(box.x + box.width * 0.55, box.y + box.height * 0.6);
 	await expect(page.getByText('Inside Phnom Penh')).toBeVisible({ timeout: 15_000 });
-	await page.getByTestId('spawn-central-market').click();
+	await expect(page.getByTestId('start-at')).toContainText('Central Market');
 	await page.getByTestId('visible-yes').click();
 	await page.screenshot({ path: `${shots}/phase1-location.png`, fullPage: true });
 	await page.getByTestId('enter-city').click();
 
-	// Screen 6 — the 3D city
+	// The city: the wardrobe opens to make the avatar (no avatar page before it).
 	await expect(page).toHaveURL(/\/world/);
 	await expect(page.getByTestId('world-canvas')).toHaveAttribute('data-ready', 'true', { timeout: 120_000 });
+	const wardrobe = page.getByTestId('wardrobe');
+	await expect(wardrobe).toBeVisible({ timeout: 60_000 });
+	await expect(wardrobe).toContainText('Make your avatar');
+	await expect(wardrobe.getByRole('button', { name: 'Cancel' })).toHaveCount(0);
+	const drum = (await page.getByTestId('drum-top-colour').boundingBox())!;
+	await page.mouse.move(drum.x + drum.width / 2, drum.y + drum.height / 2);
+	for (let i = 0; i < 2; i++) {
+		await page.mouse.wheel(0, 100);
+		await page.waitForTimeout(200);
+	}
+	await expect(page.getByTestId('wardrobe-now')).toHaveText('Saffron jacket');
+	// The wardrobe as a laptop shows it.
+	const viewport = page.viewportSize()!;
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.waitForTimeout(2500);
+	await page.screenshot({ path: `${shots}/phase1-avatar.png` });
+	await page.setViewportSize(viewport);
+	await page.getByTestId('wardrobe-save').click();
+	await expect(wardrobe).toHaveCount(0);
+	expect((await (await page.request.get('/api/v1/me/avatar')).json()).top_color).toBe('#e8a33d');
 	await expect(page.getByTestId('hud-location')).toBeVisible();
 	await expect(page.getByTestId('hud-coords')).toContainText('11.56');
 	await page.waitForTimeout(1500);

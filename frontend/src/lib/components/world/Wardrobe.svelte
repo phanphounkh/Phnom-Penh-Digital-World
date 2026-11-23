@@ -3,6 +3,7 @@
 	 * The wardrobe, in the game: a glass panel over the city while the camera faces the player.
 	 * Pick what to change, turn its wheel; the avatar in the world changes as you go (`onPreview`).
 	 * Save keeps the outfit (others see it at once); Cancel or Escape puts the old one back.
+	 * `first`: a new player's first visit: a welcome, no Cancel, and saving enters the city.
 	 */
 	import { Backpack, Footprints, PersonStanding, Scissors, Shirt, Shuffle, X } from 'lucide-svelte';
 	import type { Avatar } from '$lib/api/types';
@@ -13,12 +14,14 @@
 
 	let {
 		outfit,
+		first = false,
 		solid = false,
 		onPreview,
 		onSave,
 		onClose
 	}: {
 		outfit: Avatar;
+		first?: boolean;
 		/** No frosted glass (slow graphics): a more opaque panel instead. */
 		solid?: boolean;
 		onPreview: (avatar: Avatar) => void;
@@ -75,7 +78,7 @@
 		if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
-			cancel();
+			if (!first) cancel();
 		} else if (!typing && (e.key === '[' || e.key === ']')) {
 			const i = CATEGORIES.findIndex((c) => c.id === category);
 			category = CATEGORIES[(i + (e.key === ']' ? 1 : CATEGORIES.length - 1)) % CATEGORIES.length].id;
@@ -88,9 +91,17 @@
 <div class="wardrobe" data-testid="wardrobe" data-category={category}>
 	<div class="glass panel" class:solid aria-label="Wardrobe" role="dialog" aria-modal="false">
 		<header class="head">
-			<h2>Wardrobe</h2>
-			<button type="button" class="icon" aria-label="Close without saving" onclick={cancel}><X size={18} /></button>
+			{#if first}
+				<div class="welcome">
+					<p>Welcome to Phnom Penh</p>
+					<h2>Make your avatar</h2>
+				</div>
+			{:else}
+				<h2>Wardrobe</h2>
+				<button type="button" class="icon" aria-label="Close without saving" onclick={cancel}><X size={18} /></button>
+			{/if}
 		</header>
+		{#if first}<p class="intro">This is how other players see you. Turn the wheels, then enter the city. You can change it any time with <kbd>O</kbd>.</p>{/if}
 
 		<div class="cats" role="tablist" aria-label="What to change">
 			{#each CATEGORIES as c (c.id)}
@@ -131,11 +142,11 @@
 		<footer class="foot">
 			<button type="button" class="ghost" onclick={() => wear(randomAvatar(draft.avatar_name))}><Shuffle size={15} /> Surprise me</button>
 			<span class="grow"></span>
-			<button type="button" class="ghost" onclick={cancel}>Cancel</button>
-			<button type="button" class="save" disabled={busy} onclick={save} data-testid="wardrobe-save">{busy ? 'Saving…' : changed ? 'Save outfit' : 'Done'}</button>
+			{#if !first}<button type="button" class="ghost" onclick={cancel}>Cancel</button>{/if}
+			<button type="button" class="save" disabled={busy} onclick={save} data-testid="wardrobe-save">{busy ? 'Saving…' : first ? 'Enter the city' : changed ? 'Save outfit' : 'Done'}</button>
 		</footer>
 	</div>
-	<p class="glass hint" class:solid>Scroll a wheel to choose · drag the city to turn around · <kbd>[</kbd> <kbd>]</kbd> change what to wear · <kbd>Esc</kbd> cancel</p>
+	<p class="glass hint" class:solid>Scroll a wheel to choose · drag the city to turn around · <kbd>[</kbd> <kbd>]</kbd> change what to wear{#if !first} · <kbd>Esc</kbd> cancel{/if}</p>
 </div>
 
 <style>
@@ -165,6 +176,9 @@
 	.panel > * { flex-shrink: 0; } /* the panel scrolls; its rows keep their height */
 	.head { display: flex; align-items: center; gap: 10px; }
 	h2 { margin: 0; flex: 1; font-family: var(--font-display); font-size: 24px; font-weight: 700; color: #fffaf0; }
+	.welcome { display: grid; gap: 2px; flex: 1; }
+	.welcome p { font-size: 12px; font-weight: 700; color: var(--color-saffron-300); }
+	.intro { font-size: 13px; line-height: 1.45; opacity: 0.9; }
 	.icon { padding: 6px; border-radius: 10px; }
 	.icon:hover, .ghost:hover { background: rgba(255, 255, 255, 0.14); }
 	.cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }

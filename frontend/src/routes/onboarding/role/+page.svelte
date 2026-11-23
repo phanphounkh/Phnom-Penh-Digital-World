@@ -80,7 +80,7 @@
 
 <section class="mx-auto max-w-3xl">
 	<div class="card">
-		<p class="eyebrow">Step 3 of 4</p>
+		<p class="eyebrow">Work roles</p>
 		<h1 class="display mt-1 text-3xl font-bold">How will you use the city?</h1>
 		<p class="mt-2 text-sm text-ink-soft">
 			Choose any combination. You can change this later. Everyone can explore as a visitor.

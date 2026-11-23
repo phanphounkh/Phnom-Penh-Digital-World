@@ -147,15 +147,17 @@
 				net.remotes.groundAt = (x, z, storey) => houses?.floorAt(x, z, storey) ?? null; // others stand on their floor too
 				// Doors, windows, lights and appliances are shared with the players around, and
 				// they see which storey this player is on.
-				const session = net;
-				houses.onChange = (b, kind, id, on) => session.buildings.set(b, kind, id, on);
-				houses.onLoaded = (b) => session.buildings.ask(b);
-				session.onBuildingState = (b, state, keep) => houses?.applyShared(b, state, keep);
-				session.onOpen = () => {
-					for (const id of houses?.loadedIds ?? []) session.buildings.ask(id);
+				const sync = net;
+				houses.onChange = (b, kind, id, on) => sync.buildings.set(b, kind, id, on);
+				houses.onLoaded = (b) => sync.buildings.ask(b);
+				sync.onBuildingState = (b, state, keep) => houses?.applyShared(b, state, keep);
+				sync.onOpen = () => {
+					for (const id of houses?.loadedIds ?? []) sync.buildings.ask(id);
 				};
-				session.storey = () => houses?.storeyOn ?? 0;
+				sync.storey = () => houses?.storeyOn ?? 0;
 				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
+				// The first visit: no avatar chosen yet, so the wardrobe opens to make one.
+				if (session.user?.onboarding.avatar === false) openWardrobe(true);
 				let parkCheck = 0;
 				created.onFrame((dt) => {
 					const me = created.localState();
@@ -400,10 +402,13 @@
 	let wardrobe = $state(false);
 	/** What the player wore when the wardrobe opened. */
 	let wardrobeOutfit = $state<Avatar | null>(null);
+	/** The first visit: the avatar is made here (no Cancel; saving enters the city). */
+	let wardrobeFirst = $state(false);
 	/** Room for the glass panel: beside the avatar on a wide screen, below it on a narrow one. */
 	const showcaseView = () => (window.innerWidth >= 900 ? { right: 0.75 } : { down: 1.2, distance: 4.3, pitch: 0.28 });
-	function openWardrobe() {
+	function openWardrobe(first = false) {
 		if (!city || city.riding || wardrobe) return;
+		wardrobeFirst = first;
 		panel = '';
 		chatOpen = false;
 		wardrobeOutfit = city.outfit;
@@ -427,6 +432,7 @@
 	async function saveOutfit(next: Avatar) {
 		await me.saveAvatar(next);
 		await wearOutfit(next);
+		if (wardrobeFirst) await session.refresh(); // the avatar is made: no welcome next time
 	}
 
 	function setTime(mode: TimeMode) {
@@ -521,7 +527,7 @@
 					{#if id === 'cart' && cart?.item_count}<span class="absolute -mt-7 ml-7 rounded-full bg-saffron-500 px-1.5 text-[10px] font-bold text-river-950" data-testid="cart-count">{cart.item_count}</span>{/if}
 				</button>
 			{/each}
-			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={openWardrobe}><Shirt size={19} /></button>
+			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={() => openWardrobe()}><Shirt size={19} /></button>
 			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
 		</nav>
 
@@ -690,6 +696,7 @@
 	{#if wardrobe && wardrobeOutfit}
 		<Wardrobe
 			outfit={wardrobeOutfit}
+			first={wardrobeFirst}
 			solid={quality === 'low'}
 			onPreview={previewOutfit}
 			onSave={saveOutfit}
@@ -805,7 +812,7 @@
 					<a class="btn-ghost" href="/seller" data-sveltekit-reload>{isSeller ? 'Seller dashboard' : 'Sell here'}</a>
 				</div>
 				<p class="label mt-4">Avatar</p>
-				<a class="btn-ghost w-full" href="/onboarding/avatar" data-sveltekit-reload>Edit avatar</a>
+				<button class="btn-ghost w-full" onclick={() => openWardrobe()}>Change your outfit (O)</button>
 				<p class="label mt-4">Visibility</p>
 				<p class="text-sm">{boot.player.world_visible ? 'Visible to other players' : 'Hidden from other players'}</p>
 			{:else}

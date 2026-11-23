@@ -11,8 +11,8 @@ map data**. This repository grew out of two existing projects, which are left un
   reused. Its canteen ordering and demo-payment code are the reference for Phases 4 and 7.
 
 **Status: Phases 1–7 are implemented: foundation, 3D city, multiplayer, marketplace,
-transportation, simulated delivery and the demo wallet.** A new user can register, verify, build an avatar, choose roles, pick a private
-delivery address and a public spawn area on a real map, then walk the real streets of Daun Penh
+transportation, simulated delivery and the demo wallet.** A new user can register, verify, pick a private home anywhere in Phnom Penh (they start
+at the nearest public spawn area), make their avatar in the city's wardrobe, then walk the real streets of Daun Penh
 in 3D with other real players (chat, emotes, friends, invites, moderation). **Sellers** apply
 with their business details, are approved by an administrator, claim one of 1,680 virtual shop
 units cut into real street frontages, and stock it from a dashboard. **Buyers** walk through the
@@ -32,7 +32,7 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 | ![Central Market at midday](frontend/artifacts/phase2-central-market-noon.png) | ![Street 136 at night](frontend/artifacts/phase2-central-market-night.png) |
 | ![Wat Phnom hill in the morning](frontend/artifacts/phase2-wat-phnom-morning.png) | ![Street 136 at sunset](frontend/artifacts/phase2-central-market-sunset.png) |
 | ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
-| ![Creating an avatar](frontend/artifacts/phase1-avatar.png) | ![Choosing a location](frontend/artifacts/phase1-location.png) |
+| ![A new player makes their avatar in the city: the wardrobe's glass panel and wheels](frontend/artifacts/phase1-avatar.png) | ![Choosing your place: a private home anywhere in Phnom Penh, and the nearest public start](frontend/artifacts/phase1-location.png) |
 | ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop on Street 63, carrying a product to the cart](frontend/artifacts/phase4-shop-interior.png) |
 | ![Seller dashboard: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Demo checkout paid](frontend/artifacts/phase4-checkout.png) |
 | ![At the shelf: product facings with price tags, the shop's cart by the door](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |

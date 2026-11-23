@@ -49,17 +49,20 @@ async def onboarding_state(session: AsyncSession, user: User) -> OnboardingOut:
         )
     ) > 0
     roles_done = bool(profile and profile.roles_chosen_at)
-    needs_address = wants_buyer(user)
+    # Every new player can buy (they get the buyer role on finishing), so they give a private
+    # address; players who chose to be visitors only (earlier accounts) do not need one.
+    needs_address = wants_buyer(user) or not roles_done
     location_done = bool(
         profile
         and profile.spawn_point_id
         and profile.world_visible is not None
         and (has_address or not needs_address)
     )
+    # Two steps before the city: verify, then choose your place. The avatar is made in the
+    # game (the wardrobe opens on the first visit: `avatar` false until one is saved), and work
+    # roles are registered in the game too.
     steps = [
         ("verify", user.contact_verified),
-        ("avatar", has_avatar),
-        ("role", roles_done),
         ("location", location_done),
     ]
     completed = user.onboarding_completed_at is not None
@@ -292,6 +295,10 @@ async def complete(session: AsyncSession, user: User) -> OnboardingOut:
             f"Finish the '{state.next_step}' step first.",
             details={"next_step": state.next_step},
         )
+    if not (user.profile and user.profile.roles_chosen_at):
+        # A new player: visitor and buyer, active at once (seller and driver are registered
+        # in the game, one at a time).
+        await select_roles(session, user, RoleSelection(roles=["buyer"]))
     if user.onboarding_completed_at is None:
         user.onboarding_completed_at = utcnow()
         audit.record(

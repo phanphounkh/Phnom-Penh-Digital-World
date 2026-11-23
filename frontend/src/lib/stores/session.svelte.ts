@@ -45,11 +45,11 @@ class Session {
 
 export const session = new Session();
 
+/** Before the city: verify, then choose your place. The avatar is made in the city (the
+ * wardrobe opens on the first visit) and work roles are registered there too. */
 export const STEPS: { id: Exclude<OnboardingStep, 'complete' | 'world'>; label: string }[] = [
 	{ id: 'verify', label: 'Verify' },
-	{ id: 'avatar', label: 'Avatar' },
-	{ id: 'role', label: 'Role' },
-	{ id: 'location', label: 'Location' }
+	{ id: 'location', label: 'Your place' }
 ];
 
 /** Where a user should go next: an onboarding step, or the world. */
