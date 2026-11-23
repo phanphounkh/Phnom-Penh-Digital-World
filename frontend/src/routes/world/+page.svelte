@@ -509,12 +509,12 @@
 
 	{#if ready && hud}
 		<!-- Location card -->
-		<div class="world-location pointer-events-none absolute top-3 left-3 max-w-[min(22rem,calc(100vw-7rem))] rounded-2xl bg-river-950/75 px-4 py-3 shadow-xl backdrop-blur" data-testid="hud-location">
-			<p class="flex items-center gap-2 text-[11px] font-bold tracking-widest text-saffron-300 uppercase">
+		<div class="world-location hud-glass pointer-events-none absolute top-3 left-3 max-w-[min(19rem,calc(100vw-7rem))] rounded-xl px-3 py-2" data-testid="hud-location">
+			<p class="flex items-center gap-2 text-[10px] font-bold tracking-widest text-saffron-300 uppercase">
 				<Navigation size={12} style="transform: rotate({hud.heading}deg)" /> {compassLabel(hud.heading)} · Daun Penh
 				<span class="ml-auto font-mono normal-case tracking-normal text-river-200" data-testid="hud-clock" title={hud.timeMode === 'live' ? 'Phnom Penh time (live sun)' : 'Fixed time of day'}>{hud.clock}{hud.timeMode === 'live' ? '' : ' ·'}</span>
 			</p>
-			<p class="mt-1 truncate font-display text-lg leading-tight" data-testid="hud-street" title={insideShop?.name ?? hud.street ?? 'Off-street'}>
+			<p class="hud-street mt-0.5 truncate font-display text-base leading-tight" data-testid="hud-street" title={insideShop?.name ?? hud.street ?? 'Off-street'}>
 				{insideShop ? insideShop.name : (hud.street ?? 'Off-street')}
 			</p>
 			{#if insideShop}<p class="truncate text-xs text-saffron-300" data-testid="hud-shop">Shop {insideShop.unit.code} · {insideShop.unit.street_name ?? ''}{insideShop.is_open ? '' : ' · closed'}</p>{/if}
@@ -550,7 +550,7 @@
 		<!-- Status -->
 		<div class="world-status pointer-events-none absolute right-3 bottom-10 flex flex-col items-end gap-1.5 text-[11px]">
 			{#if net}
-				<span class="flex items-center gap-1.5 rounded-full px-3 py-1 backdrop-blur {net.status === 'open' ? 'bg-river-950/70' : 'bg-brick-600/85'}" data-testid="hud-net" data-status={net.status}>
+				<span class="flex items-center gap-1.5 rounded-full px-2.5 py-0.5 {net.status === 'open' ? 'hud-glass' : 'bg-brick-600/85 backdrop-blur'}" data-testid="hud-net" data-status={net.status}>
 					{#if net.status === 'open'}
 						<Wifi size={12} /> <span data-testid="hud-online">{net.online}</span>&nbsp;online · {net.nearby.length} nearby{#if net.rtt} · {net.rtt} ms{/if}
 					{:else}
@@ -558,7 +558,7 @@
 					{/if}
 				</span>
 			{/if}
-			<span class="performance-status flex items-center gap-1.5 rounded-full bg-river-950/70 px-3 py-1 backdrop-blur" data-testid="hud-perf"><Gauge size={12} /> {hud.fps} fps · {hud.chunks} chunks{hud.pending ? ` (+${hud.pending})` : ''}</span>
+			<span class="performance-status hud-glass flex items-center gap-1.5 rounded-full px-2.5 py-0.5" data-testid="hud-perf"><Gauge size={12} /> {hud.fps} fps · {hud.chunks} chunks{hud.pending ? ` (+${hud.pending})` : ''}</span>
 		</div>
 
 		{#if net}
@@ -872,7 +872,8 @@
 	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: rgb(11 37 36 / .3); }
 	.map-toggle { display: none; }
 	.world-attribution { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
-	.compact .world-location { max-width: min(20rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 10px 12px; border-radius: 14px; }
+	.compact .world-location { max-width: min(16rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 6px 10px; border-radius: 12px; }
+	.compact .hud-street { font-size: 14px; }
 	.compact .location-detail { display: none; }
 	.compact .world-toolbar { flex-direction: row; gap: 6px; }
 	.compact .secondary-control { display: none; }
@@ -881,7 +882,7 @@
 	.compact .world-minimap.expanded canvas { width: min(230px, 50vw); height: min(230px, 50vw); }
 	.compact .map-toggle { display: grid; }
 	.compact .world-minimap > span { font-size: 8px; }
-	.compact .world-status { top: calc(var(--hud-top) + 86px); left: var(--hud-left); right: auto; bottom: auto; font-size: 10px; }
+	.compact .world-status { top: calc(var(--hud-top) + 64px); left: var(--hud-left); right: auto; bottom: auto; font-size: 10px; }
 	.compact .performance-status { display: none; }
 	.compact .world-touch { right: var(--hud-right); bottom: var(--hud-bottom); gap: 4px; }
 	.compact .pad { width: 42px; height: 42px; border: 1px solid rgb(255 255 255 / .14); border-radius: 13px; }
@@ -899,6 +900,9 @@
 	.compact .world-speed > :global(div) { padding: 6px 10px; }
 	.compact .world-panel { top: var(--hud-top); right: var(--hud-right); width: min(27rem, calc(100vw - var(--hud-left) - var(--hud-right))); padding: 20px; }
 	.compact[data-panel-open='true'] .world-toolbar, .compact[data-panel-open='true'] .chat-toggle { visibility: hidden; }
+	/* Light glass for the HUD's small cards: the city shows through, a faint edge and a text
+	   shadow keep them readable on sky and road. */
+	.hud-glass { background: rgba(11, 37, 36, 0.4); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgba(255, 255, 255, 0.14); text-shadow: 0 1px 2px rgba(11, 37, 36, 0.6); }
 	/* Alerts over the city are text only: a soft shadow keeps them readable on sky and road. */
 	.world-alert { text-shadow: 0 1px 2px rgba(11, 37, 36, 0.9), 0 0 10px rgba(11, 37, 36, 0.7); }
 	/* The wardrobe: only the city, the avatar and the glass panel. */
@@ -906,6 +910,7 @@
 	@media (max-width: 600px) {
 		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }
+		.compact .world-alert { top: calc(var(--hud-top) + 166px); }
 		.compact .world-guidance { top: calc(var(--hud-top) + 166px); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-action { bottom: calc(var(--hud-bottom) + 150px); max-width: calc(100vw - 2rem); width: max-content; }
 		.compact .world-speed { right: var(--hud-right); bottom: calc(var(--hud-bottom) + 145px); }
