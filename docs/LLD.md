@@ -569,6 +569,11 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   sees them, so they see the new outfit without reconnecting. Cancel or Escape puts back what
   was worn.
 * Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
+* The toolbar's pop-ups (People, Places, vehicles, Cart, Settings, Controls, ☰ and the wallet,
+  delivery jobs and shop pages it opens) use the same dark glass: `.glass-sheet` in `app.css`,
+  over an undimmed city. Inside it the light palette is remapped (text light; white and paper
+  surfaces faint glass tiles; the selected tab a light chip; primary buttons saffron), so the
+  panel components are unchanged; `.solid` on `low` quality.
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

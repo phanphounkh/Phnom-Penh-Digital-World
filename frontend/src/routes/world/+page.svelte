@@ -798,7 +798,7 @@
 
 	{#if panel}
 		<button class="world-backdrop" aria-label="Dismiss overlay" tabindex="-1" onclick={() => panel = ''}></button>
-		<div use:dialogFocus={panel} class="world-panel absolute top-3 right-17 {panel === 'people' ? 'w-[min(27rem,calc(100vw-5.5rem))]' : 'w-[min(22rem,calc(100vw-5.5rem))]'} rounded-2xl bg-paper p-5 text-ink shadow-2xl" role="dialog" aria-modal="true" aria-label={panel} tabindex="-1">
+		<div use:dialogFocus={panel} class="world-panel glass-sheet absolute top-3 right-17 {panel === 'people' ? 'w-[min(27rem,calc(100vw-5.5rem))]' : 'w-[min(22rem,calc(100vw-5.5rem))]'} rounded-3xl p-5" class:solid={quality === 'low'} role="dialog" aria-modal="true" aria-label={panel} tabindex="-1">
 			<button class="absolute top-3 right-3 rounded-lg p-1 text-ink-soft hover:bg-paper-2" aria-label="Close" onclick={() => (panel = '')}><X size={18} /></button>
 			{#if panel === 'menu'}
 				<h2 class="display mb-4 text-xl font-bold">Your city</h2>
@@ -854,7 +854,7 @@
 				<p class="hint">Vehicles keep to the right and follow one-way streets; on foot you can use footpaths and the steps of Wat Phnom.</p>
 				{#if shopList.length}
 					<p class="label mt-3 flex items-center gap-1.5"><Store size={13} /> Shops ({shopList.length})</p>
-					<div class="grid max-h-48 gap-1.5 overflow-y-auto" data-testid="shop-directory">
+					<div class="grid max-h-48 grid-cols-1 gap-1.5 overflow-y-auto" data-testid="shop-directory">
 						{#each [...shopList].sort((a, b) => shopDistance(a) - shopDistance(b)) as s (s.id)}
 							<div class="flex items-center gap-2 rounded-xl border border-river-900/10 bg-white px-3 py-2" data-testid={`shop-row-${s.unit.code}`}>
 								<span class="h-3 w-3 shrink-0 rounded-full" style="background: {s.primary_color}"></span>
@@ -877,7 +877,7 @@
 					</span>
 					<button class="btn-primary px-2 py-1 text-xs" disabled={routing} onclick={toOffice}><RouteIcon size={13} class="inline" /> Route</button>
 				</div>
-				<div class="mt-3 grid gap-2">
+				<div class="mt-3 grid grid-cols-1 gap-2">
 					{#each places as p (p.id)}
 						<div class="flex items-center gap-2 rounded-xl border border-river-900/10 bg-white px-3 py-2" data-testid={`place-${p.slug}`}>
 							<span class="min-w-0 flex-1">
@@ -955,7 +955,8 @@
 	.world-location { top: var(--hud-top); left: var(--hud-left); }
 	.world-toolbar { top: var(--hud-top); right: var(--hud-right); }
 	.world-panel { z-index: 40; max-height: calc(100dvh - var(--hud-top) - var(--hud-bottom)); overflow-y: auto; overscroll-behavior: contain; }
-	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: rgb(11 37 36 / .3); }
+	/* Clicking the city closes a panel; it stays undimmed behind the glass. */
+	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: transparent; }
 	.map-toggle { display: none; }
 	.world-attribution { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
 	.compact .world-location { max-width: min(16rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 6px 10px; border-radius: 12px; }
