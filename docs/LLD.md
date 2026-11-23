@@ -574,6 +574,13 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   over an undimmed city. Inside it the light palette is remapped (text light; white and paper
   surfaces faint glass tiles; the selected tab a light chip; primary buttons saffron), so the
   panel components are unchanged; `.solid` on `low` quality.
+* The HUD's bottom row in the same glass: bottom left a round see-through minimap (136 px, north
+  up; `drawMinimap` paints a light teal tint, light roads with saffron main roads, faint
+  buildings, a heading cone and arrow; the scale bar is a true 100 m) and the chat beside it (a
+  slim bar: channel, message, Send; key hints Enter and Tab inside it; the log only shows once
+  someone talks). Bottom right the greetings dock (👋 🙏 🎉 💃, keys 1–4, names on hover) over the
+  network and frame-rate chips, the speedometer above it when riding. On a phone the minimap is
+  96 px (tap to expand), and the greetings, named, open with the chat.
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)
 

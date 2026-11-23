@@ -1234,10 +1234,19 @@ export async function createCity(
 	return controller;
 }
 
+/**
+ * The minimap is see-through glass over the city (the page blurs what is behind it): a light
+ * tint of dark teal, light roads (saffron for the main ones), faint buildings, tinted water and
+ * parks. Only the player's arrow and a route are solid.
+ */
 const MINI_ROADS: Record<string, [string, number]> = {
-	trunk: ['#e8a33d', 7], primary: ['#e8a33d', 6], secondary: ['#f4cf8e', 5], tertiary: ['#ffffff', 4],
-	residential: ['#ffffff', 3], unclassified: ['#ffffff', 3], living_street: ['#ffffff', 3],
-	service: ['#e9e2d2', 2], pedestrian: ['#e6d8b8', 2.5], footway: ['#e6d8b8', 1.5]
+	trunk: ['#e8a33d', 7], primary: ['#e8a33d', 6], secondary: ['rgba(244, 207, 142, 0.9)', 5], tertiary: ['rgba(255, 250, 240, 0.85)', 4],
+	residential: ['rgba(255, 250, 240, 0.75)', 3], unclassified: ['rgba(255, 250, 240, 0.75)', 3], living_street: ['rgba(255, 250, 240, 0.75)', 3],
+	service: ['rgba(255, 250, 240, 0.4)', 2], pedestrian: ['rgba(244, 207, 142, 0.45)', 2.5], footway: ['rgba(244, 207, 142, 0.35)', 1.5]
+};
+const MINI_AREAS: Record<string, string> = {
+	water: 'rgba(76, 158, 178, 0.6)', park: 'rgba(104, 158, 88, 0.5)', grass: 'rgba(116, 168, 96, 0.45)', pitch: 'rgba(116, 168, 96, 0.45)',
+	temple_grounds: 'rgba(232, 200, 140, 0.35)', plaza: 'rgba(255, 250, 240, 0.12)'
 };
 
 function drawMinimap(
@@ -1254,7 +1263,7 @@ function drawMinimap(
 	const tx = (x: number) => half + (x - px) / mpp;
 	const tz = (z: number) => half + (z - pz) / mpp;
 	ctx.clearRect(0, 0, size, size);
-	ctx.fillStyle = '#d8d0bf';
+	ctx.fillStyle = 'rgba(11, 37, 36, 0.42)';
 	ctx.fillRect(0, 0, size, size);
 	const payloads = chunks.payloads();
 	const fillRings = (rings: [number, number][][]) => {
@@ -1262,21 +1271,20 @@ function drawMinimap(
 		for (const ring of rings) ring.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
 		ctx.fill('evenodd');
 	};
-	const AREA: Record<string, string> = { water: '#7fb3bb', park: '#9fbb83', grass: '#a9c48a', pitch: '#a9c48a', temple_grounds: '#e5d3a8', plaza: '#e6dcc6' };
 	for (const p of payloads)
 		for (const a of p.areas) {
-			const c = AREA[a.kind];
+			const c = MINI_AREAS[a.kind];
 			if (!c) continue;
 			ctx.fillStyle = c;
 			for (const poly of a.polys) fillRings(poly);
 		}
-	ctx.fillStyle = '#b3a993';
+	ctx.fillStyle = 'rgba(255, 250, 240, 0.2)';
 	for (const p of payloads) for (const bld of p.buildings) for (const poly of bld.polys) fillRings(poly);
 	ctx.lineCap = 'round';
 	ctx.lineJoin = 'round';
 	for (const p of payloads)
 		for (const r of p.roads) {
-			const [color, w] = MINI_ROADS[r.cls.replace(/_link$/, '')] ?? ['#f1ece0', 1.5];
+			const [color, w] = MINI_ROADS[r.cls.replace(/_link$/, '')] ?? ['rgba(255, 250, 240, 0.4)', 1.5];
 			ctx.strokeStyle = color;
 			ctx.lineWidth = Math.max(1, (w * 3) / (mpp * 2));
 			ctx.beginPath();
@@ -1284,13 +1292,13 @@ function drawMinimap(
 			ctx.stroke();
 		}
 	if (routePoints && routePoints.length > 1) {
-		ctx.strokeStyle = '#c4552f';
+		ctx.strokeStyle = '#f0703f';
 		ctx.lineWidth = 3.5;
 		ctx.beginPath();
 		routePoints.forEach(([x, z], i) => (i ? ctx.lineTo(tx(x), tz(z)) : ctx.moveTo(tx(x), tz(z))));
 		ctx.stroke();
 		const [ex, ez] = routePoints[routePoints.length - 1];
-		ctx.fillStyle = '#c4552f';
+		ctx.fillStyle = '#f0703f';
 		ctx.beginPath();
 		ctx.arc(tx(ex), tz(ez), 5, 0, Math.PI * 2);
 		ctx.fill();
@@ -1298,8 +1306,18 @@ function drawMinimap(
 	ctx.save();
 	ctx.translate(half, half);
 	ctx.rotate(Math.PI - yaw);
-	ctx.fillStyle = '#c4552f';
-	ctx.strokeStyle = '#fff';
+	// A soft cone where the player faces, then the arrow.
+	const cone = ctx.createRadialGradient(0, 0, 4, 0, 0, 46);
+	cone.addColorStop(0, 'rgba(255, 250, 240, 0.32)');
+	cone.addColorStop(1, 'rgba(255, 250, 240, 0)');
+	ctx.fillStyle = cone;
+	ctx.beginPath();
+	ctx.moveTo(0, 0);
+	ctx.arc(0, 0, 46, -Math.PI / 2 - 0.6, -Math.PI / 2 + 0.6);
+	ctx.closePath();
+	ctx.fill();
+	ctx.fillStyle = '#fffaf0';
+	ctx.strokeStyle = '#0b2524';
 	ctx.lineWidth = 2;
 	ctx.beginPath();
 	ctx.moveTo(0, -9);

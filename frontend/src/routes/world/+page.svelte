@@ -3,7 +3,7 @@
 	import { goto, replaceState } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
-		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
+		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff,
 		ShoppingCart, ShoppingBasket, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
 		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt
 	} from 'lucide-svelte';
@@ -87,6 +87,9 @@
 	let net = $state<WorldSession | null>(null);
 	let chatInput = $state<HTMLInputElement>();
 	const EMOTE_BUTTONS: [EmoteName, string][] = [['wave', 'Wave'], ['sampeah', 'Sampeah'], ['cheer', 'Cheer'], ['dance', 'Dance']];
+	const EMOTE_FACES: Record<EmoteName, string> = { wave: '👋', sampeah: '🙏', cheer: '🎉', dance: '💃' };
+	/** 100 m on the minimap, as a share of its width (170 px drawn at 1.6 m per px). */
+	const MAP_SCALE = `${(100 / 1.6 / 170) * 100}%`;
 	let places = $state<SpawnPoint[]>([]);
 	let quality = $state<Quality>('high');
 	let timeMode = $state<TimeMode>('live');
@@ -596,16 +599,30 @@
 			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
 		</nav>
 
-		<!-- Minimap -->
-		<div class="world-minimap absolute bottom-10 left-3 overflow-hidden rounded-2xl border-2 border-white/80 shadow-xl" class:expanded={mapExpanded}>
-			<canvas bind:this={minimap} width="170" height="170" class="block h-[150px] w-[150px] sm:h-[170px] sm:w-[170px]" aria-label="Minimap"></canvas>
-			<span class="absolute top-1.5 left-1/2 -translate-x-1/2 rounded bg-river-950/70 px-1.5 text-[10px] font-bold">N</span>
-			<span class="absolute right-2 bottom-1.5 rounded bg-river-950/70 px-1.5 text-[9px]">100 m ▬</span>
-			<button class="map-toggle absolute top-1 right-1 grid h-7 w-7 place-items-center rounded-lg bg-river-950/80 text-paper" aria-label={mapExpanded ? 'Shrink minimap' : 'Expand minimap'} aria-expanded={mapExpanded} onclick={() => mapExpanded = !mapExpanded}>{#if mapExpanded}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}</button>
+		{#snippet greetings()}
+			<div class="greetings pointer-events-auto" role="group" aria-label="Greetings (keys 1–4)">
+				{#each EMOTE_BUTTONS as [id, label], i (id)}
+					<button class="greeting" onclick={() => net?.emote(id)} aria-keyshortcuts={String(i + 1)} data-testid={`emote-${id}`}>
+						<span class="greeting-face" aria-hidden="true">{EMOTE_FACES[id]}</span>
+						<kbd aria-hidden="true">{i + 1}</kbd>
+						<span class="greeting-name">{label}</span>
+					</button>
+				{/each}
+			</div>
+		{/snippet}
+
+		<!-- Minimap: a small round glass map, north up. -->
+		<div class="world-minimap absolute" class:expanded={mapExpanded}>
+			<div class="minimap-disc">
+				<canvas bind:this={minimap} width="170" height="170" aria-label="Minimap"></canvas>
+				<span class="minimap-north" aria-hidden="true">N</span>
+				<span class="minimap-scale" style:width={MAP_SCALE}>100 m</span>
+			</div>
+			<button class="map-toggle absolute -top-1 -right-1 h-7 w-7 place-items-center rounded-full bg-river-950/85 text-paper shadow-lg" aria-label={mapExpanded ? 'Shrink minimap' : 'Expand minimap'} aria-expanded={mapExpanded} onclick={() => mapExpanded = !mapExpanded}>{#if mapExpanded}<Minimize2 size={13} />{:else}<Maximize2 size={13} />{/if}</button>
 		</div>
 
 		<!-- Status -->
-		<div class="world-status pointer-events-none absolute right-3 bottom-10 flex flex-col items-end gap-1.5 text-[11px]">
+		<div class="world-status pointer-events-none absolute flex items-center gap-1.5 text-[11px]">
 			{#if net}
 				<span class="flex items-center gap-1.5 rounded-full px-2.5 py-0.5 {net.status === 'open' ? 'hud-glass' : 'bg-brick-600/85 backdrop-blur'}" data-testid="hud-net" data-status={net.status}>
 					{#if net.status === 'open'}
@@ -621,18 +638,12 @@
 		{#if net}
 			{#if compact}<button class="chat-toggle absolute grid h-11 w-11 place-items-center rounded-full bg-river-950/85 shadow-lg" aria-label={chatOpen ? 'Close chat' : 'Open chat'} aria-expanded={chatOpen} onclick={() => chatOpen = !chatOpen}>{#if chatOpen}<X size={20} />{:else}<MessageCircle size={20} />{/if}</button>{/if}
 			{#if !compact || chatOpen}
-			<div class="world-chat pointer-events-none absolute bottom-10 left-[calc(170px+1.5rem)] flex flex-col gap-2">
-				<div class="pointer-events-auto flex gap-1.5" role="group" aria-label="Emotes (keys 1–4)">
-					{#each EMOTE_BUTTONS as [id, label], i (id)}
-						<button class="flex items-center gap-1 rounded-full bg-river-950/70 px-2.5 py-1 text-[11px] font-semibold backdrop-blur hover:bg-river-800" title={`${label} (${i + 1})`} onclick={() => net?.emote(id)} data-testid={`emote-${id}`}>
-							{#if id === 'wave'}<Hand size={12} />{:else if id === 'sampeah'}<span aria-hidden="true">🙏</span>{:else if id === 'cheer'}<PartyPopper size={12} />{:else}<Sparkles size={12} />{/if}
-							{label}
-						</button>
-					{/each}
-				</div>
+			<div class="world-chat pointer-events-none absolute flex flex-col gap-2">
+				{#if compact}{@render greetings()}{/if}
 				<ChatBox session={net} bind:input={chatInput} />
 			</div>
 			{/if}
+			{#if !compact}<div class="world-greetings absolute">{@render greetings()}</div>{/if}
 			<div class="absolute {hud.nav && navTarget ? 'top-24' : 'top-3'} left-1/2 flex w-[min(26rem,calc(100vw-8rem))] -translate-x-1/2 flex-col gap-2" aria-live="polite">
 				{#each net.toasts as t (t.key)}
 					<div class="flex items-center gap-3 rounded-2xl px-4 py-2.5 text-sm shadow-xl {t.kind === 'warning' ? 'bg-brick-600 text-white' : 'bg-paper text-ink'}" data-testid="toast">
@@ -647,7 +658,7 @@
 		{/if}
 
 		{#if hud.mode !== 'foot'}
-			<div class="world-speed pointer-events-none absolute right-3 bottom-[5.5rem] flex items-end gap-2" data-testid="hud-ride" data-mode={hud.mode} data-speed={hud.speedKmh}>
+			<div class="world-speed pointer-events-none absolute right-3 bottom-32 flex items-end gap-2" data-testid="hud-ride" data-mode={hud.mode} data-speed={hud.speedKmh}>
 				{#if hud.wrongWay}
 					<span class="flex items-center gap-1.5 rounded-full bg-brick-600 px-3 py-1.5 text-xs font-bold text-white shadow-lg" data-testid="hud-wrong-way"><TriangleAlert size={14} /> Wrong way: one-way street</span>
 				{:else if hud.oneWay}
@@ -958,18 +969,43 @@
 	/* Clicking the city closes a panel; it stays undimmed behind the glass. */
 	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: transparent; }
 	.map-toggle { display: none; }
+	/* Bottom left: a small round glass minimap, north up, the chat beside it. Bottom right: the
+	   greetings dock over the status chips. */
+	.world-minimap { left: var(--hud-left); bottom: 40px; }
+	.minimap-disc { position: relative; width: 136px; height: 136px; border-radius: 50%; overflow: hidden; border: 1px solid rgb(255 255 255 / .28); box-shadow: 0 12px 32px -12px rgb(0 0 0 / .6); -webkit-backdrop-filter: blur(6px) saturate(140%); backdrop-filter: blur(6px) saturate(140%); }
+	.minimap-disc canvas { display: block; width: 100%; height: 100%; }
+	.minimap-north { position: absolute; top: 5px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 800; line-height: 1; color: var(--color-saffron-300); text-shadow: 0 1px 2px rgb(11 37 36 / .9); }
+	.minimap-scale { position: absolute; bottom: 13px; left: 50%; transform: translateX(-50%); padding-bottom: 2px; border-bottom: 2px solid rgb(255 250 240 / .85); text-align: center; font-size: 9px; font-weight: 700; line-height: 1; color: rgb(255 250 240 / .9); text-shadow: 0 1px 2px rgb(11 37 36 / .9); }
+	.world-chat { left: calc(var(--hud-left) + 150px); bottom: 40px; }
+	.world-status { right: var(--hud-right); bottom: 40px; }
+	.world-greetings { right: var(--hud-right); bottom: 70px; }
+	.greetings { display: flex; gap: 2px; padding: 4px; border-radius: 999px; background: rgb(11 37 36 / .45); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgb(255 255 255 / .16); box-shadow: 0 12px 30px -14px rgb(0 0 0 / .6); }
+	.greeting { position: relative; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; color: #fffaf0; transition: background-color 120ms, transform 120ms; }
+	.greeting:hover { background: rgb(255 255 255 / .14); }
+	.greeting:active { transform: scale(.9); }
+	.greeting-face { font-size: 20px; line-height: 1; }
+	.greeting kbd { position: absolute; right: 0; bottom: 0; min-width: 14px; padding: 0 3px; border-radius: 6px; font: 700 9px/13px var(--font-sans); text-align: center; color: var(--color-river-950); background: rgb(255 250 240 / .85); }
+	.greeting-name { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translate(-50%, 4px); padding: 3px 8px; border-radius: 8px; white-space: nowrap; font-size: 11px; font-weight: 700; background: rgb(11 37 36 / .85); opacity: 0; pointer-events: none; transition: opacity 120ms, transform 120ms; }
+	.greeting:is(:hover, :focus-visible) .greeting-name { opacity: 1; transform: translate(-50%, 0); }
+	@media (prefers-reduced-motion: reduce) { .greeting, .greeting-name { transition: none; } }
 	.world-attribution { padding-bottom: max(6px, env(safe-area-inset-bottom)); }
 	.compact .world-location { max-width: min(16rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 6px 10px; border-radius: 12px; }
 	.compact .hud-street { font-size: 14px; }
 	.compact .location-detail { display: none; }
 	.compact .world-toolbar { flex-direction: row; gap: 6px; }
 	.compact .secondary-control { display: none; }
-	.compact .world-minimap { left: var(--hud-left); bottom: var(--hud-bottom); border-width: 1px; border-radius: 14px; }
-	.compact .world-minimap canvas { width: 104px; height: 104px; }
-	.compact .world-minimap.expanded canvas { width: min(230px, 50vw); height: min(230px, 50vw); }
+	.compact .world-minimap { left: var(--hud-left); bottom: var(--hud-bottom); }
+	.compact .minimap-disc { width: 96px; height: 96px; }
+	.compact .world-minimap.expanded .minimap-disc { width: min(230px, 50vw); height: min(230px, 50vw); }
 	.compact .map-toggle { display: grid; }
-	.compact .world-minimap > span { font-size: 8px; }
-	.compact .world-status { top: calc(var(--hud-top) + 64px); left: var(--hud-left); right: auto; bottom: auto; font-size: 10px; }
+	.compact :is(.minimap-north, .minimap-scale) { font-size: 8px; }
+	.compact .minimap-scale { bottom: 9px; }
+	.compact .world-status { top: calc(var(--hud-top) + 64px); left: var(--hud-left); right: auto; bottom: auto; flex-direction: column; align-items: flex-start; font-size: 10px; }
+	/* On a phone the greetings sit in the chat drawer, named (no hover there). */
+	.compact .greeting { display: flex; gap: 5px; width: auto; height: 34px; padding: 0 11px 0 8px; border-radius: 999px; }
+	.compact .greeting-face { font-size: 16px; }
+	.compact .greeting kbd { display: none; }
+	.compact .greeting-name { position: static; opacity: 1; transform: none; padding: 0; background: none; }
 	.compact .performance-status { display: none; }
 	.compact .world-touch { right: var(--hud-right); bottom: var(--hud-bottom); gap: 4px; }
 	.compact .pad { width: 42px; height: 42px; border: 1px solid rgb(255 255 255 / .14); border-radius: 13px; }
@@ -997,12 +1033,12 @@
 	.basket-chip { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700; color: #fffaf0; background: rgba(11, 37, 36, 0.55); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: 0 8px 24px -10px rgba(0, 0, 0, 0.5); }
 	.basket-chip .muted { font-weight: 500; opacity: 0.75; }
 	/* My shop takes the right side (a sheet on a phone). */
-	.myshop-open :is(.world-toolbar, .world-action, .world-guidance, .chat-toggle) { display: none; }
+	.myshop-open :is(.world-toolbar, .world-action, .world-guidance, .chat-toggle, .world-greetings) { display: none; }
 	.compact.myshop-open :is(.world-touch, .world-chat, .world-status, .world-minimap) { display: none; }
 	/* Alerts over the city are text only: a soft shadow keeps them readable on sky and road. */
 	.world-alert { text-shadow: 0 1px 2px rgba(11, 37, 36, 0.9), 0 0 10px rgba(11, 37, 36, 0.7); }
 	/* The wardrobe: only the city, the avatar and the glass panel. */
-	.wardrobe-open :is(.world-location, .world-toolbar, .world-minimap, .world-status, .world-chat, .world-speed, .world-guidance, .world-action, .world-touch, .world-alert, .chat-toggle) { display: none; }
+	.wardrobe-open :is(.world-location, .world-toolbar, .world-minimap, .world-status, .world-chat, .world-greetings, .world-speed, .world-guidance, .world-action, .world-touch, .world-alert, .chat-toggle) { display: none; }
 	@media (max-width: 600px) {
 		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }
@@ -1012,8 +1048,8 @@
 		.compact .world-speed { right: var(--hud-right); bottom: calc(var(--hud-bottom) + 145px); }
 	}
 	@media (max-height: 400px) and (min-width: 601px) {
-		.compact .world-minimap canvas { width: 88px; height: 88px; }
-		.compact .world-minimap.expanded canvas { width: 180px; height: 180px; }
+		.compact .minimap-disc { width: 84px; height: 84px; }
+		.compact .world-minimap.expanded .minimap-disc { width: 180px; height: 180px; }
 		.compact .world-action { bottom: calc(var(--hud-bottom) + 36px); }
 	}
 	.pad {
