@@ -681,9 +681,9 @@
 		{/if}
 
 		{#if hud.nearEdge}
-			<div class="pointer-events-none absolute top-24 left-1/2 -translate-x-1/2 rounded-full bg-saffron-500 px-4 py-2 text-sm font-semibold text-river-950 shadow-lg">
+			<p class="world-alert pointer-events-none absolute top-24 left-1/2 w-[min(30rem,calc(100vw-2rem))] -translate-x-1/2 text-center text-sm font-semibold text-paper" data-testid="edge-alert" role="status">
 				Edge of the mapped neighbourhood — more of Phnom Penh is coming
-			</div>
+			</p>
 		{/if}
 
 		<p class="world-attribution absolute right-0 bottom-0 left-0 bg-gradient-to-t from-river-950/80 to-transparent px-3 pt-4 pb-1.5 text-center text-[10px] text-river-200">
@@ -899,8 +899,10 @@
 	.compact .world-speed > :global(div) { padding: 6px 10px; }
 	.compact .world-panel { top: var(--hud-top); right: var(--hud-right); width: min(27rem, calc(100vw - var(--hud-left) - var(--hud-right))); padding: 20px; }
 	.compact[data-panel-open='true'] .world-toolbar, .compact[data-panel-open='true'] .chat-toggle { visibility: hidden; }
+	/* Alerts over the city are text only: a soft shadow keeps them readable on sky and road. */
+	.world-alert { text-shadow: 0 1px 2px rgba(11, 37, 36, 0.9), 0 0 10px rgba(11, 37, 36, 0.7); }
 	/* The wardrobe: only the city, the avatar and the glass panel. */
-	.wardrobe-open :is(.world-location, .world-toolbar, .world-minimap, .world-status, .world-chat, .world-speed, .world-guidance, .world-action, .world-touch, .chat-toggle) { display: none; }
+	.wardrobe-open :is(.world-location, .world-toolbar, .world-minimap, .world-status, .world-chat, .world-speed, .world-guidance, .world-action, .world-touch, .world-alert, .chat-toggle) { display: none; }
 	@media (max-width: 600px) {
 		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }
