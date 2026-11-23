@@ -1,12 +1,11 @@
 <script lang="ts">
 	/**
 	 * The wardrobe, in the game: a glass panel over the city while the camera faces the player.
-	 * Pick a category, turn its wheels; the avatar in the world changes as you go (`onPreview`).
+	 * Pick what to change, turn its wheel; the avatar in the world changes as you go (`onPreview`).
 	 * Save keeps the outfit (others see it at once); Cancel or Escape puts the old one back.
 	 */
-	import { Backpack, Eye, Footprints, Glasses, PersonStanding, Scissors, Shirt, Shuffle, X } from 'lucide-svelte';
+	import { Backpack, Footprints, PersonStanding, Scissors, Shirt, Shuffle, X } from 'lucide-svelte';
 	import type { Avatar } from '$lib/api/types';
-	import type { AvatarStyle } from '$lib/game/avatar/character';
 	import { randomAvatar } from '$lib/game/avatar/avatar';
 	import { CATEGORIES, describe, wheels, type CategoryId } from '$lib/game/avatar/wardrobe';
 	import { untrack } from 'svelte';
@@ -14,18 +13,14 @@
 
 	let {
 		outfit,
-		look,
 		solid = false,
-		onLook,
 		onPreview,
 		onSave,
 		onClose
 	}: {
 		outfit: Avatar;
-		look: AvatarStyle;
 		/** No frosted glass (slow graphics): a more opaque panel instead. */
 		solid?: boolean;
-		onLook: (style: AvatarStyle) => void;
 		onPreview: (avatar: Avatar) => void;
 		onSave: (avatar: Avatar) => Promise<void>;
 		onClose: () => void;
@@ -94,11 +89,6 @@
 	<div class="glass panel" class:solid aria-label="Wardrobe" role="dialog" aria-modal="false">
 		<header class="head">
 			<h2>Wardrobe</h2>
-			<div class="look" role="radiogroup" aria-label="Look">
-				{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [s, text] (s)}
-					<button type="button" role="radio" aria-checked={look === s} class:on={look === s} onclick={() => onLook(s)}>{text}</button>
-				{/each}
-			</div>
 			<button type="button" class="icon" aria-label="Close without saving" onclick={cancel}><X size={18} /></button>
 		</header>
 
@@ -109,10 +99,7 @@
 						{#if c.id === 'top'}<Shirt size={18} />
 						{:else if c.id === 'bottom'}<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 3h10l1 18h-4l-2-11-2 11H6z" /></svg>
 						{:else if c.id === 'shoes'}<Footprints size={18} />
-						{:else if c.id === 'hat'}<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 15a8 8 0 0 1 16 0z" /><path d="M12 15h9" /></svg>
-						{:else if c.id === 'glasses'}<Glasses size={18} />
 						{:else if c.id === 'bag'}<Backpack size={18} />
-						{:else if c.id === 'scarf'}<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 6c4 3 10 3 14 0" /><path d="M9 8l-2 13h4l1-10" /></svg>
 						{:else if c.id === 'hair'}<Scissors size={18} />
 						{:else}<PersonStanding size={18} />{/if}
 					</span>
@@ -126,15 +113,9 @@
 			<p class="now-what" data-testid="wardrobe-now">{describe(category, draft)}</p>
 		</div>
 
-		{#if current.classicOnly && look === 'realistic'}
-			<button type="button" class="tag" onclick={() => onLook('classic')} title="The realistic look wears one outfit in your colours. Show the Classic look.">
-				<Eye size={13} /> The item shows in the Classic look
-			</button>
-		{/if}
-
 		<div class="wheels" class:single={turning.length === 1}>
 			{#each turning as wheel (`${category}-${wheel.kind}`)}
-				<Drum id={`${category}-${wheel.kind}`} rows={narrow ? 3 : 5} label={wheel.label} choices={wheel.choices} value={wheel.value} onchange={(id) => wear(wheel.pick(draft, id))} />
+				<Drum id={`${category}-${wheel.kind}`} rows={narrow ? 3 : turning.length === 1 ? 7 : 5} label={wheel.label} choices={wheel.choices} value={wheel.value} onchange={(id) => wear(wheel.pick(draft, id))} />
 			{/each}
 		</div>
 		{#if current.note}<p class="note">{current.note}</p>{/if}
@@ -184,12 +165,9 @@
 	.panel > * { flex-shrink: 0; } /* the panel scrolls; its rows keep their height */
 	.head { display: flex; align-items: center; gap: 10px; }
 	h2 { margin: 0; flex: 1; font-family: var(--font-display); font-size: 24px; font-weight: 700; color: #fffaf0; }
-	.look { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, 0.12); font-size: 12px; font-weight: 600; }
-	.look button { padding: 4px 10px; border-radius: 9px; color: inherit; opacity: 0.8; }
-	.look button.on { background: rgba(255, 255, 255, 0.92); color: #123b3a; opacity: 1; }
 	.icon { padding: 6px; border-radius: 10px; }
 	.icon:hover, .ghost:hover { background: rgba(255, 255, 255, 0.14); }
-	.cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+	.cats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 	.cats button { display: flex; align-items: center; gap: 6px; padding: 7px 9px; border-radius: 12px; font-size: 12px; font-weight: 600; background: rgba(255, 255, 255, 0.08); border: 1px solid transparent; color: inherit; }
 	.cats button:hover { background: rgba(255, 255, 255, 0.16); }
 	.cats button.on { background: rgba(255, 255, 255, 0.92); color: #123b3a; }
@@ -197,7 +175,6 @@
 	.now { display: grid; gap: 2px; }
 	.now-cat { font-size: 12px; font-weight: 600; opacity: 0.75; }
 	.now-what { font-family: var(--font-display); font-size: 22px; font-weight: 600; color: #fffaf0; }
-	.tag { justify-self: start; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(232, 163, 61, 0.9); color: #0b2524; }
 	.wheels { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 	.wheels.single { grid-template-columns: 1fr; }
 	.note { font-size: 12px; opacity: 0.8; }

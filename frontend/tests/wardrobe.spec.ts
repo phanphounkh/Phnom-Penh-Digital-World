@@ -1,8 +1,9 @@
 /**
  * The wardrobe in the game (isolated stack): a player opens it (O), the camera turns to face
- * them and the HUD gives way to a glass panel; they turn the wheels with the mouse wheel (a
- * hoodie, then its colour) and see it on their avatar at once; Save keeps it, and another player
- * nearby sees the new outfit without reconnecting. Escape puts back what was worn.
+ * them and the HUD gives way to a glass panel; they turn the colour wheels with the mouse wheel
+ * and the keys and see it on their avatar at once; Save keeps it, and another player nearby sees
+ * the new outfit without reconnecting. Escape puts back what was worn. There is only the
+ * realistic look (no Classic switch).
  * Screenshots go to test-results/wardrobe/.
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -54,30 +55,30 @@ test('the wardrobe: wheels, a live avatar, saved for everyone around', async ({ 
 	const a = await join(browser, baseURL, `wear_a_${id}`);
 	const b = await join(browser, baseURL, `wear_b_${id}`);
 	const aId = await ev<number>(a.page, `globalThis.__ppwNet.me.id`);
-	const seenByB = () => ev<{ top_style: string; top_color: string } | null>(b.page, `globalThis.__ppwNet.remotes.players.get(${aId})?.card.av ?? null`);
-	await expect.poll(seenByB, FRAMES).toMatchObject({ top_style: 'tee' });
+	const seenByB = () => ev<{ top_color: string } | null>(b.page, `globalThis.__ppwNet.remotes.players.get(${aId})?.card.av ?? null`);
+	await expect.poll(seenByB, FRAMES).toMatchObject({ top_color: '#2f7d6d' });
 
 	// O opens it: the panel, no HUD.
 	await a.page.locator('[data-testid="world-canvas"] canvas').click({ position: { x: 300, y: 300 } });
 	await a.page.keyboard.press('o');
 	await expect(a.page.getByTestId('wardrobe')).toBeVisible();
 	await expect(a.page.getByRole('navigation', { name: 'World controls' })).toBeHidden();
-	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Jade t-shirt');
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Jade jacket');
+	await expect(a.page.getByTestId('wardrobe').getByText(/Classic/)).toHaveCount(0);
 	await a.page.waitForTimeout(2500);
 	await a.page.screenshot({ path: `${SHOTS}/open.png` });
 
-	// The wheels: a hoodie, then two colours on (Jade → River → Saffron).
-	await scroll(a.page, 'top-item', 1);
-	await expect(a.page.getByTestId('drum-top-item')).toHaveAttribute('data-value', 'hoodie');
+	// The wheel: two colours on (Jade → River → Saffron).
 	await scroll(a.page, 'top-colour', 2);
-	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Saffron hoodie');
+	await expect(a.page.getByTestId('drum-top-colour')).toHaveAttribute('data-value', '#e8a33d');
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Saffron jacket');
 	// Worn at once, before saving.
-	await expect.poll(() => ev<string>(a.page, `globalThis.__ppwNet.city.outfit.top_style + ' ' + globalThis.__ppwNet.city.outfit.top_color`), FRAMES).toBe('hoodie #e8a33d');
-	// Keys too: down on the bottom wheel gives shorts.
+	await expect.poll(() => ev<string>(a.page, `globalThis.__ppwNet.city.outfit.top_color`), FRAMES).toBe('#e8a33d');
+	// Keys too: down on the trousers wheel goes from Slate to Orchid.
 	await a.page.getByTestId('cat-bottom').click();
-	await a.page.getByTestId('drum-bottom-item').focus();
+	await a.page.getByTestId('drum-bottom-colour').focus();
 	await a.page.keyboard.press('ArrowDown');
-	await expect(a.page.getByTestId('wardrobe-now')).toHaveText(/shorts$/);
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Orchid trousers');
 	await a.page.waitForTimeout(2000);
 	await a.page.screenshot({ path: `${SHOTS}/changed.png` });
 
@@ -86,19 +87,19 @@ test('the wardrobe: wheels, a live avatar, saved for everyone around', async ({ 
 	await expect(a.page.getByTestId('wardrobe')).toHaveCount(0);
 	await expect(a.page.getByRole('navigation', { name: 'World controls' })).toBeVisible();
 	const saved = await (await a.api.get('/api/v1/me/avatar')).json();
-	expect(saved).toMatchObject({ top_style: 'hoodie', top_color: '#e8a33d', bottom_style: 'shorts' });
-	await expect.poll(seenByB, FRAMES).toMatchObject({ top_style: 'hoodie', top_color: '#e8a33d' });
+	expect(saved).toMatchObject({ top_color: '#e8a33d', bottom_color: '#6b4fa0' });
+	await expect.poll(seenByB, FRAMES).toMatchObject({ top_color: '#e8a33d' });
 
 	// Escape puts back what was worn.
 	await a.page.getByTestId('open-wardrobe').click();
-	await a.page.getByTestId('cat-hat').click();
-	await scroll(a.page, 'hat-item', 1);
-	await expect(a.page.getByTestId('wardrobe-now')).toHaveText(/cap$/);
-	await expect.poll(() => ev<string[]>(a.page, `globalThis.__ppwNet.city.outfit.accessories`), FRAMES).toEqual(['cap']);
+	await a.page.getByTestId('cat-bag').click();
+	await scroll(a.page, 'bag-colour', 1);
+	await expect(a.page.getByTestId('wardrobe-now')).toHaveText('Brick backpack');
+	await expect.poll(() => ev<string>(a.page, `globalThis.__ppwNet.city.outfit.accent_color`), FRAMES).toBe('#c4552f');
 	await a.page.keyboard.press('Escape');
 	await expect(a.page.getByTestId('wardrobe')).toHaveCount(0);
-	await expect.poll(() => ev<string[]>(a.page, `globalThis.__ppwNet.city.outfit.accessories`), FRAMES).toEqual([]);
-	expect((await (await a.api.get('/api/v1/me/avatar')).json()).accessories).toEqual([]);
+	await expect.poll(() => ev<string>(a.page, `globalThis.__ppwNet.city.outfit.accent_color`), FRAMES).toBe('#e8a33d');
+	expect((await (await a.api.get('/api/v1/me/avatar')).json()).accent_color).toBe('#e8a33d');
 
 	// A phone: the panel is a sheet below the avatar.
 	await a.page.setViewportSize({ width: 390, height: 844 });

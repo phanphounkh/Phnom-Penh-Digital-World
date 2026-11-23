@@ -81,8 +81,8 @@ Coordinates are world metres (2 decimals): `x = east`, `z = −north`. Rings are
 | `lib/api/*` | Typed client (CSRF echo, error envelope → `ApiError` with `fieldErrors`), endpoint functions, types |
 | `lib/stores/session.svelte.ts` | Session store: request-scoped `page.data.user` during SSR (no cross-request leaks), client override after mutations; routing helpers |
 | `lib/geo/projection.ts` | proj4 mirror of the backend projection; chunk keys; compass/yaw helpers |
-| `lib/game/avatar/avatar.ts` | Classic avatar: loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching |
-| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider) for either style; `realistic` (default) or `classic`, a local display preference in `localStorage` (`ppw.avatarStyle`); falls back to classic if the realistic models cannot load |
+| `lib/game/avatar/avatar.ts` | Classic avatar (the fallback only): loads `avatar.glb` once; per-avatar material clones; option visibility; per-joint batching; the colour palettes and their names |
+| `lib/game/avatar/character.ts` | One avatar behind one interface (model, gait, emotes, vehicle rider, in-place `update`): the realistic avatar, or the classic one if the realistic models cannot load |
 | `lib/game/avatar/realistic.ts` | Realistic avatars (`avatar-generator/`): loads `characters/realistic/{male,female}.glb` + `manifest.json`, clones with `SkeletonUtils`, recolours per player (skin tint, hair factor, repainted palette cells), adds a `RightWrist` socket for held products |
 | `lib/game/avatar/RealisticAnimations.ts` | Gait clips (Idle/Walk/Run with hysteresis, stride phase kept, speed-matched playback), emote clips (Wave, Greet = sampeah, Cheer, Dance), IK carry pose; `RealisticEmotes` facade |
 | `lib/game/avatar/ik.ts` | Rig-agnostic bone aiming and two-bone IK (any bone orientation) |
@@ -447,7 +447,9 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
   grey with mean 0.5), measured foot-sliding-free walk/run speeds, height.
 * Colour choices map to cells in `RECOLOR` (`realistic.ts`): top → jacket (male) or hoodie
   (female); bottom → pants; shoes → shoe upper; accent → panels, backpack and shoe accents.
-  Hair style, garment styles and accessories apply to the classic style only.
+  Hair style, garment styles and accessories are stored but not drawn: the realistic avatar is
+  the game's only look. The classic avatar (`avatar.ts`) is drawn only if the realistic models
+  cannot load (`createCharacter` falls back to it), so the game never ends up without avatars.
 * `realistic.test.ts` fails if a GLB lacks a bone, clip, recolourable material or palette cell
   the game uses.
 
@@ -456,17 +458,17 @@ autopilot (look-ahead 4–14 m, slower in bends, under OSM limits, stopping at t
 * Opened with **O** or the shirt button. The camera turns to face the player
   (`CityController.setShowcase`: beside a glass panel on wide screens, above a glass sheet on
   phones), movement keys are ignored, the HUD and other players' name tags hide.
-* Categories: top, bottom, shoes, hat, glasses, bag, scarf, hair, body. Each has one or two
-  wheels (`wardrobe.ts`: the item, then its colour), turned with the mouse wheel or touchpad (one
-  choice per notch), the arrow keys, a drag, or a click; `[` and `]` change category. At most 3
-  extras (hat, glasses, bag, scarf): a fourth is shown crossed out. The hat, bag and scarf share
-  the accent colour.
-* Every turn is worn at once (`CityController.setAvatar`: colours in place; a classic avatar is
-  rebuilt for other parts, `GameCharacter.update` says which). Save → `PUT /me/avatar`, then the
-  hub sends the player's card again (`spawn`) to everyone who sees them, so they see the new
-  outfit without reconnecting. Cancel or Escape puts back what was worn.
-* In the realistic look, item wheels marked "shows in the Classic look" change nothing visible
-  (it wears one outfit in your colours); new garments for it need the avatar generator.
+* What the realistic avatar shows, as wheels (`wardrobe.ts`): top (build A's jacket, build B's
+  hoodie), trousers, shoes, backpack (its colour also trims the top's panels and the shoes), hair
+  colour, and body (build, skin tone). Turned with the mouse wheel or touchpad (one choice per
+  notch), the arrow keys, a drag, or a click; `[` and `]` change category.
+* Every turn is worn at once (`CityController.setAvatar`: colours in place, another build is a
+  rebuild, `GameCharacter.update` says which; a product held in a shop moves to the new hands).
+  Save → `PUT /me/avatar`, then the hub sends the player's card again (`spawn`) to everyone who
+  sees them, so they see the new outfit without reconnecting. Cancel or Escape puts back what
+  was worn.
+* New garments (shirts, jeans, hats, other shoes) need new realistic models from the avatar
+  generator first; each then becomes an item wheel.
 * Slow graphics (`low` quality): the panel is opaque instead of frosted glass (no backdrop blur).
 
 ## Avatar asset contract (`tools/blender/generate_avatars.py`)

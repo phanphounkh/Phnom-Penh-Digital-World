@@ -3,19 +3,14 @@
 	import { Rotate3d } from 'lucide-svelte';
 	import type { Material, Object3D } from 'three';
 	import type { Avatar } from '$lib/api/types';
-	import { loadAvatarStyle, saveAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
+	import type { AvatarStyle } from '$lib/game/avatar/character';
 
 	/**
-	 * Turntable preview of the player's avatar in the chosen style (realistic or classic, also
-	 * settable by the page: `bind:style`); restyles live as `avatar` changes. Realistic models
-	 * idle-animate; a different build reloads the model. `caption` describes the look below the
-	 * stage, where it never covers the avatar.
+	 * Turntable preview of the player's realistic avatar (the classic one only if the realistic
+	 * models cannot load); restyles live as `avatar` changes, idle-animating; a different build
+	 * reloads the model. `caption` describes the look below the stage, where it never covers it.
 	 */
-	let {
-		avatar,
-		style = $bindable(loadAvatarStyle()),
-		caption = ''
-	}: { avatar: Avatar; style?: AvatarStyle; caption?: string } = $props();
+	let { avatar, caption = '' }: { avatar: Avatar; caption?: string } = $props();
 	let host: HTMLDivElement;
 	let failed = $state(false);
 	let ready = $state(false);
@@ -34,13 +29,9 @@
 
 	$effect(() => {
 		const snapshot = $state.snapshot(avatar) as Avatar;
-		void style;
-		if (model && model.update(snapshot) && shown === style) return;
+		if (model && model.update(snapshot)) return;
 		rebuild?.(snapshot);
 	});
-
-	// The look is also the one used in the world (players see everyone in it).
-	$effect(() => saveAvatarStyle(style));
 
 	async function realisticModel(a: Avatar): Promise<Model> {
 		const THREE = await import('three');
@@ -106,11 +97,12 @@
 				let token = 0;
 				rebuild = async (a: Avatar) => {
 					const mine = ++token;
-					const want = style;
 					let next: Model;
+					let style: AvatarStyle = 'realistic';
 					try {
-						next = want === 'realistic' ? await realisticModel(a) : await classicModel(a);
+						next = await realisticModel(a);
 					} catch (error) {
+						style = 'classic';
 						console.warn('Realistic preview unavailable, showing the classic avatar:', error);
 						next = await classicModel(a);
 					}
@@ -119,7 +111,7 @@
 					model?.dispose();
 					model = next;
 					scene.add(next.root);
-					shown = want;
+					shown = style;
 					ready = true;
 				};
 				await rebuild($state.snapshot(avatar) as Avatar);
@@ -200,17 +192,6 @@
 		<p class="flex items-center gap-1.5 text-xs text-ink-soft transition-opacity {turned ? 'opacity-0' : ''}" aria-hidden={turned}>
 			<Rotate3d size={14} /> Drag to turn
 		</p>
-		<div class="grid grid-cols-2 gap-1 rounded-xl bg-white/80 p-1 text-xs font-semibold" role="radiogroup" aria-label="Avatar style">
-			{#each [['realistic', 'Realistic'], ['classic', 'Classic']] as const as [s, text] (s)}
-				<button
-					type="button"
-					role="radio"
-					aria-checked={style === s}
-					class="rounded-lg px-2.5 py-1 {style === s ? 'bg-white text-river-900 shadow' : 'text-ink-soft hover:text-river-900'}"
-					onclick={() => (style = s)}>{text}</button
-				>
-			{/each}
-		</div>
 	</div>
 	<div bind:this={host} class="relative min-h-0 flex-1 cursor-grab touch-pan-y active:cursor-grabbing">
 		{#if failed}
@@ -221,12 +202,9 @@
 			<p class="absolute inset-0 grid place-items-center text-sm text-ink-soft">Loading avatar…</p>
 		{/if}
 	</div>
-	{#if caption || shown === 'realistic'}
+	{#if caption}
 		<div class="border-t border-river-900/10 bg-white/55 px-4 py-3" aria-live="polite">
-			{#if caption}<p class="text-sm text-river-950">{caption}</p>{/if}
-			{#if shown === 'realistic'}
-				<p class="mt-0.5 text-xs text-ink-soft">The realistic look wears one outfit in your colours. Hairstyles, garment styles and accessories show in Classic.</p>
-			{/if}
+			<p class="text-sm text-river-950">{caption}</p>
 		</div>
 	{/if}
 </div>

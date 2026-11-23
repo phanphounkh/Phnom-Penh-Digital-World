@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { Check, Eye, Shuffle } from 'lucide-svelte';
+	import { Check, Shuffle } from 'lucide-svelte';
 	import AvatarPreview from '$lib/components/AvatarPreview.svelte';
 	import { me } from '$lib/api/endpoints';
 	import { ApiError } from '$lib/api/client';
-	import type { Accessory, Avatar } from '$lib/api/types';
+	import type { Avatar } from '$lib/api/types';
 	import {
 		CLOTH_COLORS,
 		DEFAULT_AVATAR,
@@ -15,14 +15,13 @@
 		colorName,
 		randomAvatar
 	} from '$lib/game/avatar/avatar';
-	import { loadAvatarStyle, type AvatarStyle } from '$lib/game/avatar/character';
+	import { describe, summary as outfit } from '$lib/game/avatar/wardrobe';
 	import { session, nextPath } from '$lib/stores/session.svelte';
 
 	let avatar = $state<Avatar>({
 		...DEFAULT_AVATAR,
 		avatar_name: session.user?.display_name.slice(0, 32) ?? 'Explorer'
 	});
-	let look = $state<AvatarStyle>(loadAvatarStyle());
 	let busy = $state(false);
 	let error = $state('');
 
@@ -36,43 +35,8 @@
 		}
 	});
 
-	const ACCESSORIES: { id: Accessory; label: string; phrase: string }[] = [
-		{ id: 'cap', label: 'Cap', phrase: 'a cap' },
-		{ id: 'glasses', label: 'Glasses', phrase: 'glasses' },
-		{ id: 'backpack', label: 'Backpack', phrase: 'a backpack' },
-		{ id: 'krama', label: 'Krama scarf', phrase: 'a krama scarf' }
-	];
-	const MAX_ACCESSORIES = 3;
-	const TOPS = { tee: 'T-shirt', hoodie: 'Hoodie' } as const;
-	const BOTTOMS = { trousers: 'Trousers', shorts: 'Shorts' } as const;
-
-	function toggle(id: Accessory) {
-		avatar.accessories = avatar.accessories.includes(id)
-			? avatar.accessories.filter((a) => a !== id)
-			: avatar.accessories.length < MAX_ACCESSORIES
-				? [...avatar.accessories, id]
-				: avatar.accessories;
-	}
-
-	/** A colour name inside a sentence ("Mekong blue" keeps its capital). */
-	const lower = (name: string) => name.toLowerCase().replace('mekong', 'Mekong');
-	const list = (items: string[]) => (items.length < 2 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
-
-	/** The whole look in one sentence, under the preview. */
-	const summary = $derived.by(() => {
-		const hc = lower(colorName('hair', avatar.hair_color));
-		const hair = {
-			short: `Short ${hc} hair`,
-			long: `Long ${hc} hair`,
-			bun: `${hc[0].toUpperCase()}${hc.slice(1)} hair in a bun`,
-			buzz: `${hc[0].toUpperCase()}${hc.slice(1)} buzz cut`
-		}[avatar.hair_style];
-		const top = `a ${lower(colorName('cloth', avatar.top_color))} ${TOPS[avatar.top_style].toLowerCase()}`;
-		const bottom = `${lower(colorName('cloth', avatar.bottom_color))} ${BOTTOMS[avatar.bottom_style].toLowerCase()}`;
-		const shoes = `${lower(colorName('shoe', avatar.shoe_color))} shoes`;
-		const extras = ACCESSORIES.filter((a) => avatar.accessories.includes(a.id)).map((a) => a.phrase);
-		return `${hair}, ${top}, ${bottom} and ${shoes}${extras.length ? `, with ${list(extras)}` : ''}.`;
-	});
+	/** The whole look in one sentence, under the preview (the same words as the wardrobe). */
+	const summary = $derived(outfit(avatar));
 
 	/** Light swatches get a dark tick, dark ones a white one. */
 	function light(hex: string): boolean {
@@ -157,20 +121,10 @@
 	</div>
 {/snippet}
 
-<!-- A row's name, what is chosen, and (in the realistic look) a way to see options it does not show. -->
-{#snippet row(name: string, value = '', classicOnly = false)}
+<!-- A row's name and what is chosen. -->
+{#snippet row(name: string, value = '')}
 	<div class="mb-2 flex items-baseline justify-between gap-3">
-		<p class="flex items-baseline gap-2 text-sm font-semibold text-ink">
-			{name}
-			{#if classicOnly && look === 'realistic'}
-				<button
-					type="button"
-					class="inline-flex items-center gap-1 self-center rounded-full bg-river-200/70 px-2 py-0.5 text-[11px] font-semibold text-river-900 hover:bg-river-200"
-					title="The realistic look wears one outfit. Show the Classic look in the preview."
-					onclick={() => (look = 'classic')}><Eye size={12} /> Shows in Classic</button
-				>
-			{/if}
-		</p>
+		<p class="text-sm font-semibold text-ink">{name}</p>
 		{#if value}<p class="truncate text-sm text-ink-soft">{value}</p>{/if}
 	</div>
 {/snippet}
@@ -179,7 +133,7 @@
 
 <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-start">
 	<section class="h-[50svh] max-h-[500px] min-h-[320px] lg:sticky lg:top-6 lg:h-[calc(100dvh-7rem)] lg:max-h-[760px]" aria-label="Preview">
-		<AvatarPreview {avatar} bind:style={look} caption={summary} />
+		<AvatarPreview {avatar} caption={summary} />
 	</section>
 
 	<section class="card flex flex-col gap-7 pb-0">
@@ -216,15 +170,6 @@
 		<section class="space-y-5 border-t border-river-900/10 pt-5" aria-labelledby="hair-heading">
 			<h2 id="hair-heading" class="display text-xl font-semibold">Hair</h2>
 			<div>
-				{@render row('Style', '', true)}
-				{@render choice(
-					[['short', 'Short'], ['long', 'Long'], ['bun', 'Bun'], ['buzz', 'Buzz']],
-					avatar.hair_style,
-					(v) => (avatar.hair_style = v),
-					'Hairstyle'
-				)}
-			</div>
-			<div>
 				{@render row('Colour', colorName('hair', avatar.hair_color))}
 				{@render swatches(HAIR_COLORS, avatar.hair_color, (c) => (avatar.hair_color = c), 'Hair colour', 'hair')}
 			</div>
@@ -232,52 +177,22 @@
 
 		<section class="space-y-5 border-t border-river-900/10 pt-5" aria-labelledby="clothes-heading">
 			<h2 id="clothes-heading" class="display text-xl font-semibold">Clothes</h2>
-			<div class="space-y-3">
-				{@render row('Top', `${colorName('cloth', avatar.top_color)} ${TOPS[avatar.top_style].toLowerCase()}`, true)}
-				{@render choice([['tee', 'T-shirt'], ['hoodie', 'Hoodie']], avatar.top_style, (v) => (avatar.top_style = v), 'Top style')}
+			<div>
+				{@render row('Top', describe('top', avatar))}
 				{@render swatches(CLOTH_COLORS, avatar.top_color, (c) => (avatar.top_color = c), 'Top colour', 'cloth')}
 			</div>
-			<div class="space-y-3">
-				{@render row('Bottom', `${colorName('cloth', avatar.bottom_color)} ${BOTTOMS[avatar.bottom_style].toLowerCase()}`, true)}
-				{@render choice(
-					[['trousers', 'Trousers'], ['shorts', 'Shorts']],
-					avatar.bottom_style,
-					(v) => (avatar.bottom_style = v),
-					'Bottom style'
-				)}
-				{@render swatches(CLOTH_COLORS, avatar.bottom_color, (c) => (avatar.bottom_color = c), 'Bottom colour', 'cloth')}
+			<div>
+				{@render row('Trousers', describe('bottom', avatar))}
+				{@render swatches(CLOTH_COLORS, avatar.bottom_color, (c) => (avatar.bottom_color = c), 'Trousers colour', 'cloth')}
 			</div>
 			<div>
-				{@render row('Shoes', colorName('shoe', avatar.shoe_color))}
+				{@render row('Shoes', describe('shoes', avatar))}
 				{@render swatches(SHOE_COLORS, avatar.shoe_color, (c) => (avatar.shoe_color = c), 'Shoe colour', 'shoe')}
 			</div>
-		</section>
-
-		<section class="space-y-5 border-t border-river-900/10 pt-5" aria-labelledby="extras-heading">
-			<h2 id="extras-heading" class="display text-xl font-semibold">Extras</h2>
 			<div>
-				{@render row('Accessories', `${avatar.accessories.length} of ${MAX_ACCESSORIES}`, true)}
-				<div class="flex flex-wrap gap-2">
-					{#each ACCESSORIES as acc (acc.id)}
-						{@const on = avatar.accessories.includes(acc.id)}
-						{@const full = !on && avatar.accessories.length >= MAX_ACCESSORIES}
-						<button
-							type="button"
-							aria-pressed={on}
-							disabled={full}
-							title={full ? `Up to ${MAX_ACCESSORIES}: take one off first` : undefined}
-							class="chip py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-45
-								{on ? 'border-river-900 bg-river-900 text-paper' : 'hover:border-river-900/40'}"
-							onclick={() => toggle(acc.id)}
-						>
-							{#if on}<Check size={14} strokeWidth={3} />{/if}{acc.label}</button
-						>
-					{/each}
-				</div>
-			</div>
-			<div>
-				{@render row('Accessory colour', colorName('cloth', avatar.accent_color))}
-				{@render swatches(CLOTH_COLORS.slice(0, 6), avatar.accent_color, (c) => (avatar.accent_color = c), 'Accessory colour', 'cloth')}
+				{@render row('Backpack', describe('bag', avatar))}
+				{@render swatches(CLOTH_COLORS, avatar.accent_color, (c) => (avatar.accent_color = c), 'Backpack colour', 'cloth')}
+				<p class="hint">This colour also trims the top's panels and the shoes.</p>
 			</div>
 		</section>
 

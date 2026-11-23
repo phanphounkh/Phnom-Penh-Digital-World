@@ -143,8 +143,6 @@ export interface CityController {
 	followRoute(onDone?: (arrived: boolean) => void): void;
 	readonly following: boolean;
 	playEmote(name: EmoteName): void;
-	/** Realistic or classic avatars (a local display preference; rebuilds the player's model). */
-	setAvatarStyle(style: AvatarStyle): Promise<void>;
 	/** What the player's avatar wears (the avatar description). */
 	readonly outfit: Avatar;
 	/** Wear another avatar: in place where the model can, else rebuilt (the wardrobe's live
@@ -154,7 +152,7 @@ export interface CityController {
 	 * the avatar framed `right` metres left of centre and `down` metres higher (room for a panel
 	 * beside or below), from `distance` metres at `pitch` (radians); null: back behind the player. */
 	setShowcase(view: { right?: number; down?: number; distance?: number; pitch?: number } | null): void;
-	/** The avatar style in use (realistic falls back to classic if its models cannot load). */
+	/** The avatar model in use: realistic, or classic if the realistic models cannot load. */
 	readonly avatarStyle: AvatarStyle;
 	/** Current graphics preset (may start at 'low' on software rendering, see softwareRenderer). */
 	readonly quality: Quality;
@@ -173,7 +171,6 @@ export interface CityOptions {
 	preferKhmer?: boolean;
 	quality?: Quality;
 	timeMode?: TimeMode;
-	avatarStyle?: AvatarStyle;
 }
 
 const RADIUS = 0.35;
@@ -299,7 +296,7 @@ export async function createCity(
 	// shops, vehicles and the camera keep their reference.
 	const player = new THREE.Group();
 	player.name = 'player';
-	let character: GameCharacter = await createCharacter(boot.player.avatar, options.avatarStyle ?? 'realistic');
+	let character: GameCharacter = await createCharacter(boot.player.avatar);
 	/** The wardrobe's view (see setShowcase), and the camera to go back to. */
 	let showcase: { right: number; down: number } | null = null;
 	let beforeShowcase: { pitch: number; distance: number } | null = null;
@@ -310,11 +307,11 @@ export async function createCity(
 		player.add(c.root);
 	};
 	wear(character);
-	/** Build the player's model again (another style, or parts the current one cannot change),
+	/** Build the player's model again (another build, or parts the current one cannot change),
 	 * and put it on the vehicle if they are riding. The newest request wins. */
-	async function rebuild(style: AvatarStyle): Promise<void> {
+	async function rebuild(): Promise<void> {
 		const token = ++styleToken;
-		const next = await createCharacter(boot.player.avatar, style);
+		const next = await createCharacter(boot.player.avatar);
 		if (token !== styleToken || disposed) return next.dispose();
 		const mounted = rider && vehicle ? vehicle : null;
 		rider?.detach(scene);
@@ -1132,15 +1129,12 @@ export async function createCity(
 		playEmote(name) {
 			if (!riding) character.emotes.play(name);
 		},
-		async setAvatarStyle(style) {
-			await rebuild(style);
-		},
 		get outfit() {
 			return boot.player.avatar;
 		},
 		async setAvatar(avatar) {
 			boot.player.avatar = avatar;
-			if (!character.update(avatar)) await rebuild(character.style);
+			if (!character.update(avatar)) await rebuild();
 		},
 		setShowcase(view) {
 			if (view && !showcase) {

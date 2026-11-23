@@ -42,9 +42,9 @@ test('a new player registers, onboards and walks the real streets of Daun Penh',
 	// Screen 3 — avatar (Blender GLB preview)
 	await expect(page).toHaveURL(/\/onboarding\/avatar/);
 	await expect(page.getByTestId('avatar-preview')).toHaveAttribute('data-ready', 'true', { timeout: 60_000 });
-	await page.getByRole('radio', { name: 'Long' }).click();
-	await page.getByRole('radio', { name: 'Hoodie' }).click();
-	await page.getByRole('button', { name: 'Krama scarf' }).click();
+	await page.getByRole('radiogroup', { name: 'Top colour' }).getByRole('radio', { name: 'Saffron' }).click();
+	await page.getByRole('radiogroup', { name: 'Backpack colour' }).getByRole('radio', { name: 'Brick' }).click();
+	await expect(page.getByTestId('avatar-preview')).toContainText('a saffron jacket');
 	// The editor as a laptop shows it (the Save bar sticks to the window's foot, so a full-page
 	// capture would draw it mid-page).
 	const viewport = page.viewportSize()!;

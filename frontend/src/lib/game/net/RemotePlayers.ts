@@ -4,7 +4,7 @@
  * decides who exists and where.
  */
 import * as THREE from 'three';
-import { createCharacter, loadAvatarStyle, type AvatarStyle, type GameCharacter, type Mount } from '$lib/game/avatar/character';
+import { createCharacter, type GameCharacter, type Mount } from '$lib/game/avatar/character';
 import type { Terrain } from '$lib/game/city/terrain';
 import { createVehicle, type VehicleInstance } from '$lib/game/vehicles/VehicleModels';
 import { HANDLING } from '$lib/game/vehicles/specs';
@@ -101,16 +101,8 @@ export class RemotePlayers {
 
 	constructor(
 		private scene: THREE.Scene,
-		private terrain: Terrain,
-		private style: AvatarStyle = loadAvatarStyle()
+		private terrain: Terrain
 	) {}
-
-	/** Draw every remote avatar in `style` (rebuilds the loaded ones). */
-	setStyle(style: AvatarStyle): void {
-		if (style === this.style) return;
-		this.style = style;
-		for (const remote of this.players.values()) this.dress(remote);
-	}
 
 	get count(): number {
 		return this.players.size;
@@ -143,7 +135,7 @@ export class RemotePlayers {
 	/** Load (or reload, after a style change) a remote player's avatar. */
 	private dress(remote: Remote): void {
 		const token = ++remote.avatarToken;
-		createCharacter(remote.card.av, this.style).then((character) => {
+		createCharacter(remote.card.av).then((character) => {
 			if (remote.removed || token !== remote.avatarToken) return character.dispose();
 			const wasRiding = !!remote.rider;
 			if (wasRiding) this.dismount(remote);
