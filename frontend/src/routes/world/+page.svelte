@@ -71,8 +71,12 @@
 	let prompt = $state<Interaction | null>(null);
 	/** What the player picked in the shop they stand in (carried in a basket). */
 	let basket = $state<Basket | null>(null);
-	/** The shop whose counter is open. */
+	/** The shop whose counter is open, and its shopkeeper's name (if one stands there). */
 	let counterShop = $state<Shop | null>(null);
+	let counterKeeper = $state<string | null>(null);
+	function keeperSay(text: string, gesture?: 'talk' | 'thanks') {
+		if (counterShop) shops?.keeperSay(counterShop.id, text, gesture);
+	}
 	let cart = $state<Cart | null>(null);
 	let browsing = $state<Shop | null>(null);
 	let insideShop = $state<Shop | null>(null);
@@ -140,10 +144,12 @@
 					materials: created.materials,
 					terrain: created.terrain,
 					avatar: created.avatar,
+					camera: created.camera,
 					setHolding: (h) => created.setHolding(h),
 					onInteraction: (i) => (prompt = i),
 					onBasket: (b) => (basket = b)
 				});
+				shops.keeperLimit = created.quality === 'low' ? 1 : 2;
 				(globalThis as { __ppwShops?: unknown }).__ppwShops = shops;
 				const [{ Buildings }, { ENTERABLE, AUTO_ENTERABLE }] = await Promise.all([import('$lib/game/buildings/Buildings'), import('$lib/game/buildings/placements')]);
 				if (disposed) return;
@@ -190,6 +196,7 @@
 						if (prompt) prompt = null;
 						if (housePrompt) housePrompt = null;
 						shops?.stow(true); // the basket or bag waits until walking again
+						shops?.animateKeepers(dt, me.x, me.z);
 						return; // no shopping from the saddle
 					}
 					shops?.stow(false);
@@ -197,7 +204,7 @@
 					if (office && houses?.insideOf !== `osm:${SYSTEM_OFFICE_ID}`) office = false; // walked out
 					const named = houses?.insideName ?? null;
 					if (named !== insideBuilding) insideBuilding = named;
-					shops?.update(me.x, me.z, me.yaw);
+					shops?.update(me.x, me.z, me.yaw, dt);
 					const here = shops?.shopAt(me.x, me.z) ?? null;
 					if (here?.id !== insideShop?.id) insideShop = here;
 					if (counterShop && shops?.shopAt(me.x, me.z, 0.5)?.id !== counterShop.id) counterShop = null; // walked out
@@ -307,6 +314,7 @@
 		} else if (i.kind === 'counter') {
 			panel = '';
 			chatOpen = false;
+			counterKeeper = shops.keeper(i.shop.id)?.name ?? null;
 			counterShop = i.shop;
 		}
 	}
@@ -421,6 +429,7 @@
 	function setQuality(q: Quality) {
 		quality = q;
 		city?.setQuality(q);
+		if (shops) shops.keeperLimit = q === 'low' ? 1 : 2; // shopkeepers: one at a time on low
 	}
 
 	// ── System Office ────────────────────────────────────────────────────────────────
@@ -754,6 +763,8 @@
 		<CounterPanel
 			shop={counterShop}
 			{cart}
+			keeper={counterKeeper}
+			onSay={keeperSay}
 			solid={quality === 'low'}
 			onCart={setCart}
 			onPaid={() => counterShop && shops?.handOver(counterShop)}

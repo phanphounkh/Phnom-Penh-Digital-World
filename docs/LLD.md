@@ -439,6 +439,22 @@ receipt. Orders report `in_person`. The seller's world session gets
 `{"t": "order", "sold": true, "total"}` ("Sold in person at your counter"). Orders placed ahead
 for pickup are collected at the same counter (`POST /orders/{id}/received`).
 
+**Shopkeepers (`game/shop/Shopkeepers.ts`).** A person stands behind each open shop's counter
+(between the counter and the back wall, facing the door) and serves walk-in customers on the
+seller's behalf. Who it is follows from the shop's id (`keeperFor`: body, a Khmer name, skin, hair,
+clothes; FNV-1a hash), so every player sees the same shopkeeper; the realistic character is the
+players' own pipeline (`createCharacter`), with an apron in the shop's colours fitted in front of
+the clothes (measured on the skinned outfit in the idle pose; bib on Spine2, skirt on the hips,
+neck straps). Name tag over the counter. Behaviour, all local to each player's client (nothing on
+the network): a sampeah and "សួស្តី! Welcome to …" when the player walks in (again after 45 s),
+turning to face them (at most 75° from the door, 4 rad/s), talking at the counter (the counter
+panel's lines: the price, an order ready to collect, thanks with a sampeah after paying), speech
+bubbles drawn over the shop's walls (they only come while the player is inside). Cost: one
+character (~26–30k triangles, one mixer) per shopkeeper, so only at the nearest open shops within
+30 m (kept to 40 m; a shopkeeper gives its place to a shop at least 3 m nearer: `planKeepers`),
+at most 2, 1 on the low graphics setting; one out of the camera's view is neither drawn nor
+animated (skinned meshes are not culled by three.js).
+
 **My shop (the seller's panel, in the city: `components/myshop/`).** Sellers run their shop
 without leaving the game: the toolbar's shop button or **B** (also ☰ → My shop, the System
 Office's counter after registering, and `/world?panel=shop`, where the old `/seller` address now

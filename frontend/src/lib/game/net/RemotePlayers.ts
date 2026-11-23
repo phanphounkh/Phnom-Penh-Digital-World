@@ -5,6 +5,7 @@
  */
 import * as THREE from 'three';
 import { createCharacter, type GameCharacter, type Mount } from '$lib/game/avatar/character';
+import { disposeSprite, roundedLabel, speechBubble } from '$lib/game/avatar/labels';
 import type { Terrain } from '$lib/game/city/terrain';
 import { createVehicle, type VehicleInstance } from '$lib/game/vehicles/VehicleModels';
 import { HANDLING } from '$lib/game/vehicles/specs';
@@ -45,55 +46,6 @@ export interface RemoteSummary {
 	distance: number;
 	x: number;
 	z: number;
-}
-
-function roundedLabel(lines: { text: string; font: string; color: string }[], bg: string, pad = 22) {
-	const c = document.createElement('canvas');
-	const g = c.getContext('2d')!;
-	const widths = lines.map((l) => {
-		g.font = l.font;
-		return g.measureText(l.text).width;
-	});
-	const lineH = 44;
-	c.width = Math.ceil(Math.max(...widths) + pad * 2);
-	c.height = lineH * lines.length + pad;
-	g.fillStyle = bg;
-	g.beginPath();
-	g.roundRect(0, 0, c.width, c.height, 22);
-	g.fill();
-	g.textAlign = 'center';
-	g.textBaseline = 'middle';
-	lines.forEach((l, i) => {
-		g.font = l.font;
-		g.fillStyle = l.color;
-		g.fillText(l.text, c.width / 2, pad / 2 + lineH * (i + 0.5));
-	});
-	const texture = new THREE.CanvasTexture(c);
-	texture.colorSpace = THREE.SRGBColorSpace;
-	const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthWrite: false, transparent: true }));
-	sprite.scale.set(c.width * 0.0075, c.height * 0.0075, 1);
-	sprite.renderOrder = 20;
-	return sprite;
-}
-
-function wrap(text: string, max = 34): string[] {
-	const words = text.split(/\s+/);
-	const lines: string[] = [];
-	let line = '';
-	for (const w of words) {
-		if ((line + ' ' + w).trim().length > max && line) {
-			lines.push(line);
-			line = w;
-		} else line = (line + ' ' + w).trim();
-	}
-	if (line) lines.push(line);
-	return lines.slice(0, 4);
-}
-
-function disposeSprite(s: THREE.Sprite) {
-	s.material.map?.dispose();
-	s.material.dispose();
-	s.removeFromParent();
 }
 
 export class RemotePlayers {
@@ -218,10 +170,7 @@ export class RemotePlayers {
 		const remote = this.players.get(id);
 		if (!remote) return;
 		if (remote.bubble) disposeSprite(remote.bubble.sprite);
-		const sprite = roundedLabel(
-			wrap(text).map((line) => ({ text: line, font: '500 28px Inter, "Noto Sans Khmer", sans-serif', color: '#1d2422' })),
-			'rgba(246,241,230,0.95)'
-		);
+		const sprite = speechBubble(text);
 		sprite.position.y = 2.55 + sprite.scale.y / 2;
 		remote.group.add(sprite);
 		remote.bubble = { sprite, until: performance.now() + BUBBLE_MS };

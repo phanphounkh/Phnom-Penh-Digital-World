@@ -34,7 +34,7 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 | ![Wat Phnom hill in the morning](frontend/artifacts/phase2-wat-phnom-morning.png) | ![Street 136 at sunset](frontend/artifacts/phase2-central-market-sunset.png) |
 | ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
 | ![A new player makes their avatar in the city: the wardrobe's glass panel and wheels](frontend/artifacts/phase1-avatar.png) | ![Choosing your place: a private home anywhere in Phnom Penh, and the nearest public start](frontend/artifacts/phase1-location.png) |
-| ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop on Street 136, the basket in hand at the counter](frontend/artifacts/phase4-shop-interior.png) |
+| ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop: the shopkeeper behind the counter, the basket in hand](frontend/artifacts/phase4-shop-interior.png) |
 | ![My shop, the seller's panel in the city: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Paid at the counter: handed over at once](frontend/artifacts/phase4-checkout.png) |
 | ![At the shelf: product facings with price tags; E puts one in your basket](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |
 | ![Riding the route at 38 km/h in the right-hand lane of Calmette (Street 53)](frontend/artifacts/phase5-route.png) | ![Parked at the kerb on a real street; the garage lists it by street name](frontend/artifacts/phase5-parked.png) |
@@ -154,8 +154,9 @@ worker bundling, the affected onboarding and commerce suites were rerun: **5 pas
    and per-player actions (add friend, invite, message, mute, block, report). An invite shows a
    "Join" toast to your friend. The chip at the top shows the connection state and players online.
 9. **Shops**: **M** lists the shops by distance (Browse, or Walk there). Walk through a shop's
-   doorway; **E** at a shelf puts the product in your basket (you carry it, with your picks in
-   it). **E** at the counter shows the basket and one **Pay** button: it's yours at once, you
+   doorway: the shopkeeper behind the counter greets you with a sampeah. **E** at a shelf puts
+   the product in your basket (you carry it, with your picks in it). **E** at the counter (the
+   shopkeeper tells you the price) shows the basket and one **Pay** button: it's yours at once, you
    walk out with a paper bag in the shop's colours, and the seller sees "Sold in person". To
    order ahead for pickup or delivery, Browse a shop and check out from the cart (**C**);
    collect a ready pickup order at the shop's counter. **/orders** lists your orders.

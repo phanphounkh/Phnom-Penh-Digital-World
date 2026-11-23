@@ -2,8 +2,9 @@
 	/**
 	 * A shop's counter, in the game: the basket (what the player picked from this shop's shelves),
 	 * one Pay button, and the receipt: paid in person, the goods are handed over at once. Orders
-	 * placed ahead for pickup here are collected at the same counter. A glass panel like the
-	 * System Office's; walking away from the shop closes it.
+	 * placed ahead for pickup here are collected at the same counter. The shopkeeper (when one
+	 * stands there) does the talking. A glass panel like the System Office's; walking away from
+	 * the shop closes it.
 	 */
 	import { onMount, untrack } from 'svelte';
 	import { BadgeCheck, Minus, Package, Plus, X } from 'lucide-svelte';
@@ -14,14 +15,20 @@
 	let {
 		shop,
 		cart,
+		keeper = null,
 		solid = false,
+		onSay,
 		onCart,
 		onPaid,
 		onClose
 	}: {
 		shop: Shop;
 		cart: Cart | null;
+		/** The shopkeeper's name (null: nobody at the counter yet). */
+		keeper?: string | null;
 		solid?: boolean;
+		/** The shopkeeper says this in the city (a bubble); thanks comes with a sampeah. */
+		onSay?: (text: string, gesture?: 'talk' | 'thanks') => void;
 		onCart: (cart: Cart) => void;
 		/** Paid: the basket became a bag in the player's hand. */
 		onPaid: (payment: Payment) => void;
@@ -35,6 +42,13 @@
 	let busy = $state(false);
 	let error = $state('');
 	let notice = $state('');
+	/** What the shopkeeper said last (also shown here). */
+	let line = $state('');
+	function say(text: string, gesture: 'talk' | 'thanks' = 'talk') {
+		if (!keeper) return;
+		line = text;
+		onSay?.(text, gesture);
+	}
 
 	const group = $derived(cart?.groups.find((g) => g.merchant_id === shop.merchant_id) ?? null);
 	const lines = $derived(group?.lines ?? []);
@@ -61,7 +75,12 @@
 		ready = mine.filter((o) => o.pickup_unit === shop.unit.code && o.fulfillment === 'pickup' && !o.in_person && ['paid', 'merchant_accepted', 'preparing', 'ready_for_pickup'].includes(o.status));
 	}
 	onMount(() => {
-		void loadOrders();
+		void loadOrders().then(() => {
+			const due = ready.find((o) => o.status === 'ready_for_pickup');
+			if (count) say(`That's ${money(total)}, please.`);
+			else if (due) say(`Your order ${due.number} is ready. Here you are!`);
+			else say('Hello! Pick what you like from the shelves and bring it here.');
+		});
 		wallet.get().then((w) => (purse = w)).catch(() => {});
 	});
 
@@ -82,6 +101,7 @@
 			const paid = await shopping.counter(shop.id, attempt, { expected_total_minor: total, age_confirmed: adult });
 			receipt = paid;
 			attempt = '';
+			say('Orkun! Thank you. Here you are.', 'thanks');
 			onPaid(paid);
 			onCart(await shopping.cart());
 			wallet.get().then((w) => (purse = w)).catch(() => {});
@@ -102,6 +122,7 @@
 		try {
 			await shopping.received(o.id);
 			notice = `${o.number} is yours. Thank you!`;
+			say(`Here is ${o.number}. Orkun!`, 'thanks');
 			await loadOrders();
 		} catch (e) {
 			error = e instanceof ApiError ? e.message : 'Could not collect the order.';
@@ -123,11 +144,13 @@
 <div class="counter" class:solid role="dialog" aria-label={`${shop.name} counter`} data-testid="counter" data-step={receipt ? 'done' : 'basket'}>
 	<header>
 		<div class="title">
-			<p>Counter</p>
+			<p>{keeper ? `${keeper}, at the counter` : 'Counter'}</p>
 			<h2>{shop.name}</h2>
 		</div>
 		<button type="button" class="icon" aria-label="Close" onclick={onClose}><X size={18} /></button>
 	</header>
+
+	{#if line}<p class="line" data-testid="counter-line-said">“{line}”</p>{/if}
 
 	{#if receipt}
 		<section class="receipt" data-testid="counter-receipt">
@@ -225,6 +248,7 @@
 	.icon { padding: 6px; border-radius: 10px; }
 	.icon:hover { background: rgba(255, 255, 255, 0.14); }
 	.intro { font-size: 13px; line-height: 1.45; opacity: 0.9; }
+	.line { font-family: var(--font-display); font-size: 16px; font-style: italic; line-height: 1.35; color: #fffaf0; }
 	.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 	.lines li { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, 0.08); }
 	.pic { width: 40px; height: 40px; flex: none; border-radius: 10px; overflow: hidden; display: grid; place-items: center; background: rgba(255, 255, 255, 0.12); }

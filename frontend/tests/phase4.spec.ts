@@ -5,6 +5,7 @@
  * shop in 3D, puts products in the basket at the shelf (E), and pays at the counter in one step:
  * handed over at once, nothing for the seller to do. Then an order placed ahead for pickup: the
  * seller prepares it in My shop as it arrives, and the buyer collects it at the same counter.
+ * A shopkeeper stands behind the counter: greets, quotes the price, thanks.
  * Two sellers racing for one unit: exactly one wins.
  */
 import { crc32, deflateSync } from 'node:zlib';
@@ -222,6 +223,13 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	};
 	await canvas.click({ position: { x: 20, y: 300 } }); // keyboard focus on the game
 	const carrying = () => ev<string>(buyer.page, `__ppwShops.carrying`);
+	type Keeper = { name: string; ready: boolean; line: string | null } | null;
+	const keeper = () => ev<Keeper>(buyer.page, `__ppwShops.keeper('${shop.id}')`);
+
+	// ── The shopkeeper behind the counter greets the buyer who walked in. ────────────────
+	await expect.poll(async () => (await keeper())?.ready, { timeout: 30_000 }).toBe(true);
+	const keeperName = (await keeper())!.name;
+	await expect.poll(async () => (await keeper())?.line ?? '', { timeout: 10_000 }).toContain('Welcome to');
 	const basket = buyer.page.getByTestId('basket');
 
 	// ── E at the shelf puts it in the basket, which appears in the buyer's hand. ─────────
@@ -243,6 +251,9 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	await buyer.page.screenshot({ path: 'artifacts/phase4-shop-interior.png' });
 	await buyer.page.keyboard.press('e');
 	const counter = buyer.page.getByTestId('counter');
+	await expect(counter).toContainText(`${keeperName}, at the counter`);
+	await expect(counter.getByTestId('counter-line-said')).toHaveText("“That's $5.00, please.”");
+	await expect.poll(async () => (await keeper())?.line).toBe("That's $5.00, please.");
 	await expect(counter.getByTestId('counter-total')).toHaveText('$5.00');
 	await counter.getByRole('button', { name: 'One less Num pang' }).click();
 	await expect(counter.getByTestId('counter-total')).toHaveText('$2.50');
@@ -250,6 +261,7 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	await expect(counter.getByTestId('counter-receipt')).toContainText("Paid. It's yours.");
 	await expect(counter.getByTestId('counter-receipt')).toContainText('1 × Num pang');
 	await expect.poll(carrying, { timeout: 15_000 }).toBe('bag');
+	await expect.poll(async () => (await keeper())?.line).toContain('Orkun');
 	await expect(basket).toHaveCount(0);
 	await buyer.page.screenshot({ path: 'artifacts/phase4-checkout.png' });
 	await counter.getByTestId('counter-done').click();
@@ -288,6 +300,7 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	await canvas.click({ position: { x: 20, y: 300 } });
 	await expect(buyer.page.getByTestId('shop-prompt')).toHaveAttribute('data-kind', 'counter', { timeout: 20_000 });
 	await buyer.page.keyboard.press('e');
+	await expect(counter.getByTestId('counter-line-said')).toContainText('is ready');
 	await counter.getByTestId('counter-collect').click();
 	await expect(counter.getByTestId('counter-notice')).toContainText('is yours');
 	const mine = (await (await buyer.api.get('/api/v1/orders')).json()) as { status: string; in_person: boolean }[];

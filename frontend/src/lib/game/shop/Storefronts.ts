@@ -18,6 +18,7 @@ import type { CityMaterials } from '$lib/game/city/materials';
 import { SHOP_DOORS } from '$lib/game/city/materials';
 import type { Terrain } from '$lib/game/city/terrain';
 import { applyPhoto, disposeOwned, fitting, productModel, tint } from './ShopAssets';
+import { Shopkeepers, type KeeperPost } from './Shopkeepers';
 import {
 	DOOR_HEIGHT,
 	doorway,
@@ -129,6 +130,8 @@ interface Built {
 	slots: Slot[];
 	cart: { x: number; z: number; y: number };
 	counter: { x: number; z: number };
+	/** Where the shopkeeper stands: behind the counter, facing the door. */
+	keeper: { x: number; z: number; yaw: number };
 	catalog: string; // catalog_version shown
 	loading: boolean;
 	detail: ShopDetail | null;
@@ -142,6 +145,8 @@ export interface StorefrontOptions {
 	terrain: Terrain;
 	/** The avatar root (the held product attaches to its right wrist). */
 	avatar: THREE.Object3D;
+	/** The view: shopkeepers out of it are neither drawn nor animated. */
+	camera?: THREE.Camera;
 	setHolding(holding: boolean): void;
 	onInteraction?(interaction: Interaction | null): void;
 	/** The basket of the shop the player stands in changed (entered, left, picked, paid). */
@@ -237,7 +242,11 @@ export class Storefronts {
 	private disposed = false;
 	private wrist: THREE.Object3D | null;
 
+	private keepers: Shopkeepers;
+	private keeperSync = 0;
+
 	constructor(private o: StorefrontOptions) {
+		this.keepers = new Shopkeepers(o.scene, o.camera);
 		this.wrist = o.avatar.getObjectByName('RightWrist') ?? null;
 	}
 
@@ -336,7 +345,7 @@ export class Storefronts {
 	}
 
 	/** Per frame, after the player moved. */
-	update(px: number, pz: number, yaw: number): void {
+	update(px: number, pz: number, yaw: number, dt = 0): void {
 		if (this.disposed) return;
 		const inside = this.shopAt(px, pz, 0.2)?.id ?? null;
 		if (inside !== this.insideId) {
@@ -374,6 +383,42 @@ export class Storefronts {
 			);
 		}
 		this.pick(px, pz, yaw);
+		this.animateKeepers(dt, px, pz);
+	}
+
+	/** The shopkeepers at the nearest open shops (also while riding past, without the rest of
+	 *  update). */
+	animateKeepers(dt: number, px: number, pz: number): void {
+		this.keeperSync -= dt;
+		if (this.keeperSync <= 0) {
+			this.keeperSync = 0.5;
+			const posts: KeeperPost[] = [...this.built.values()].map((b) => ({
+				shop: b.shop,
+				x: b.keeper.x,
+				y: b.ground,
+				z: b.keeper.z,
+				yaw: b.keeper.yaw,
+				distance: Math.hypot(b.frame.ox - px, b.frame.oz - pz)
+			}));
+			this.keepers.sync(posts);
+		}
+		this.keepers.update(dt, px, pz, this.insideId);
+	}
+
+	/** How many shopkeepers may stand at once (1 on the low graphics setting). */
+	set keeperLimit(n: number) {
+		this.keepers.limit = n;
+		this.keeperSync = 0;
+	}
+
+	/** The shopkeeper of a shop (name, and what they last said), if one stands there now. */
+	keeper(shopId: string) {
+		return this.keepers.of(shopId);
+	}
+
+	/** The shopkeeper speaks (the counter: prices, thanks). */
+	keeperSay(shopId: string, text: string, gesture: 'talk' | 'greet' | 'thanks' = 'talk'): void {
+		this.keepers.say(shopId, text, gesture);
 	}
 
 	private pick(px: number, pz: number, yaw: number): void {
@@ -410,7 +455,12 @@ export class Storefronts {
 				};
 			else if (near(inside.counter.x, inside.counter.z, COUNTER_REACH, -0.2, 1.4) < Infinity) {
 				const basket = this.basketFor(shop);
-				found = { kind: 'counter', shop, label: basket.count ? `Pay at the counter · ${money(basket.total_minor)}` : 'The counter' };
+				const keeper = this.keepers.of(shop.id);
+				found = {
+					kind: 'counter',
+					shop,
+					label: basket.count ? `Pay at the counter · ${money(basket.total_minor)}` : keeper ? `Talk to ${keeper.name}` : 'The counter'
+				};
 			}
 		} else {
 			for (const b of this.built.values()) {
@@ -599,6 +649,9 @@ export class Storefronts {
 			place(await fitting('cart'), layout.cart); // by the door, for the look of a shop
 			const [cx, cz] = toWorld(f, layout.cart.a, layout.cart.n);
 			const [kx, kz] = toWorld(f, layout.counter.a, layout.counter.n - 0.6);
+			// Between the counter and the back wall (the counter is 0.6 m deep, 0.85 m from it),
+			// a little towards the middle of the shop (the counter stands near a side wall).
+			const [sx, sz] = toWorld(f, layout.counter.a - 0.45, layout.counter.n + 0.58);
 
 			if (this.disposed || !this.shops.has(shop.id)) {
 				disposeOwned(group);
@@ -616,6 +669,7 @@ export class Storefronts {
 				slots: [],
 				cart: { x: cx, z: cz, y: ground },
 				counter: { x: kx, z: kz },
+				keeper: { x: sx, z: sz, yaw: yawFacing(f, 0, -1) },
 				catalog: '',
 				loading: false,
 				detail: null,
@@ -724,6 +778,7 @@ export class Storefronts {
 	dispose(): void {
 		this.disposed = true;
 		this.removeCarried();
+		this.keepers.dispose();
 		for (const id of [...this.built.keys()]) this.unbuild(id);
 		for (const key of this.collisionOwners) this.o.collision.removeOwner(key);
 		this.o.collision.doors = [];
