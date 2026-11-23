@@ -11,7 +11,7 @@
 	import type { Role } from '$lib/api/types';
 	import { session } from '$lib/stores/session.svelte';
 
-	let { solid = false, onClose }: { solid?: boolean; onClose: () => void } = $props();
+	let { solid = false, onClose, onMyShop }: { solid?: boolean; onClose: () => void; /** Opens My shop (for a registered seller). */ onMyShop?: () => void } = $props();
 
 	type Work = 'seller' | 'driver';
 	const WORK: Record<Work, { label: string; what: string }> = {
@@ -97,13 +97,16 @@
 			</div>
 			<p class="explain">
 				{#if current.status === 'pending'}
-					An administrator is checking your registration. Keep exploring, and come back to this counter to see how it stands.
+					An administrator is checking your registration. Keep exploring, and come back to this counter to see how it stands.{#if work === 'seller'} Meanwhile, your business details are in My shop (B).{/if}
 				{:else if work === 'seller'}
-					You can claim a spot on a street and open your shop.
+					You can claim a spot on a street and open your shop: it is all in My shop (B).
 				{:else}
 					Delivery jobs are in the menu (☰ → Delivery jobs).
 				{/if}
 			</p>
+			{#if work === 'seller' && onMyShop}
+				<button type="button" class="go" onclick={onMyShop} data-testid="office-my-shop">Open My shop</button>
+			{/if}
 			{#if confirmLeave}
 				<div class="confirm">
 					<p>Leave the {WORK[work].label.toLowerCase()} role?{current.status === 'pending' ? ' Your registration is withdrawn.' : ''}</p>

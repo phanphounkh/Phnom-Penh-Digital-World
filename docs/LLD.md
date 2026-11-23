@@ -421,6 +421,32 @@ price tags) and resolves the E-key interaction: pick up (held at the right wrist
 put in the cart (`POST /cart/items`), put back, pay at the counter, browse at the door.
 The server allows positions on an open shop's floor (`MovementValidator.set_open_zones`).
 
+**My shop (the seller's panel, in the city: `components/myshop/`).** Sellers run their shop
+without leaving the game: the toolbar's shop button or **B** (also ☰ → My shop, the System
+Office's counter after registering, and `/world?panel=shop`, where the old `/seller` address now
+redirects) opens a frosted panel over the city (a bottom sheet on a phone; opaque on the low
+quality setting). Walking still works while it is open. Tabs:
+
+* **Today** (`TodayTab`): a checklist until the shop is ready (approved, a spot, name and
+  tagline, three products with photos, open), sales today / orders to do / last 30 days, and new
+  (paid) orders with Accept.
+* **Orders** (`OrdersBoard`): columns New, Preparing, Ready (Done with "All"); each order shows
+  its next move from `allowed` as one button; cancel-and-refund sits behind "More", with a
+  reason and a confirmation. It reloads on the world's `order` message (`ordersVersion`).
+* **Products** (`ProductsGrid`): cards (photo, price tag, stock, status), filters (on the shelf,
+  low stock, hidden or checked), one editor (name EN/KM, price, stock, category with its policy,
+  the shelf model as tiles, description, photo upload, hide/show, remove with a confirmation).
+* **Shop** (`ShopLook`): name EN/KM, tagline, theme, colour pairs or own colours, open; a live
+  sign-and-awning preview. A seller with several spots picks the shop in the header.
+* **Spot** (`SpotsTab`): the spots held (renew, hand over to another seller, give up, with a
+  confirmation; route there), handovers to accept, decline or withdraw, and the 12 free spots
+  nearest the player (`GET /market/units` within ±0.004° of their position, distance and compass
+  direction from the city's projection). A spot is claimed in person: Go there draws the route;
+  Claim appears within 25 m of it. This is a client rule: the claim API does not check position.
+* **Business** (`BusinessForm`): the merchant details.
+
+Customer messages are in People (**P**), as for every player.
+
 ## Transport (Phase 5)
 
 **Road graph.** `build_graph` walks each routable way's node ids; a node used by two ways (or

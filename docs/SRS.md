@@ -38,7 +38,7 @@ Status: ✅ done and tested · 🟡 partial · ⏳ planned (phase). Tests are in
 | F-PROP-3 | No claiming someone else's real business: units at a named OSM business need evidence and admin review; disputes | ✅ | B: test_real_business_unit_needs_evidence_review_and_can_be_disputed |
 | F-PROP-4 | Claim expiry and renewal, release, transfer between merchants, admin revoke; per-merchant limit | ✅ | B: test_claim_limit_release_and_expiry, test_transfer_moves_the_unit_to_another_merchant |
 | F-MER-1 | Merchant registration (name, category, contacts, private address, hours, documents) with approve/reject/suspend | ✅ | B: test_merchant_application_needs_admin_approval; E: phase4 (dashboard + admin UI) |
-| F-MER-2 | Seller dashboard: units map, storefront customisation, products, stock, orders, revenue, customer messages | ✅ | E: phase4; B: catalogue/order tests |
+| F-MER-2 | My shop, in the city (B): spots near the player claimed in person, storefront customisation, products, stock, orders, revenue; customer messages in People | ✅ | E: phase4, system-office; U: myshop/types; B: catalogue/order tests |
 | F-CAT-1 | Products with price (integer cents), currency, stock, images (EXIF stripped), display model, availability, fulfilment | ✅ | B: test_catalogue_rules_and_storefront, test_image_upload_strips_metadata |
 | F-CAT-2 | Regulated categories: prohibited (refused) and restricted (admin review, 18+ confirmation) | ✅ | B: test_catalogue_rules_and_storefront, test_age_restricted_items_need_confirmation |
 | F-SHOP-1 | Walk-in 3D storefronts at the real frontage: sign, awning, shelves, products with price tags, cart, counter | ✅ | U: layout.test.ts, collision doorway tests; B: test_shop_floor_is_walkable…; E: phase4 |

@@ -409,11 +409,13 @@ export async function createCity(
 	const keys = new Set<string>();
 	const typing = (e: Event) => {
 		const t = e.target as HTMLElement | null;
-		return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+		return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 	};
 	const onKeyDown = (e: KeyboardEvent) => {
 		if (typing(e) || showcase) return;
 		const k = e.key.toLowerCase();
+		// Space presses a focused button in a panel over the city (My shop, the office), not jump.
+		if (k === ' ' && (e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
 		if (k === ' ') {
 			e.preventDefault(); // no page scroll, no click on a focused HUD button
 			if (!e.repeat) jump();

@@ -138,8 +138,16 @@ test('a new player registers a work role at the System Office, one at a time', a
 	await page.waitForTimeout(800);
 	await page.screenshot({ path: `${SHOTS}/seller-approved.png` });
 
-	// Walking out closes the counter.
+	// The counter leads straight to My shop, the seller's panel in the city.
+	await panel.getByTestId('office-my-shop').click();
+	await expect(panel).toHaveCount(0);
+	const myShop = page.getByTestId('my-shop');
+	await expect(myShop.getByTestId('merchant-status')).toHaveAttribute('data-status', 'approved');
+	await expect(myShop).toContainText(`Bopha Noodles ${id}`);
 	await page.keyboard.press('Escape');
+	await expect(myShop).toHaveCount(0);
+
+	// Walking out closes the counter.
 	await navTo(page, office, [dx, dz + 3]);
 	await expect.poll(() => ev<string | null>(page, `globalThis.__ppwBuildings.insideOf`), FRAMES).toBeNull();
 	expect(errors).toEqual([]);

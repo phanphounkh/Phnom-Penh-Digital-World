@@ -35,7 +35,7 @@ and the remaining work in [the roadmap](docs/ROADMAP.md).
 | ![The Riverside Café, a real OpenStreetMap building with a generated interior: E opens its door](frontend/artifacts/buildings-cafe-door.png) | ![Inside the café: tables, the counter and the stairs to the upper floor](frontend/artifacts/buildings-cafe-inside.png) |
 | ![A new player makes their avatar in the city: the wardrobe's glass panel and wheels](frontend/artifacts/phase1-avatar.png) | ![Choosing your place: a private home anywhere in Phnom Penh, and the nearest public start](frontend/artifacts/phase1-location.png) |
 | ![Two players, chat and friends](frontend/artifacts/phase3-two-players.png) | ![Inside a walk-in shop on Street 63, carrying a product to the cart](frontend/artifacts/phase4-shop-interior.png) |
-| ![Seller dashboard: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Demo checkout paid](frontend/artifacts/phase4-checkout.png) |
+| ![My shop, the seller's panel in the city: an order ready for pickup](frontend/artifacts/phase4-seller-orders.png) | ![Demo checkout paid](frontend/artifacts/phase4-checkout.png) |
 | ![At the shelf: product facings with price tags, the shop's cart by the door](frontend/artifacts/phase4-shelf.png) | ![Another player sees a rider on a motorbike on Street 136](frontend/artifacts/phase5-watcher.png) |
 | ![Riding the route at 38 km/h in the right-hand lane of Calmette (Street 53)](frontend/artifacts/phase5-route.png) | ![Parked at the kerb on a real street; the garage lists it by street name](frontend/artifacts/phase5-parked.png) |
 
@@ -156,9 +156,11 @@ worker bundling, the affected onboarding and commerce suites were rerun: **5 pas
 9. **Shops**: **M** lists the shops by distance (Browse, or Walk there). Walk through a shop's
    doorway; **E** at a shelf picks a product up, **E** at the cart puts it in, **E** at the
    counter (or **C** anywhere) opens the cart and the demo checkout. **/orders** tracks orders.
-10. **Sell** (`/seller`): apply, then claim a unit on the map, customise the storefront, add
-   products (photo, price, stock, 3D display model), fulfil orders, see demo revenue, answer
-   customer messages.
+10. **Sell** (in the city): register as a seller at the System Office; once approved, **B**
+   (or the shop button in the toolbar) opens My shop over the city: what to do next and today's
+   sales, orders (accept, prepare, mark ready), products (photo, price, stock, how it looks on
+   the shelf), the shop's name, tagline and colours, and your spot (walk to a free spot and claim
+   it there; renew, hand over or give it up). Customer messages are in People (**P**).
 11. **Vehicles** (**V**): take a free bicycle or motorbike (parked on the nearest street), walk
    to it (**Walk there**), press **F** to ride: **W/S** throttle and brake, **A/D** steer, keep
    right. The HUD shows speed, the OSM speed limit and one-way streets (and warns when you ride
@@ -247,7 +249,7 @@ frontend/           SvelteKit app; server.js = production server with the WebSoc
                     lighting + sun, terrain, collision, chunk streaming
   src/lib/game/net  WorldSocket (reconnect), WorldSession (reactive state), Interpolator, RemotePlayers
   src/lib/game      avatar/ (+ emotes), legacy player/camera/cart/npc
-  src/lib/components/world  ChatBox, PeoplePanel, ShopPanel, CartPanel; components/seller: dashboard tabs, UnitMap
+  src/lib/components/world  ChatBox, PeoplePanel, ShopPanel, CartPanel; components/myshop: My shop (the seller's panel)
   src/lib/game/shop Storefronts (walk-in shops), layout, ShopAssets
   src/lib/game/vehicles  specs (+ shared fixture), kinematics, RoadNetwork, route (lanes, guidance), RouteLine,
                     VehicleModels, Rider (seated IK pose)
@@ -372,11 +374,12 @@ live tracking on the order page, and the delivery states the order machine alrea
 * **Merchants.** One application: business name (EN/KM), category, description, customer
   contacts, private real address, opening hours, documents (PDF/JPEG/PNG, magic-byte checked,
   stored privately, admin download audited). Approval activates the seller role.
-* **Seller dashboard** (`/seller`): business, units (MapLibre claim map with unit outlines
-  coloured by status, plus a list and code search), storefront (name EN/KM, tagline, theme,
-  colours, open/closed, live sign preview), products (category policy, price, stock,
-  visibility, photo, 3D display model), orders with the allowed next steps, demo revenue chart,
-  customer messages (direct messages).
+* **My shop** (in the city, **B**; it replaced the `/seller` dashboard, whose address now opens
+  it): today (checklist, figures, new orders), orders as a board with the allowed next step,
+  products (category policy, price, stock, visibility, photo, 3D display model), the storefront
+  (name EN/KM, tagline, theme, colours, open/closed, live sign preview), spots (free spots near
+  the player, claimed in person; renew, transfer, release) and the business details. Customer
+  messages are direct messages (People).
 * **Catalogue rules.** Integer cents with database CHECKs; prohibited categories refused
   (tobacco, medicines, weapons, other regulated goods); alcohol listed only after admin review
   and sold only with an 18+ confirmation. Photos are re-encoded to WebP (metadata such as GPS
@@ -406,7 +409,7 @@ merchants, claims, catalog, checkout, media, sweeper), `app/schemas/market.py`,
 `tests/test_market_shopping.py`. Frontend: `src/lib/api/market.ts`, `src/lib/game/shop/`
 (Storefronts, layout, ShopAssets), doorway support in `collision.ts` and `materials.ts`, the
 autopilot and carry pose in `CityEngine.ts`, `components/world/{ShopPanel,CartPanel}`,
-`components/seller/*`, routes `/seller` and `/orders`, admin tabs, `playwright.config.ts`,
+`components/myshop/*` (was `components/seller/*` and the `/seller` route), `/orders`, admin tabs, `playwright.config.ts`,
 `tests/phase4.spec.ts`. Assets: `tools/blender/generate_shop_assets.py` (11 GLBs).
 Infrastructure: media volume, upload size limits. Docs: HLD, LLD, ERD, API, SRS, DATA, ROADMAP,
 privacy draft.

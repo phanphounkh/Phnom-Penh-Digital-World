@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import {
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff, Hand, Sparkles, PartyPopper,
@@ -16,6 +16,8 @@
 	import WalletPanel from '$lib/components/world/WalletPanel.svelte';
 	import Wardrobe from '$lib/components/world/Wardrobe.svelte';
 	import SystemOffice from '$lib/components/world/SystemOffice.svelte';
+	import MyShop from '$lib/components/myshop/MyShop.svelte';
+	import type { Here } from '$lib/components/myshop/types';
 	import { SYSTEM_OFFICE_DOOR, SYSTEM_OFFICE_ID } from '$lib/game/buildings/placements';
 	import VehicleIcon from '$lib/components/world/VehicleIcon.svelte';
 	import { transport, type Vehicle } from '$lib/api/transport';
@@ -71,7 +73,8 @@
 	let browsing = $state<Shop | null>(null);
 	let insideShop = $state<Shop | null>(null);
 	const canBuy = $derived(!!session.user?.active_roles.includes('buyer'));
-	const isSeller = $derived(!!session.user?.roles.some((r) => r.role === 'seller'));
+	/** Registered as a seller (approved or waiting): "My shop" is in the toolbar. */
+	const isSeller = $derived(!!session.user?.roles.some((r) => r.role === 'seller' && (r.status === 'active' || r.status === 'pending')));
 	const region = boot.spawn.region;
 	let net = $state<WorldSession | null>(null);
 	let chatInput = $state<HTMLInputElement>();
@@ -164,6 +167,11 @@
 				};
 				// The first visit: no avatar chosen yet, so the wardrobe opens to make one.
 				if (session.user?.onboarding.avatar === false) openWardrobe(true);
+				// /world?panel=shop (the old seller dashboard's address) opens My shop.
+				else if (new URL(location.href).searchParams.get('panel') === 'shop' && isSeller) {
+					openMyShop();
+					replaceState('/world', {});
+				}
 				let parkCheck = 0;
 				created.onFrame((dt) => {
 					const me = created.localState();
@@ -202,6 +210,12 @@
 		const onKey = (e: KeyboardEvent) => {
 			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
 			if (wardrobe || office) return; // they have their own keys (Escape closes them)
+			if (myShop) {
+				// Walking still works (the city reads its own keys); B or Escape (in the panel) closes it.
+				if (!typing && e.key.toLowerCase() === 'b') myShop = false;
+				return;
+			}
+			if (!typing && e.key.toLowerCase() === 'b' && isSeller && !panel) return openMyShop();
 			if (!typing && e.key.toLowerCase() === 'o' && !panel) return openWardrobe();
 			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
@@ -419,6 +433,24 @@
 	}
 	const toOffice = () => showRoute(SYSTEM_OFFICE_DOOR, navMode);
 
+	// ── My shop (sellers) ────────────────────────────────────────────────────────────
+	let myShop = $state(false);
+	function openMyShop() {
+		if (wardrobe) return;
+		panel = '';
+		chatOpen = false;
+		office = false;
+		myShop = true;
+	}
+	/** Where the player stands, for the spots near them. */
+	function here(): Here | null {
+		if (!city) return null;
+		const me = city.localState();
+		const projection = city.projection;
+		const { lat, lon } = projection.toLatLon(me.x, me.z);
+		return { x: me.x, z: me.z, lat, lon, toWorld: (la, lo) => projection.toWorld(la, lo) };
+	}
+
 	// ── wardrobe ─────────────────────────────────────────────────────────────────────
 	let wardrobe = $state(false);
 	/** What the player wore when the wardrobe opened. */
@@ -499,7 +531,7 @@
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office} data-panel-open={!!panel} data-chat-open={chatOpen}>
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office} class:myshop-open={myShop} data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -549,6 +581,7 @@
 				</button>
 			{/each}
 			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={() => openWardrobe()}><Shirt size={19} /></button>
+			{#if isSeller}<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="My shop (B)" title="My shop (B)" data-testid="open-my-shop" onclick={openMyShop}><Store size={19} /></button>{/if}
 			<button class="grid h-11 w-11 place-items-center rounded-xl bg-river-950/75 text-paper shadow-lg backdrop-blur hover:bg-river-800" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
 		</nav>
 
@@ -715,7 +748,20 @@
 	{/if}
 
 	{#if office}
-		<SystemOffice solid={quality === 'low'} onClose={() => (office = false)} />
+		<SystemOffice solid={quality === 'low'} onClose={() => (office = false)} onMyShop={openMyShop} />
+	{/if}
+
+	{#if myShop}
+		<MyShop
+			{here}
+			ordersVersion={net?.ordersVersion ?? 0}
+			solid={quality === 'low'}
+			onRoute={(target) => {
+				myShop = false;
+				void showRoute(target, navMode);
+			}}
+			onClose={() => (myShop = false)}
+		/>
 	{/if}
 
 	{#if wardrobe && wardrobeOutfit}
@@ -739,7 +785,7 @@
 					<button class="btn-ghost justify-start" onclick={() => panel = 'wallet'}><WalletCards size={18} />Demo wallet</button>
 					{#if isDriver}<button class="btn-ghost justify-start" onclick={() => panel = 'driver'}><Truck size={18} />Delivery jobs</button>{/if}
 					<a class="btn-ghost justify-start" href="/orders"><Package size={18} />My orders</a>
-					{#if isSeller}<a class="btn-ghost justify-start" href="/seller"><Store size={18} />Seller dashboard</a>
+					{#if isSeller}<button class="btn-ghost justify-start" onclick={openMyShop} data-testid="menu-my-shop"><Store size={18} />My shop (B)</button>
 					{:else}<button class="btn-ghost justify-start" onclick={toOffice}><Store size={18} />Sell or deliver: the System Office</button>{/if}
 					{#if session.user?.active_roles.includes('admin')}<a class="btn-ghost justify-start" href="/admin"><Users size={18} />Administration</a>{/if}
 					<button class="btn-ghost justify-start" onclick={() => panel = 'settings'}><Settings2 size={18} />Settings</button>
@@ -842,7 +888,7 @@
 				<p class="label mt-4">Shopping</p>
 				<div class="grid grid-cols-2 gap-2">
 					<a class="btn-ghost" href="/orders" data-sveltekit-reload>My orders</a>
-					{#if isSeller}<a class="btn-ghost" href="/seller" data-sveltekit-reload>Seller dashboard</a>{:else}<button class="btn-ghost" onclick={toOffice}>Sell or deliver</button>{/if}
+					{#if isSeller}<button class="btn-ghost" onclick={openMyShop}>My shop</button>{:else}<button class="btn-ghost" onclick={toOffice}>Sell or deliver</button>{/if}
 				</div>
 				<p class="label mt-4">Avatar</p>
 				<button class="btn-ghost w-full" onclick={() => openWardrobe()}>Change your outfit (O)</button>
@@ -864,6 +910,8 @@
 					<dt class="font-mono font-semibold">C</dt><dd>Cart and demo checkout</dd>
 					<dt class="font-mono font-semibold">V</dt><dd>My vehicles: get a bicycle or motorbike, find it, bring it</dd>
 					<dt class="font-mono font-semibold">F</dt><dd>Ride your vehicle when next to it · park it (at the kerb, a car park or an alley)</dd>
+					<dt class="font-mono font-semibold">O</dt><dd>Wardrobe: change your outfit</dd>
+					{#if isSeller}<dt class="font-mono font-semibold">B</dt><dd>My shop: orders, products, your spot, the shop's look</dd>{/if}
 					<dt class="font-mono font-semibold">Riding</dt><dd>W throttle · S brake / reverse · A D steer · keep right</dd>
 					<dt class="font-mono font-semibold">Esc</dt><dd>This panel</dd>
 				</dl>
@@ -922,6 +970,9 @@
 	.hud-glass { background: rgba(11, 37, 36, 0.4); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgba(255, 255, 255, 0.14); text-shadow: 0 1px 2px rgba(11, 37, 36, 0.6); }
 	/* At the System Office's counter: its panel takes the top right. */
 	.office-open :is(.world-toolbar, .world-action, .world-guidance) { display: none; }
+	/* My shop takes the right side (a sheet on a phone). */
+	.myshop-open :is(.world-toolbar, .world-action, .world-guidance, .chat-toggle) { display: none; }
+	.compact.myshop-open :is(.world-touch, .world-chat, .world-status, .world-minimap) { display: none; }
 	/* Alerts over the city are text only: a soft shadow keeps them readable on sky and road. */
 	.world-alert { text-shadow: 0 1px 2px rgba(11, 37, 36, 0.9), 0 0 10px rgba(11, 37, 36, 0.7); }
 	/* The wardrobe: only the city, the avatar and the glass panel. */

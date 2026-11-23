@@ -220,11 +220,10 @@ test('buyer chooses virtual delivery, pays from wallet, and an approved driver a
 				})
 			).ok()
 		).toBe(true);
-		await seller.page.goto('/seller');
-		await seller.page.getByTestId('tab-units').click();
-		await expect(seller.page.getByTestId('unit-map')).toHaveAttribute('data-ready', 'true', {
-			timeout: 60_000
-		});
+		// The old seller dashboard's address now opens My shop in the city.
+		const dashboard = await seller.api.get('/seller', { maxRedirects: 0 });
+		expect(dashboard.status()).toBe(307);
+		expect(dashboard.headers()['location']).toBe('/world?panel=shop');
 		const units = await (
 			await seller.api.get('/api/v1/market/units?bbox=104.915,11.564,104.927,11.576&available=true')
 		).json();
