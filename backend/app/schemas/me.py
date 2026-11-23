@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.models.enums import Language, RoleName
 from app.schemas.common import Schema
+from app.schemas.market import MerchantIn
 
 HEX = re.compile(r"^#[0-9a-f]{6}$")
 SKIN_TONES = ("#f1d0b5", "#e0b48f", "#c8946b", "#a8744f", "#7e5236", "#5a3824")
@@ -80,6 +81,15 @@ class ProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, min_length=2, max_length=48)
     preferred_language: Language | None = None
     world_visible: bool | None = None
+
+
+class WorkRoleIn(BaseModel):
+    """A work role registered at the System Office: a seller's business details (a merchant
+    application) or a driver's note."""
+
+    role: Literal["seller", "driver"]
+    note: str | None = Field(default=None, max_length=500)
+    business: MerchantIn | None = None
 
 
 def default_avatar(name: str) -> AvatarIn:

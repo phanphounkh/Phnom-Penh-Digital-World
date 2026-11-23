@@ -17,13 +17,16 @@ async def test_buyer_is_immediate_seller_and_driver_need_approval(client: httpx.
     await register_verified(client)
     r = await client.post(
         "/me/roles",
-        json={"roles": ["buyer", "seller", "driver"], "seller_note": "Noodle stall, Street 136"},
+        json={"roles": ["buyer", "seller"], "seller_note": "Noodle stall, Street 136"},
     )
     me = r.json()
     assert me["active_roles"] == ["buyer", "visitor"]
     assert status_of(me, "seller") == "pending"
-    assert status_of(me, "driver") == "pending"
     assert me["onboarding"]["roles"] is True
+    # One work role at a time: driver instead of seller.
+    me = (await client.post("/me/roles", json={"roles": ["buyer", "driver"]})).json()
+    assert status_of(me, "driver") == "pending"
+    assert status_of(me, "seller") == "revoked"
 
 
 async def test_visitor_only_is_a_valid_choice(client: httpx.AsyncClient):
@@ -66,34 +69,37 @@ async def test_admin_approves_and_rejects_requests(
     client: httpx.AsyncClient, admin_client: httpx.AsyncClient
 ):
     await register_verified(client, "seller1")
-    await client.post("/me/roles", json={"roles": ["seller", "driver"]})
-    pending = (await admin_client.get("/admin/role-requests")).json()
-    assert {(p["username"], p["role"]) for p in pending} == {
-        ("seller1", "seller"),
-        ("seller1", "driver"),
-    }
-    seller = next(p for p in pending if p["role"] == "seller")
-    driver = next(p for p in pending if p["role"] == "driver")
+    await client.post("/me/roles", json={"roles": ["seller"]})
+    async with make_client() as other:
+        await register_verified(other, "driver1")
+        await other.post("/me/roles", json={"roles": ["driver"]})
+        pending = (await admin_client.get("/admin/role-requests")).json()
+        assert {(p["username"], p["role"]) for p in pending} == {
+            ("seller1", "seller"),
+            ("driver1", "driver"),
+        }
+        seller = next(p for p in pending if p["role"] == "seller")
+        driver = next(p for p in pending if p["role"] == "driver")
 
-    ok = await admin_client.post(f"/admin/role-requests/{seller['id']}/approve", json={})
-    assert ok.status_code == 200 and ok.json()["status"] == "active"
-    no = await admin_client.post(
-        f"/admin/role-requests/{driver['id']}/reject", json={"reason": "Licence photo unclear"}
-    )
-    assert no.json()["status"] == "rejected"
-    twice = await admin_client.post(f"/admin/role-requests/{seller['id']}/approve", json={})
-    assert twice.status_code == 409
+        ok = await admin_client.post(f"/admin/role-requests/{seller['id']}/approve", json={})
+        assert ok.status_code == 200 and ok.json()["status"] == "active"
+        no = await admin_client.post(
+            f"/admin/role-requests/{driver['id']}/reject", json={"reason": "Licence photo unclear"}
+        )
+        assert no.json()["status"] == "rejected"
+        twice = await admin_client.post(f"/admin/role-requests/{seller['id']}/approve", json={})
+        assert twice.status_code == 409
 
-    me = (await client.get("/auth/me")).json()
-    assert "seller" in me["active_roles"] and "driver" not in me["active_roles"]
-    assert next(r for r in me["roles"] if r["role"] == "driver")["decision_reason"] == (
-        "Licence photo unclear"
-    )
+        assert "seller" in (await client.get("/auth/me")).json()["active_roles"]
+        theirs = (await other.get("/auth/me")).json()
+        assert "driver" not in theirs["active_roles"]
+        assert next(r for r in theirs["roles"] if r["role"] == "driver")["decision_reason"] == (
+            "Licence photo unclear"
+        )
 
-    # A rejected applicant may apply again; it goes back to the review queue.
-    again = (await client.post("/me/roles", json={"roles": ["seller", "driver"]})).json()
-    assert status_of(again, "driver") == "pending"
-    assert status_of(again, "seller") == "active"
+        # A rejected applicant may apply again; it goes back to the review queue.
+        again = (await other.post("/me/roles", json={"roles": ["driver"]})).json()
+        assert status_of(again, "driver") == "pending"
 
 
 async def test_role_decisions_are_audited(

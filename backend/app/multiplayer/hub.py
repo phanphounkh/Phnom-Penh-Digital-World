@@ -1124,6 +1124,13 @@ class Hub:
                 self._announce_ride(player)
 
     # ── relationships & moderation (called by REST endpoints) ───────────────────────────
+    def at_building(self, user_id: uuid.UUID, building: str, reach: float = 15.0) -> bool:
+        """Is the player in the world, in or at this building (its footprint within `reach`)?"""
+        player = self.by_user.get(user_id)
+        return player is not None and building_near(
+            building, player.x, player.z, player.room.footprints, reach
+        )
+
     def avatar_changed(self, user_id: uuid.UUID, avatar: dict[str, Any]) -> None:
         """A player saved a new outfit: they wear it at once for everyone who sees them (their
         card is sent again; clients replace the avatar)."""

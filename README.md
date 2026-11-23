@@ -12,7 +12,8 @@ map data**. This repository grew out of two existing projects, which are left un
 
 **Status: Phases 1–7 are implemented: foundation, 3D city, multiplayer, marketplace,
 transportation, simulated delivery and the demo wallet.** A new user can register, verify, pick a private home anywhere in Phnom Penh (they start
-at the nearest public spawn area), make their avatar in the city's wardrobe, then walk the real streets of Daun Penh
+at the nearest public spawn area), make their avatar in the city's wardrobe (and register a work role, seller or driver, at the
+System Office in the city), then walk the real streets of Daun Penh
 in 3D with other real players (chat, emotes, friends, invites, moderation). **Sellers** apply
 with their business details, are approved by an administrator, claim one of 1,680 virtual shop
 units cut into real street frontages, and stock it from a dashboard. **Buyers** walk through the

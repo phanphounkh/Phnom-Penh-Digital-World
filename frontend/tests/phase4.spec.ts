@@ -100,10 +100,12 @@ test('a seller opens a shop on a real street and a buyer shops in it in 3D', asy
 	expect(unit, 'a free unit with a clear path near Central Market').not.toBeNull();
 
 	// ── The seller applies through the dashboard; the administrator approves. ────────────
+	// (In the game sellers register at the System Office: tests/system-office.spec.ts. Here the
+	// application goes through the API.)
+	expect(
+		(await seller.api.post('/api/v1/merchant', { headers: await seller.headers(), data: { business_name: `Sokha Snacks ${id}`, category: 'food_drink', contact_phone: '012 345 678' } })).status()
+	).toBe(201);
 	await seller.page.goto('/seller');
-	await seller.page.locator('input[name="business_name"]').fill(`Sokha Snacks ${id}`);
-	await seller.page.locator('input[name="contact_phone"]').fill('012 345 678');
-	await seller.page.getByTestId('merchant-submit').click();
 	await expect(seller.page.getByTestId('merchant-status')).toHaveAttribute('data-status', 'pending');
 	expect(
 		(await rival.api.post('/api/v1/merchant', { headers: await rival.headers(), data: { business_name: `Rival ${id}`, category: 'grocery', contact_phone: '097 111 222' } })).status()

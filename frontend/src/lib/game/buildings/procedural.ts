@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import type { Plan } from './footprint';
 import type { InteriorType } from './osm';
-import type { BuildingSpec, DoorSpec, ItemSpec, SeatSpec, TableSpec, ToggleSpec, XZ } from './spec';
+import type { BuildingSpec, DoorSpec, ItemSpec, SeatSpec, ServiceSpec, TableSpec, ToggleSpec, XZ } from './spec';
 
 type V3 = [number, number, number];
 type Glow = [number, number] | null;
@@ -200,7 +200,7 @@ class MeshBuilder {
 
 // ── Floor plans ─────────────────────────────────────────────────────────────────────────────
 
-export type RoomKind = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'sales' | 'store' | 'dining' | 'galley' | 'family';
+export type RoomKind = 'living' | 'bedroom' | 'kitchen' | 'bathroom' | 'sales' | 'store' | 'dining' | 'galley' | 'family' | 'hall' | 'records';
 
 export interface RoomPlan {
 	id: string;
@@ -245,7 +245,9 @@ const ROOM_NAMES: Record<RoomKind, string> = {
 	store: 'Storeroom',
 	dining: 'Café',
 	galley: 'Kitchen',
-	family: 'Family Room'
+	family: 'Family Room',
+	hall: 'Service Hall',
+	records: 'Records Room'
 };
 
 /**
@@ -317,12 +319,15 @@ export function planRooms(type: InteriorType, W: number, D: number, doorX: numbe
 		}
 		return { rooms, partitions, doors };
 	}
-	// A shop's storeroom (door on the counter's side) or a café's kitchen (door on the left, the
-	// counter takes the right).
+	// A shop's storeroom (door on the counter's side), a café's kitchen (door on the left, the
+	// counter takes the right) or an office's records room (door on the left, the service
+	// counter is in the middle).
 	const [front, behind, deepEnough, depth, doorAt] =
 		type === 'shop'
 			? (['sales', 'store', D >= 8 && W >= 3.4, clamp(D * 0.3, 2.2, 3.4), (doorX > 0 ? -1 : 1) * W] as const)
-			: (['dining', 'galley', D >= 9 && W >= 4.4, clamp(D * 0.28, 2.4, 3.4), -W] as const);
+			: type === 'office'
+				? (['hall', 'records', D >= 8 && W >= 4.4, clamp(D * 0.26, 2.4, 3.2), -W] as const)
+				: (['dining', 'galley', D >= 9 && W >= 4.4, clamp(D * 0.28, 2.4, 3.4), -W] as const);
 	if (!deepEnough) {
 		room(front, [x0, x1, z0, z1]);
 		return { rooms, partitions, doors };
@@ -509,10 +514,12 @@ const STYLE: Record<RoomKind, { wall: string; band: string; bandH: number; bandO
 	store: { wall: '#e6e4de', band: '#9a978f', bandH: 0.12, bandOf: 'concrete', floor: ['#b9b6ae', '#b1aea6'], pattern: 1.0, floorOf: 'concrete', ceiling: '#f4f4f2' },
 	dining: { wall: '#efe2cc', band: '#5b3a28', bandH: 1.0, bandOf: 'wood', floor: ['#8a5a38', '#7a4c2e'], pattern: 'planks', ceiling: '#f6efe2' },
 	galley: { wall: '#f2efe6', band: '#e0d6c2', bandH: 1.25, bandOf: tiles(0.15), floor: ['#cfc8bb', '#b3ab9c'], pattern: 0.3, ceiling: '#fbf8f0' },
-	family: { wall: '#f0e6d6', band: '#c9b89a', bandH: 0.9, bandOf: 'paint', floor: ['#9c6b43', '#8a5c38'], pattern: 'planks', ceiling: '#fbf8f0' }
+	family: { wall: '#f0e6d6', band: '#c9b89a', bandH: 0.9, bandOf: 'paint', floor: ['#9c6b43', '#8a5c38'], pattern: 'planks', ceiling: '#fbf8f0' },
+	hall: { wall: '#eef0ea', band: '#2f6f68', bandH: 1.0, bandOf: 'paint', floor: ['#e3e0d8', '#c9c5bb'], pattern: 0.6, ceiling: '#ffffff' },
+	records: { wall: '#e9e6dd', band: '#8f8a7f', bandH: 0.12, bandOf: 'paint', floor: ['#c9c3b6', '#bdb7aa'], pattern: 0.5, ceiling: '#f6f5f0' }
 };
 
-const SIGN_NAMES = { cafe: 'Café', shop: 'Mini-mart', house: 'House' } as const;
+const SIGN_NAMES = { cafe: 'Café', shop: 'Mini-mart', house: 'House', office: 'Office' } as const;
 
 /** The name over the door, outside (cafés and shops): a painted board, so a building that can be
  * entered stands out on the street. Needs a canvas (none in unit tests: no sign). */
@@ -523,7 +530,7 @@ function nameSign(text: string, type: InteriorType, width: number): THREE.Mesh |
 	canvas.height = 128;
 	const g = canvas.getContext('2d');
 	if (!g) return null;
-	const [board, paint] = type === 'cafe' ? ['#3e2a1e', '#f4e6c8'] : ['#b8322a', '#ffffff'];
+	const [board, paint] = type === 'cafe' ? ['#3e2a1e', '#f4e6c8'] : type === 'office' ? ['#123b3a', '#f6f1e6'] : ['#b8322a', '#ffffff'];
 	g.fillStyle = board;
 	g.fillRect(0, 0, 512, 128);
 	g.strokeStyle = paint;
@@ -759,6 +766,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		// Keep the room's own fixture free too: a café's counter, a shop's drinks fridge.
 		const reserved: Rect[] = [];
 		if (type === 'cafe') reserved.push([x1 - 0.5 - Math.min(x1 - x0 - 1.6, 3.6), x1 - 0.5, z0, z0 + 1.35]);
+		if (type === 'office') reserved.push([x0 + 0.6, x1 - 0.6, z0, z0 + 1.9]);
 		// (The fridge goes at the back, on the side of the door: the counter is on the other.)
 		if (type === 'shop') reserved.push(dx > 0 ? [x1 - 1.5, x1, z0, z0 + 0.85] : [x0, x0 + 1.5, z0, z0 + 0.85]);
 		// And a wide way up to each inner door (stairs beside a counter could wall one off).
@@ -800,7 +808,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		const [x0, x1, z0, z1] = fp.rooms[0].rect;
 		return type === 'house' || (x1 - x0) * (z1 - z0) >= (type === 'cafe' ? 40 : 30);
 	};
-	if (plan.height >= FLOOR_LIFT + storey + H + 0.6 && roomy(planRooms(type, w, d, dx, true))) {
+	// (An office keeps to one floor: the hall and the records room are all it needs.)
+	if (type !== 'office' && plan.height >= FLOOR_LIFT + storey + H + 0.6 && roomy(planRooms(type, w, d, dx, true))) {
 		const withUpper = planRooms(type, w, d, dx, true);
 		const up = upperRooms(withUpper);
 		flight = placeStairs(withUpper, up);
@@ -814,6 +823,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 	const tables: TableSpec[] = [];
 	const items: ItemSpec[] = [];
 	const toggles: ToggleSpec[] = [];
+	const services: ServiceSpec[] = [];
 	const root = new THREE.Group();
 	// The storey being built: its plan, mesh builder, lighting, the parts kept clear, and the
 	// stairwell in its floor (above) or its ceiling (below).
@@ -1534,6 +1544,102 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		if (art) onWall(art, 1.4, 2.1, 0.5, '#3e2a1e', '#b5552f', [0.9, 0.5], { id: 'art', label: 'Painting', title: 'Painting', text: 'Boats on the Tonle Sap at dusk, by a local artist.' });
 	}
 
+	/** The System Office's hall: the service counter along the back wall (a glass screen with
+	 * two windows, the registration sign above), rows of waiting chairs facing it with an aisle
+	 * from the door, a ticket machine and the notice board. */
+	function hall(room: RoomPlan) {
+		const [x0, x1, z0, z1] = room.rect;
+		const W = x1 - x0;
+		const cz = z0 + 0.95;
+		const cw = Math.min(W - 1.4, 4.4);
+		const counter = mount(room, 'back', cw, 1.3, 0.5) ?? mount(room, 'back', Math.max(1.8, cw - 1.2), 1.3, 0.5);
+		if (counter) {
+			const L = counter.rect[1] - counter.rect[0];
+			const cx0 = counter.rect[0];
+			const mid = cx0 + L / 2;
+			b.as('wood').box(cx0, cx0 + L, 0, 1.05, cz - 0.3, cz + 0.3, hex('#2f5f59'));
+			b.as('ceramic').box(cx0 - 0.03, cx0 + L + 0.03, 1.05, 1.09, cz - 0.33, cz + 0.33, hex('#ece8dc'));
+			ctx.blockers.push([cx0 - 0.03, cx0 + L + 0.03, cz - 0.33, cz + 0.33]);
+			// The glass screen, with a frame between the two windows and a pass-through slot.
+			b.as('glass').box(cx0, cx0 + L, 1.09, 1.95, cz - 0.02, cz + 0.02, hex('#9cc8d2'), [1.0, 0.8]);
+			b.as('metal');
+			for (const fx of [cx0, mid, cx0 + L]) b.box(fx - 0.03, fx + 0.03, 1.09, 1.95, cz - 0.04, cz + 0.04, hex('#9aa3a8'));
+			b.box(cx0, cx0 + L, 1.93, 1.97, cz - 0.04, cz + 0.04, hex('#9aa3a8'));
+			// Behind it: two screens on the desk.
+			for (const wx of [cx0 + L * 0.25, cx0 + L * 0.75]) {
+				b.box(wx - 0.22, wx + 0.22, 1.12, 1.42, cz - 0.24, cz - 0.2, hex('#2a2c2e'));
+				b.as('glass').box(wx - 0.19, wx + 0.19, 1.15, 1.39, cz - 0.2, cz - 0.19, hex('#7fb7c4'), [1.2, 0.9]);
+				b.as('metal');
+			}
+			// The sign above: "Work roles · registration" (a dark board with light lettering).
+			b.as('paint').box(mid - 1.0, mid + 1.0, 2.1, 2.55, z0 + 0.01, z0 + 0.04, hex('#123b3a'));
+			for (let k = 0; k < 3; k++) b.box(mid - 0.8, mid + 0.8 - k * 0.35, 2.42 - k * 0.12, 2.46 - k * 0.12, z0 + 0.04, z0 + 0.045, hex('#f6f1e6'), [1.0, 0.4]);
+			// Where the player is served: in front of the left window.
+			services.push({ id: 'roles', label: 'Register a Work Role', x: cx0 + L * 0.25, z: cz + 0.8 });
+			lampAt(room, mid, cz + 0.4, 0.5, 0.8);
+		}
+		// Rows of chairs facing the counter, clear of the way from the door to it.
+		let n = 0;
+		for (let z = z1 - (windows.length ? 2.2 : 1.4); z > cz + 2.0; z -= 1.5)
+			for (let x = x0 + 0.8; x < x1 - 0.6; x += 0.62) {
+				if (Math.abs(x - dx) < 1.0) continue;
+				if (!free(room, [x - 0.3, x + 0.3, z - 0.3, z + 0.9])) continue;
+				n++;
+				chair(x, z, Math.PI, `wait${n}`, [0, 1]);
+				block(x - 0.25, x + 0.25, z - 0.25, z + 0.25);
+			}
+		// A ticket machine by the door.
+		const tx = dx + (dx > (x0 + x1) / 2 ? -1.2 : 1.2);
+		if (free(room, [tx - 0.25, tx + 0.25, z1 - 0.9, z1 - 0.4])) {
+			b.as('metal').box(tx - 0.2, tx + 0.2, 0, 1.25, z1 - 0.85, z1 - 0.45, hex('#2f6f68'));
+			b.as('glass').box(tx - 0.14, tx + 0.14, 0.9, 1.15, z1 - 0.86, z1 - 0.85, hex('#9fd0d8'), [1.2, 0.9]);
+			b.as('paint');
+			block(tx - 0.22, tx + 0.22, z1 - 0.87, z1 - 0.43);
+			items.push({ id: 'ticket', label: 'Ticket Machine', title: 'Ticket machine', text: 'Take a number and wait to be called to a window. Today the queue is short.', x: tx, z: z1 - 1.2, y: 1.0 });
+		}
+		const notice = mount(room, 'left', 1.4, 0.04, 0.4) ?? mount(room, 'right', 1.4, 0.04, 0.4);
+		if (notice)
+			onWall(notice, 1.2, 2.1, 0.7, '#123b3a', '#f6f1e6', [1.0, 0.5], {
+				id: 'notice',
+				label: 'Notice Board',
+				title: 'Work roles',
+				text: 'Seller: open a shop on a real street of Daun Penh (an administrator checks your business first). Driver: deliver orders across the city (an administrator approves you). One work role at a time. Register at the counter.'
+			});
+		plant(room, x0 + 0.4, z1 - 0.45);
+		plant(room, x1 - 0.4, z1 - 0.45);
+		tube(room, (x0 + x1) / 2, (z0 + z1) / 2 + 1);
+	}
+
+	/** Behind the hall: file shelves along the back wall and a clerk's desk. */
+	function records(room: RoomPlan) {
+		const [x0, x1, z0, z1] = room.rect;
+		const shelf = mount(room, 'back', Math.min(x1 - x0 - 1.0, 3.6), 0.4, 0.5);
+		if (shelf) {
+			const L = shelf.rect[1] - shelf.rect[0];
+			const sx0 = shelf.rect[0];
+			b.as('metal').box(sx0, sx0 + L, 0, 2.0, z0, z0 + 0.38, hex('#8a9196'));
+			b.as('card');
+			for (let k = 0; k < 4; k++)
+				for (let j = 0; j < Math.floor(L / 0.12); j++)
+					b.box(sx0 + 0.05 + j * 0.12, sx0 + 0.14 + j * 0.12, 0.15 + k * 0.48, 0.45 + k * 0.48, z0 + 0.05, z0 + 0.33, hex(['#2f6f68', '#c9894a', '#8a4a2a', '#e8dcc4'][(j + k) % 4]));
+			b.as('paint');
+			ctx.blockers.push(shelf.rect);
+			const [ix, iz] = toB(shelf, 0, 0.9);
+			items.push({ id: 'archive', label: 'Files', title: 'Registry files', text: 'A binder for every shop and driver registered in Daun Penh, filed by street and number.', x: ix, z: iz, y: 1.1 });
+		}
+		const desk = mount(room, 'right', 1.2, 0.6, 0.6) ?? mount(room, 'left', 1.2, 0.6, 0.6);
+		if (desk) {
+			const [ax, az] = toB(desk, 0, 0.3);
+			b.at(ax, az, desk.yaw).as('wood');
+			b.box(-0.6, 0.6, 0.72, 0.76, -0.3, 0.3, hex('#6b4530'));
+			for (const lx of [-0.55, 0.55]) b.box(lx - 0.03, lx + 0.03, 0, 0.72, -0.27, 0.27, hex('#6b4530'));
+			b.as('card').box(-0.25, 0.15, 0.76, 0.8, -0.15, 0.15, hex('#f4f1ea'));
+			b.at(0, 0, 0).as('paint');
+			ctx.blockers.push(desk.rect);
+		}
+		tube(room, (x0 + x1) / 2, (z0 + z1) / 2);
+	}
+
 	function galley(room: RoomPlan) {
 		const [x0, x1, z0, z1] = room.rect;
 		// Counters along the back wall: two wok burners, a sink; a fridge; rice and a recipe board.
@@ -1583,6 +1689,8 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 			else if (room.kind === 'sales') sales(room, kinds.has('store'));
 			else if (room.kind === 'store') store(room);
 			else if (room.kind === 'dining') dining(room);
+			else if (room.kind === 'hall') hall(room);
+			else if (room.kind === 'records') records(room);
 			else galley(room);
 		}
 		// A single-room home deep enough for it: the bed at the back.
@@ -1845,6 +1953,7 @@ export function buildInterior(type: InteriorType, plan: Plan, seed: number, nigh
 		tables,
 		items,
 		toggles,
+		...(services.length ? { services } : {}),
 		fans: []
 	};
 	if (upper && flight) {

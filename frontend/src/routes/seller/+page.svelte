@@ -112,9 +112,9 @@
 			<p class="text-sm text-ink-soft">Loading…</p>
 		{:else if !merchant}
 			<section class="card space-y-3 p-5">
-				<h2 class="display text-xl font-bold">Apply to sell</h2>
-				<p class="text-sm text-ink-soft">Tell us about your business. An administrator reviews every application; then you can claim a shop unit, list products and receive (demo) orders.</p>
-				<BusinessForm merchant={null} onsaved={(m) => { merchant = m; notice = 'Application sent.'; }} />
+				<h2 class="display text-xl font-bold">Register at the System Office</h2>
+				<p class="text-sm text-ink-soft">Sellers register in the city: go to the System Office by Phsar Thmei (Places → System Office → Route) and choose Seller at the counter. An administrator checks every business; then you can claim a spot on a street, list products and receive (demo) orders.</p>
+				<a class="btn-primary" href="/world" data-testid="go-to-office">Go to the city</a>
 			</section>
 		{:else}
 			<nav class="flex flex-wrap gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold" aria-label="Seller sections">

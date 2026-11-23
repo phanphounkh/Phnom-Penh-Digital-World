@@ -24,6 +24,9 @@ OSM_BUILDING = re.compile(r"^osm:(\d{1,15})$")
 MODEL_BUILDINGS: dict[str, tuple[float, float, float]] = {
     "riverside-house": (1005.0, -70.0, 9.0),
 }
+# The System Office, where players register a work role (the client's placements.ts
+# SYSTEM_OFFICE_ID: keep the two in step).
+SYSTEM_OFFICE = "osm:1518"
 # A player changes things in a building they are in or at its door (generous: positions on the
 # server trail the client by up to a tenth of a second).
 REACH_M = 15.0

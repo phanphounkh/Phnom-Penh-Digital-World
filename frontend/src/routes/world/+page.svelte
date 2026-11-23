@@ -15,6 +15,8 @@
 	import DriverPanel from '$lib/components/world/DriverPanel.svelte';
 	import WalletPanel from '$lib/components/world/WalletPanel.svelte';
 	import Wardrobe from '$lib/components/world/Wardrobe.svelte';
+	import SystemOffice from '$lib/components/world/SystemOffice.svelte';
+	import { SYSTEM_OFFICE_DOOR, SYSTEM_OFFICE_ID } from '$lib/game/buildings/placements';
 	import VehicleIcon from '$lib/components/world/VehicleIcon.svelte';
 	import { transport, type Vehicle } from '$lib/api/transport';
 	import { formatDistance, formatDuration } from '$lib/game/vehicles/route';
@@ -156,6 +158,10 @@
 				};
 				sync.storey = () => houses?.storeyOn ?? 0;
 				(globalThis as { __ppwBuildings?: unknown }).__ppwBuildings = houses; // e2e inspection
+				// The System Office's counter: register a work role.
+				houses.onService = (_building, service) => {
+					if (service === 'roles') openOffice();
+				};
 				// The first visit: no avatar chosen yet, so the wardrobe opens to make one.
 				if (session.user?.onboarding.avatar === false) openWardrobe(true);
 				let parkCheck = 0;
@@ -173,6 +179,9 @@
 						return; // no shopping from the saddle
 					}
 					houses?.update(dt, me.x, me.z, me.yaw);
+					if (office && houses?.insideOf !== `osm:${SYSTEM_OFFICE_ID}`) office = false; // walked out
+					const named = houses?.insideName ?? null;
+					if (named !== insideBuilding) insideBuilding = named;
 					shops?.update(me.x, me.z, me.yaw);
 					const here = shops?.shopAt(me.x, me.z) ?? null;
 					if (here?.id !== insideShop?.id) insideShop = here;
@@ -192,7 +201,7 @@
 		geo.spawnPoints().then((p) => (places = p)).catch(() => {});
 		const onKey = (e: KeyboardEvent) => {
 			const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-			if (wardrobe) return; // the wardrobe has its own keys (Escape closes it)
+			if (wardrobe || office) return; // they have their own keys (Escape closes them)
 			if (!typing && e.key.toLowerCase() === 'o' && !panel) return openWardrobe();
 			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
@@ -398,6 +407,18 @@
 		city?.setQuality(q);
 	}
 
+	// ── System Office ────────────────────────────────────────────────────────────────
+	let office = $state(false);
+	/** The named building the player is in (shown instead of the street). */
+	let insideBuilding = $state<string | null>(null);
+	function openOffice() {
+		panel = '';
+		chatOpen = false;
+		office = true;
+		void session.refresh(); // how the registration stands now
+	}
+	const toOffice = () => showRoute(SYSTEM_OFFICE_DOOR, navMode);
+
 	// ── wardrobe ─────────────────────────────────────────────────────────────────────
 	let wardrobe = $state(false);
 	/** What the player wore when the wardrobe opened. */
@@ -478,7 +499,7 @@
 
 <svelte:head><title>Daun Penh · Phnom Penh Digital World</title></svelte:head>
 
-<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} data-panel-open={!!panel} data-chat-open={chatOpen}>
+<div bind:this={worldShell} class="world-shell fixed inset-0 overflow-hidden bg-river-950 text-paper select-none" class:compact class:wardrobe-open={wardrobe} class:office-open={office} data-panel-open={!!panel} data-chat-open={chatOpen}>
 	<div bind:this={host} class="absolute inset-0" data-testid="world-canvas" data-ready={ready} data-ground={hud?.ground.toFixed(1)} data-night={hud?.night.toFixed(2)}></div>
 
 	{#if !ready}
@@ -506,8 +527,8 @@
 				<Navigation size={12} style="transform: rotate({hud.heading}deg)" /> {compassLabel(hud.heading)} · Daun Penh
 				<span class="ml-auto font-mono normal-case tracking-normal text-river-200" data-testid="hud-clock" title={hud.timeMode === 'live' ? 'Phnom Penh time (live sun)' : 'Fixed time of day'}>{hud.clock}{hud.timeMode === 'live' ? '' : ' ·'}</span>
 			</p>
-			<p class="hud-street mt-0.5 truncate font-display text-base leading-tight" data-testid="hud-street" title={insideShop?.name ?? hud.street ?? 'Off-street'}>
-				{insideShop ? insideShop.name : (hud.street ?? 'Off-street')}
+			<p class="hud-street mt-0.5 truncate font-display text-base leading-tight" data-testid="hud-street" title={insideShop?.name ?? insideBuilding ?? hud.street ?? 'Off-street'}>
+				{insideShop ? insideShop.name : (insideBuilding ?? hud.street ?? 'Off-street')}
 			</p>
 			{#if insideShop}<p class="truncate text-xs text-saffron-300" data-testid="hud-shop">Shop {insideShop.unit.code} · {insideShop.unit.street_name ?? ''}{insideShop.is_open ? '' : ' · closed'}</p>{/if}
 			{#if hud.streetAlt}<p class="khmer truncate text-xs text-river-200" lang={preferKhmer ? 'en' : 'km'}>{hud.streetAlt}</p>{/if}
@@ -693,6 +714,10 @@
 		{/if}
 	{/if}
 
+	{#if office}
+		<SystemOffice solid={quality === 'low'} onClose={() => (office = false)} />
+	{/if}
+
 	{#if wardrobe && wardrobeOutfit}
 		<Wardrobe
 			outfit={wardrobeOutfit}
@@ -714,7 +739,8 @@
 					<button class="btn-ghost justify-start" onclick={() => panel = 'wallet'}><WalletCards size={18} />Demo wallet</button>
 					{#if isDriver}<button class="btn-ghost justify-start" onclick={() => panel = 'driver'}><Truck size={18} />Delivery jobs</button>{/if}
 					<a class="btn-ghost justify-start" href="/orders"><Package size={18} />My orders</a>
-					<a class="btn-ghost justify-start" href="/seller"><Store size={18} />{isSeller ? 'Seller dashboard' : 'Open a shop'}</a>
+					{#if isSeller}<a class="btn-ghost justify-start" href="/seller"><Store size={18} />Seller dashboard</a>
+					{:else}<button class="btn-ghost justify-start" onclick={toOffice}><Store size={18} />Sell or deliver: the System Office</button>{/if}
 					{#if session.user?.active_roles.includes('admin')}<a class="btn-ghost justify-start" href="/admin"><Users size={18} />Administration</a>{/if}
 					<button class="btn-ghost justify-start" onclick={() => panel = 'settings'}><Settings2 size={18} />Settings</button>
 					<button class="btn-ghost justify-start" onclick={() => panel = 'help'}><CircleHelp size={18} />Controls & map information</button>
@@ -777,6 +803,13 @@
 					</div>
 					<p class="label mt-3">Spawn areas</p>
 				{/if}
+				<div class="mt-3 flex items-center gap-2 rounded-xl border border-saffron-500/50 bg-saffron-100 px-3 py-2" data-testid="place-system-office">
+					<span class="min-w-0 flex-1">
+						<span class="block truncate text-sm font-semibold">System Office</span>
+						<span class="block truncate text-xs text-ink-soft">Register a work role: seller or driver · by Phsar Thmei</span>
+					</span>
+					<button class="btn-primary px-2 py-1 text-xs" disabled={routing} onclick={toOffice}><RouteIcon size={13} class="inline" /> Route</button>
+				</div>
 				<div class="mt-3 grid gap-2">
 					{#each places as p (p.id)}
 						<div class="flex items-center gap-2 rounded-xl border border-river-900/10 bg-white px-3 py-2" data-testid={`place-${p.slug}`}>
@@ -809,7 +842,7 @@
 				<p class="label mt-4">Shopping</p>
 				<div class="grid grid-cols-2 gap-2">
 					<a class="btn-ghost" href="/orders" data-sveltekit-reload>My orders</a>
-					<a class="btn-ghost" href="/seller" data-sveltekit-reload>{isSeller ? 'Seller dashboard' : 'Sell here'}</a>
+					{#if isSeller}<a class="btn-ghost" href="/seller" data-sveltekit-reload>Seller dashboard</a>{:else}<button class="btn-ghost" onclick={toOffice}>Sell or deliver</button>{/if}
 				</div>
 				<p class="label mt-4">Avatar</p>
 				<button class="btn-ghost w-full" onclick={() => openWardrobe()}>Change your outfit (O)</button>
@@ -887,6 +920,8 @@
 	/* Light glass for the HUD's small cards: the city shows through, a faint edge and a text
 	   shadow keep them readable on sky and road. */
 	.hud-glass { background: rgba(11, 37, 36, 0.4); -webkit-backdrop-filter: blur(10px) saturate(140%); backdrop-filter: blur(10px) saturate(140%); border: 1px solid rgba(255, 255, 255, 0.14); text-shadow: 0 1px 2px rgba(11, 37, 36, 0.6); }
+	/* At the System Office's counter: its panel takes the top right. */
+	.office-open :is(.world-toolbar, .world-action, .world-guidance) { display: none; }
 	/* Alerts over the city are text only: a soft shadow keeps them readable on sky and road. */
 	.world-alert { text-shadow: 0 1px 2px rgba(11, 37, 36, 0.9), 0 0 10px rgba(11, 37, 36, 0.7); }
 	/* The wardrobe: only the city, the avatar and the glass panel. */

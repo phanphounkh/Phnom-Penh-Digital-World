@@ -15,10 +15,10 @@
 		</header>
 		<section class="card">
 			{#if data.approved}<DriverPanel />{:else}<p class="text-sm">
-					Choose the driver role during onboarding, then wait for administrator approval before
-					taking delivery jobs.
+					Register as a driver at the System Office in the city (by Phsar Thmei: Places → System
+					Office → Route), then wait for an administrator's approval before taking delivery jobs.
 				</p>
-				<a class="btn-primary mt-4" href="/onboarding/role">Manage roles</a>{/if}
+				<a class="btn-primary mt-4" href="/world">Go to the city</a>{/if}
 		</section>
 	</div>
 </main>

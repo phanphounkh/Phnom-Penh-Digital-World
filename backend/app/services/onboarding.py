@@ -30,6 +30,10 @@ def _forbidden(code: str, message: str) -> AppError:
     return AppError(status.HTTP_403_FORBIDDEN, code, message)
 
 
+# Work roles: a player holds at most one at a time (registered at the System Office).
+WORK_ROLES = {RoleName.SELLER, RoleName.DRIVER}
+
+
 def wants_buyer(user: User) -> bool:
     return any(r.role == RoleName.BUYER and r.status in ("active", "pending") for r in user.roles)
 
@@ -114,6 +118,12 @@ async def select_roles(session: AsyncSession, user: User, data: RoleSelection) -
     if not user.contact_verified:
         raise _forbidden("VERIFY_FIRST", "Verify your email or phone number first.")
     wanted = {RoleName(r) for r in data.roles} | {RoleName.VISITOR}
+    if len(wanted & WORK_ROLES) > 1:
+        raise AppError(
+            status.HTTP_409_CONFLICT,
+            "ONE_WORK_ROLE",
+            "Choose one work role at a time: seller or driver.",
+        )
     now = utcnow()
     existing = {r.role: r for r in user.roles}
     for role in wanted:

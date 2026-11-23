@@ -104,6 +104,7 @@ export type BuildingInteraction =
 	| { kind: 'light'; label: string; building: string; light: string }
 	| { kind: 'toggle'; label: string; building: string; toggle: string }
 	| { kind: 'inspect'; label: string; building: string; item: string }
+	| { kind: 'service'; label: string; building: string; service: string }
 	| { kind: 'table'; label: string; building: string; table: string }
 	| { kind: 'sit'; label: string; building: string; seat: string }
 	| { kind: 'stand'; label: string; building: string };
@@ -188,6 +189,8 @@ export class Buildings {
 	private worker: Worker | null | undefined = undefined;
 	private jobs = new Map<number, { resolve: (data: InteriorData) => void; reject: (error: Error) => void }>();
 	private nextJob = 1;
+	/** A counter's service was asked for (E at the System Office's desk): the page opens it. */
+	onService: ((building: string, service: string) => void) | null = null;
 	/** Shared with the players around (WorldSession): the player changed something here … */
 	onChange: ((building: string, kind: SwitchKind, id: string, on: boolean) => void) | null = null;
 	/** … and a building was loaded (what did others change in it?). */
@@ -297,6 +300,12 @@ export class Buildings {
 	/** The building the player is inside (id), if any. */
 	get insideOf(): string | null {
 		return this.inside;
+	}
+
+	/** The name of the building the player is inside, if it has one ("System Office"). */
+	get insideName(): string | null {
+		const b = this.inside ? this.loaded.get(this.inside) : undefined;
+		return b?.placement.procedural?.name ?? null;
 	}
 
 	/** The storey the player is on in the building they are inside (0: the ground floor). */
@@ -518,6 +527,8 @@ export class Buildings {
 				const item = b.spec.items.find((x) => x.id === i.item);
 				if (item) this.openInspection(b, item);
 			}
+		} else if (i.kind === 'service') {
+			this.onService?.(i.building, i.service);
 		} else if (i.kind === 'stand') {
 			this.host.stand();
 		} else if (i.kind === 'sit' || i.kind === 'table') {
@@ -685,6 +696,10 @@ export class Buildings {
 			for (const a of b.appliances)
 				if (onStorey(a.spec) && near(a.spec.x, a.spec.z))
 					offer({ kind: 'toggle', label: `Turn ${a.state.on ? 'Off' : 'On'} ${a.spec.label}`, building: id, toggle: a.spec.id }, Math.hypot(a.spec.x - lx, a.spec.z - lz), REACH.toggle, a.spec.x, a.spec.z, 0.5, 0.3);
+			for (const service of b.spec.services ?? []) {
+				if (!onStorey(service) || !near(service.x, service.z)) continue;
+				offer({ kind: 'service', label: service.label, building: id, service: service.id }, Math.hypot(service.x - lx, service.z - lz), REACH.toggle, service.x, service.z - 0.8, 1.0, 0.2);
+			}
 			for (const item of b.spec.items) {
 				if (!onStorey(item) || !near(item.x, item.z)) continue;
 				const open = this.inspecting?.item === item.id;

@@ -80,6 +80,16 @@ export interface ItemSpec {
 	level?: number;
 }
 
+/** A counter where the player is served (the System Office's desk): E there opens its panel in
+ * the page (`Buildings.onService`). */
+export interface ServiceSpec {
+	id: string;
+	label: string;
+	x: number;
+	z: number;
+	level?: number;
+}
+
 /** An appliance that turns on and off: a TV screen or a stove's flames (a GLB node). */
 export interface ToggleSpec {
 	id: string;
@@ -132,6 +142,8 @@ export interface BuildingSpec {
 	tables: TableSpec[];
 	items: ItemSpec[];
 	toggles: ToggleSpec[];
+	/** Counters where the player is served (offices). */
+	services?: ServiceSpec[];
 	fans: { node: string; rpm: number }[];
 	/** Storeys above the ground floor (levels[0] is level 1): floor and ceiling heights above the
 	 * ground, and their own walls, lintels and furniture (the ground floor's are above). */
@@ -190,7 +202,7 @@ export interface BuildingPlacement {
 	/** rotation.y of the model: 0 = front door facing +Z (south), π/2 = facing +X (east). */
 	yaw: number;
 	/** An interior generated inside an OpenStreetMap building (procedural.ts). */
-	procedural?: { type: 'house' | 'shop' | 'cafe'; plan: import('./footprint').Plan; seed: number; name?: string | null };
+	procedural?: { type: import('./osm').InteriorType; plan: import('./footprint').Plan; seed: number; name?: string | null };
 }
 
 /** Model ↔ world transform of one placed building. */

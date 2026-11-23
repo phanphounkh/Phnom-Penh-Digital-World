@@ -49,8 +49,7 @@ registered after that. There is no avatar step: until a player saves one,
 (`schemas/me.py: default_avatar`, the same values as the client's `DEFAULT_AVATAR`), and the
 city opens the wardrobe in its welcome mode (no Cancel; "Enter the city" saves). The start is a
 public spawn area, never the home itself (other players would see where the player lives).
-The web app's onboarding layout lets users revisit earlier steps but never skip ahead; the
-`role` page stays reachable once onboarding is complete.
+The web app's onboarding layout lets users revisit earlier steps but never skip ahead.
 
 ## Roles
 
@@ -59,6 +58,25 @@ becomes active immediately (verified contact required). `seller` and `driver` st
 and an admin approves or rejects them (`/admin/role-requests/{id}/approve|reject`, audited).
 A rejected role can be requested again. Unticking a role sets it to `revoked`. `admin` cannot
 be requested.
+
+## System Office and work roles (`services/work_roles.py`, `SystemOffice.svelte`)
+
+Work roles (seller, driver) are registered in the city, at the System Office: OSM building
+1518 (`placements.ts SYSTEM_OFFICE_ID`, `multiplayer/buildings.py SYSTEM_OFFICE`, the same id in
+every import), 30 m south of the Central Market spawn, with a generated `office` interior: a
+service hall (the counter with the "Register a Work Role" service, waiting chairs, a ticket
+machine, the notice board) and a records room; one floor. Places lists it with a route.
+
+* E at the counter opens the office panel (`Buildings.onService`). `POST /me/work-role
+  {role, note?, business?}` registers: a seller sends their business (the merchant application,
+  `merchants.apply`: the seller role pending), a driver a note (the driver role pending). An
+  administrator approves either, as before. `POST /me/work-role/leave` withdraws the role (a
+  pending seller application leaves the admin queue as "withdrawn"; a seller holding a shop
+  spot releases it first).
+* The server accepts both only while the player is in the world at the office
+  (`hub.at_building`: within 15 m of its footprint, from their live position), and keeps one
+  work role at a time: `ONE_WORK_ROLE` (409) for a second one, also on `POST /me/roles` and
+  `POST /merchant` (which stay for tools and tests).
 
 ## World chunk payload (`GET /world/chunks/{ix}_{iz}`)
 
