@@ -1,0 +1,362 @@
+{
+  "passed": true,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "mounted": {
+    "materials": [
+      "DreamBlack",
+      "Metal",
+      "Seat",
+      "Gold",
+      "Ivory",
+      "Plastic",
+      "Alloy",
+      "Chrome",
+      "Rubber",
+      "TailLight",
+      "Amber",
+      "Plate",
+      "PlateInk",
+      "Light",
+      "Dial",
+      "Needle"
+    ],
+    "triangles": 13884,
+    "primitives": 16,
+    "wheel": 0,
+    "steer": 0,
+    "position": [
+      3.69,
+      0,
+      76.39
+    ],
+    "avatar": {
+      "style": "realistic",
+      "model": "realistic:female",
+      "bones": 52,
+      "riding": true,
+      "gait": "run",
+      "emote": null,
+      "speed": 0,
+      "lift": 0,
+      "yaw": 1.727,
+      "lean": {
+        "roll": -0.00036793251704448526,
+        "pitch": 0.009269454158834057
+      },
+      "feet": [
+        [
+          3.624040247172245,
+          0.32000002290208185,
+          76.22829251909359
+        ],
+        [
+          3.6769337803351645,
+          0.3200000130190574,
+          76.56415301605101
+        ],
+        [
+          3.7441868463528247,
+          0.2815913651151638,
+          76.20937103711823
+        ],
+        [
+          3.797080884557033,
+          0.2815911937343753,
+          76.54523145166478
+        ]
+      ],
+      "ground": 0.1229235302613858
+    },
+    "audio": {
+      "state": "running",
+      "error": "",
+      "footsteps": 2,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 2,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0.055,
+        "rpm": 28,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "media": {
+        "enabled": true,
+        "error": "",
+        "footsteps": 2,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 2,
+          "sprint": 0
+        },
+        "landings": 0,
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0.055,
+          "rpm": 28,
+          "tyres": 0,
+          "bikeTick": 0,
+          "coasting": false
+        },
+        "testPlaying": false,
+        "testTime": 0,
+        "steps": [
+          {
+            "playing": false,
+            "time": 0.28,
+            "volume": 0.408,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0.28,
+            "volume": 0.408,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0,
+            "volume": 0,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0,
+            "volume": 0,
+            "ready": 4
+          }
+        ],
+        "loops": [
+          {
+            "kind": "motorbike",
+            "playing": true,
+            "time": 0.114725,
+            "volume": 0.16432996317555698,
+            "rate": 0.8356988104142369
+          },
+          {
+            "kind": "bicycle-pedal",
+            "playing": true,
+            "time": 0.046186,
+            "volume": 0,
+            "rate": 1
+          },
+          {
+            "kind": "bicycle-coast",
+            "playing": true,
+            "time": 0.046701,
+            "volume": 0,
+            "rate": 1
+          }
+        ]
+      },
+      "rms": 0.003402941773703973,
+      "settings": {
+        "master": 0.6,
+        "ambience": 0.35,
+        "effects": 0.8,
+        "muted": false
+      }
+    },
+    "render": {
+      "frame": 173,
+      "calls": 150,
+      "triangles": 71089,
+      "points": 0,
+      "lines": 0
+    },
+    "memory": {
+      "geometries": 376,
+      "textures": 67
+    }
+  },
+  "driving": {
+    "materials": [
+      "DreamBlack",
+      "Metal",
+      "Seat",
+      "Gold",
+      "Ivory",
+      "Plastic",
+      "Alloy",
+      "Chrome",
+      "Rubber",
+      "TailLight",
+      "Amber",
+      "Plate",
+      "PlateInk",
+      "Light",
+      "Dial",
+      "Needle"
+    ],
+    "triangles": 13884,
+    "primitives": 16,
+    "wheel": 11.04934830039593,
+    "steer": -0.3895187055297892,
+    "position": [
+      6.842600153402548,
+      0,
+      76.3350232276051
+    ],
+    "avatar": {
+      "style": "realistic",
+      "model": "realistic:female",
+      "bones": 52,
+      "riding": true,
+      "gait": "run",
+      "emote": null,
+      "speed": 4.30580449843725,
+      "lift": 0,
+      "yaw": 1.1841862992219865,
+      "lean": {
+        "roll": -0.00036793251704448526,
+        "pitch": 0.009269454158834057
+      },
+      "feet": [
+        [
+          6.812033774754492,
+          0.3619454872658253,
+          76.30402042716698
+        ],
+        [
+          6.696095039468313,
+          0.21685613536500958,
+          76.58881384155833
+        ],
+        [
+          6.930864141004269,
+          0.3272095619355533,
+          76.33469961189189
+        ],
+        [
+          6.814925905678041,
+          0.18212006382735008,
+          76.61949315212286
+        ]
+      ],
+      "ground": 0.12292353026138536
+    },
+    "audio": {
+      "state": "running",
+      "error": "",
+      "footsteps": 2,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 2,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0.1008348269906235,
+        "rpm": 78.446435987498,
+        "tyres": 0.047363849482808126,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "media": {
+        "enabled": true,
+        "error": "",
+        "footsteps": 2,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 2,
+          "sprint": 0
+        },
+        "landings": 0,
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0.1008348269906235,
+          "rpm": 78.446435987498,
+          "tyres": 0.047363849482808126,
+          "bikeTick": 0,
+          "coasting": false
+        },
+        "testPlaying": false,
+        "testTime": 0,
+        "steps": [
+          {
+            "playing": false,
+            "time": 0.28,
+            "volume": 0.408,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0.28,
+            "volume": 0.408,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0,
+            "volume": 0,
+            "ready": 4
+          },
+          {
+            "playing": false,
+            "time": 0,
+            "volume": 0,
+            "ready": 4
+          }
+        ],
+        "loops": [
+          {
+            "kind": "motorbike",
+            "playing": true,
+            "time": 1.89033,
+            "volume": 0.26078996907122426,
+            "rate": 1.1988533830592236
+          },
+          {
+            "kind": "bicycle-pedal",
+            "playing": true,
+            "time": 1.968112,
+            "volume": 0,
+            "rate": 1
+          },
+          {
+            "kind": "bicycle-coast",
+            "playing": true,
+            "time": 1.969369,
+            "volume": 0,
+            "rate": 1
+          }
+        ]
+      },
+      "rms": 0.0012803074953587075,
+      "settings": {
+        "master": 0.6,
+        "ambience": 0.35,
+        "effects": 0.8,
+        "muted": false
+      }
+    },
+    "render": {
+      "frame": 904,
+      "calls": 135,
+      "triangles": 73433,
+      "points": 0,
+      "lines": 0
+    },
+    "memory": {
+      "geometries": 396,
+      "textures": 70
+    }
+  },
+  "performanceSample": {
+    "durationMs": 8006.10000001192,
+    "frames": 481,
+    "fps": 60.07918961782689,
+    "p95FrameMs": 16.799999999999272
+  },
+  "errors": []
+}

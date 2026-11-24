@@ -1,0 +1,196 @@
+{
+  "passed": true,
+  "webAudioDisabled": true,
+  "tone": {
+    "state": "running",
+    "error": "",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": true,
+      "error": "",
+      "footsteps": 0,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 0,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 28,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": true,
+      "testTime": 0.071988,
+      "steps": [
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        }
+      ],
+      "loops": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 0.175961,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 0.17593,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 0.174875,
+          "volume": 0,
+          "rate": 1
+        }
+      ]
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": false
+    }
+  },
+  "walking": {
+    "state": "running",
+    "error": "",
+    "footsteps": 1,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 1,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 48.50001612464523,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": true,
+      "error": "",
+      "footsteps": 1,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 1,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 48.50001612464523,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": true,
+      "testTime": 0.760527,
+      "steps": [
+        {
+          "playing": true,
+          "time": 0.019362,
+          "volume": 0.408,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        }
+      ],
+      "loops": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 0.863181,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 0.863142,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 0.862032,
+          "volume": 0,
+          "rate": 1
+        }
+      ]
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": false
+    }
+  }
+}

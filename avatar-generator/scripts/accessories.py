@@ -256,7 +256,7 @@ def backpack(spec, outer_objs, L, M):
     return parts, straps
 
 
-def headphones(spec, L, M, tree):
+def headphones(spec, L, M, tree, hooded=False):
     """Worn around the neck: cups resting on the collar at the front sides, band behind."""
     name = spec["name"]
     out = []
@@ -264,9 +264,13 @@ def headphones(spec, L, M, tree):
     cups = {}
     for sx in (-1, 1):
         d = Vector((sx * 0.55, -0.6, 0.55)).normalized()
-        aim = Vector((sx * 0.1, n.y - 0.03, n.z - 0.03))
-        hit, nrm = onto(tree, aim, -d, 0.021)
-        c = hit if hit is not None else aim + d * 0.06
+        aim = Vector((sx * 0.105, n.y - 0.09, n.z - 0.05))
+        # Approach the chest horizontally. A downward diagonal can pass through
+        # an open neckline and hit the back, putting both cups behind the wearer.
+        hit, nrm = onto(tree, aim, Vector((0, 1, 0)), 0.021)
+        if hit is not None and (hit.y > n.y or sx * hit.x < 0.06):
+            hit, nrm = None, None
+        c = hit if hit is not None else aim
         axis = ((nrm if nrm is not None else d) + d).normalized()  # the cup faces out, forward and up
         cups[sx] = (c, axis)
         x = axis.cross(Vector((0, 0, 1))).normalized()
@@ -294,11 +298,14 @@ def headphones(spec, L, M, tree):
         assign_material(pad, M["phones_pad"])
         set_smooth(pad)
         out += [cup, ring, pad]
-    # Band around the back of the neck, over the hood.
+    # Only the hoodie needs the extra height and depth to clear its hood.
     band_pts = []
     for k in range(11):
         a = math.pi * (-0.5 + k / 10)
-        p = Vector((math.sin(a) * 0.115, n.y + 0.03 + math.cos(a) * 0.1, n.z + 0.02 + 0.035 * math.cos(a)))
+        depth = 0.1 if hooded else 0.065
+        base_z = 0.02 if hooded else -0.035
+        arch = 0.035 if hooded else 0.015
+        p = Vector((math.sin(a) * 0.115, n.y + 0.03 + math.cos(a) * depth, n.z + base_z + arch * math.cos(a)))
         band_pts.append(p)
     for k, sx in ((0, -1), (-1, 1)):
         c, axis = cups[sx]
@@ -537,7 +544,7 @@ def build_accessories(spec, body, rig, parts):
     wrapped += bag_for("hoodie", straps)
     if "headphones" in spec["outfit"]:
         neckwear = [o for o in gar.get("jacket", []) + gar["hoodie"] if o.name.endswith((".hood", ".collar", ".jacket"))]
-        rigid += [(o, "Spine2") for o in fitted("hoodie", headphones(spec, L, M, outer_tree(neckwear)))]
+        rigid += [(o, "Spine2") for o in fitted("hoodie", headphones(spec, L, M, outer_tree(neckwear), hooded=True))]
     if "necklace" in spec["outfit"]:
         wrapped += fitted("hoodie", necklace(spec, body, hoodie, L, M))
 

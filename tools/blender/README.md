@@ -5,7 +5,7 @@
 | `generate_avatars.py` | `frontend/static/models/characters/avatar.glb` | Modular player avatar (Phnom Penh Digital World) |
 | `generate_city_assets.py` | `frontend/static/models/city/*.glb`, `landmarks/*.glb` | Rain tree, ornamental tree, sugar palm, shrub (crowns of leaf clumps with bent normals and baked vertex-colour occlusion, clamped to ≤ 1), double-arm lamp, traffic signal, sign post; Phsar Thmei dome (real scale), Khmer stupa. Regenerate one family with `PPW_ASSET_FILTER=city/tree` |
 | `generate_shop_assets.py` | `frontend/static/models/shop/*.glb` | Shop shelf, island table, awning, generic product models (Phase 4) |
-| `generate_vehicle_assets.py` | `frontend/static/models/vehicles/*.glb` | Step-through city bicycle with basket, generic underbone motorbike (Phase 5) |
+| `generate_vehicle_assets.py` | `frontend/static/models/vehicles/*.glb` | Step-through city bicycle with basket, Dream-style underbone motorbike (original reference-based mesh) |
 | `generate_house.py` | `frontend/static/models/buildings/house-riverside.{glb,json}`, `house-riverside-{day,lamps}.webp` | The enterable house: living and dining room, kitchen, bedroom, bathroom and hall, with real door, arch and window openings, three hinged doors, furniture, and lightmaps baked with Cycles on the CPU (daylight plus one bake per room's lamps, about 6 min at the default 200 samples; `PPW_BAKE_SAMPLES=16` for a draft, `PPW_HOUSE_PREVIEW=/tmp/house` writes Cycles stills of every room) |
 | `compress_glb.mjs` | (in place) | Meshopt compression of the Phnom Penh Digital World GLBs (`cd frontend && npm run assets:compress`) |
 | `generate_assets.py` | `frontend/static/models/**` (29 GLBs) | Original CampusEats characters, food, equipment and food court |
@@ -55,7 +55,19 @@ Built with Blender 4.3.2. The glTF exporter needs NumPy in Blender's Python. If 
   rig's `LeftArm`/`LeftLeg`); the bicycle also has `Crank` (the pedals turn about it).
 * Materials: `Paint` and `PaintDark` are recoloured per vehicle; `Light` and `TailLight` glow at
   night; `Plate` is the (virtual) number plate.
-* Both models are generic: no real make or model is reproduced.
+* The bicycle is generic. The motorbike is an original Dream 125-style exterior based on the
+  supplied visual reference, not OEM CAD or a dimensionally verified manufacturer asset.
+  `DreamBlack` keeps black lacquer with a subtle saved-colour tint. Existing vehicle records,
+  controls, sounds, wheelbase and mounting anchors remain compatible; hands follow steering.
+* Regenerate only the motorbike (leaves the bicycle file untouched):
+  `PPW_VEHICLE_FILTER=motorbike blender --background --python-use-system-env --python tools/blender/generate_vehicle_assets.py`.
+  Optional `PPW_VEHICLE_BLEND=/tmp/dream.blend` saves a review scene. Compress just this GLB
+  with `frontend/node_modules/.bin/gltf-transform meshopt <input.glb> <output.glb>`.
+* Motorbike budget: <20,000 triangles, ≤32 mesh primitives, <220 KB compressed. The current
+  model is 17,839 triangles, 29 primitives and 175,896 bytes. No external textures or downloads.
+  Decorative analogue gauge is static; the plate is fictional (`PPW 125`), not a registration.
+* Validate the asset and steering hierarchy: `node frontend/tests/vehicle-asset.test.js`.
+  The procedural asset is original work; no image pixels, commercial mesh or paid asset is used.
 
 ## Enterable building contract (relied on by `frontend/src/lib/game/buildings/`)
 

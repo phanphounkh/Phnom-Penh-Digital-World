@@ -1,0 +1,39 @@
+{
+  "crs": "EPSG:32648",
+  "chunk_size_m": 200,
+  "coverage_definition": "Downloaded region bounding boxes intersected with the OSM city boundary; not completeness or live database state.",
+  "regions": [
+    {
+      "slug": "daun-penh-central",
+      "bbox": [
+        11.565,
+        104.9165,
+        11.579,
+        104.933
+      ],
+      "osm_base_timestamp": "2026-11-07T23:23:51Z",
+      "source": "OpenStreetMap via Overpass API",
+      "licence": "ODbL 1.0 — © OpenStreetMap contributors",
+      "elements": 5074,
+      "chunk_cells": 90,
+      "buildings": 2376,
+      "building_height_sources": {
+        "estimated": 2324,
+        "osm": 4,
+        "levels": 48
+      },
+      "roads": 787,
+      "road_width_sources": {
+        "estimated": 746,
+        "lanes": 38,
+        "osm": 3
+      },
+      "water_features": 12,
+      "snapshot_bbox_area_km2": 2.7849
+    }
+  ],
+  "errors": [],
+  "city_boundary_area_km2": 688.4977,
+  "downloaded_coverage_km2": 2.7849,
+  "downloaded_coverage_percent": 0.4045
+}

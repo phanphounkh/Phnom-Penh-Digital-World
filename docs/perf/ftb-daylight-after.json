@@ -1,0 +1,310 @@
+{
+  "label": "after",
+  "viewport": {
+    "width": 1672,
+    "height": 941
+  },
+  "clock": "2026-11-24 16:42 UTC+7",
+  "camera": {
+    "position": [
+      -7,
+      2.7,
+      -282
+    ],
+    "target": [
+      -16,
+      1.6,
+      -253
+    ],
+    "fov": 60
+  },
+  "target": {
+    "x": -16,
+    "z": -271,
+    "yaw": 0,
+    "speed": 0
+  },
+  "movement": {
+    "start": {
+      "x": -16,
+      "z": -271,
+      "yaw": 0,
+      "speed": 0
+    },
+    "end": {
+      "x": -16.658974947978468,
+      "z": -277.2755066738028,
+      "yaw": -3.052860564451442,
+      "speed": 6.49140688375044
+    }
+  },
+  "cases": [
+    {
+      "preset": "Performance",
+      "fps": 60.04169215222829,
+      "p95Ms": 16.70000000001164,
+      "casters": {
+        "eligible": 500,
+        "casting": 0
+      },
+      "effectiveQuality": "low",
+      "position": {
+        "x": -16,
+        "z": -271,
+        "yaw": 0,
+        "speed": 0
+      },
+      "night": 0,
+      "shadows": false,
+      "shadowSize": [
+        512,
+        512
+      ],
+      "pixelRatio": 0.75,
+      "chunks": 32,
+      "calls": 366,
+      "triangles": 119156,
+      "geometries": 548,
+      "textures": 93,
+      "heapBytes": 40365536,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)",
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:male",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 0,
+        "lean": {
+          "roll": 2.6492606059135175e-43,
+          "pitch": -3.3623108877179837e-31
+        },
+        "feet": [
+          [
+            -15.807784747677015,
+            0.07039699678257105,
+            -270.9903480912892
+          ],
+          [
+            -16.19077186641099,
+            0.06970970956409589,
+            -270.9903931384274
+          ],
+          [
+            -15.810675428961046,
+            0.028982743710593152,
+            -270.85088744001246
+          ],
+          [
+            -16.187727427626637,
+            0.02829958947074674,
+            -270.85093741961145
+          ]
+        ],
+        "ground": 0
+      },
+      "clouds": {
+        "size": 128,
+        "day": 1,
+        "time": 3320
+      }
+    },
+    {
+      "preset": "Balanced",
+      "fps": 60.04394068021591,
+      "p95Ms": 16.79999999998836,
+      "casters": {
+        "eligible": 500,
+        "casting": 500
+      },
+      "effectiveQuality": "medium",
+      "position": {
+        "x": -16,
+        "z": -271,
+        "yaw": 0,
+        "speed": 0
+      },
+      "night": 0,
+      "shadows": true,
+      "shadowSize": [
+        1024,
+        1024
+      ],
+      "pixelRatio": 1,
+      "chunks": 32,
+      "calls": 366,
+      "triangles": 119156,
+      "geometries": 548,
+      "textures": 94,
+      "heapBytes": 51523828,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)",
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:male",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 0,
+        "lean": {
+          "roll": 2.1071032109134995e-81,
+          "pitch": -8.954968876147358e-60
+        },
+        "feet": [
+          [
+            -15.798773674099941,
+            0.07101480180462699,
+            -270.9903092650286
+          ],
+          [
+            -16.181652029189596,
+            0.061862093116703265,
+            -270.9903492907142
+          ],
+          [
+            -15.800746549405066,
+            0.029553315649373954,
+            -270.85084663009116
+          ],
+          [
+            -16.17769132592409,
+            0.02053592921201744,
+            -270.8508916657509
+          ]
+        ],
+        "ground": 0
+      },
+      "clouds": {
+        "size": 128,
+        "day": 1,
+        "time": 3320
+      }
+    },
+    {
+      "preset": "Quality",
+      "fps": 48.98783406472822,
+      "p95Ms": 33.39999999999418,
+      "casters": {
+        "eligible": 500,
+        "casting": 500
+      },
+      "effectiveQuality": "high",
+      "position": {
+        "x": -16,
+        "z": -271,
+        "yaw": 0,
+        "speed": 0
+      },
+      "night": 0,
+      "shadows": true,
+      "shadowSize": [
+        2048,
+        2048
+      ],
+      "pixelRatio": 1,
+      "chunks": 32,
+      "calls": 378,
+      "triangles": 127452,
+      "geometries": 548,
+      "textures": 94,
+      "heapBytes": 47380124,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)",
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:male",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 0,
+        "lean": {
+          "roll": 2.689439332870376e-120,
+          "pitch": -5.941899395222824e-89
+        },
+        "feet": [
+          [
+            -15.810050241452391,
+            0.06936885148848598,
+            -270.9903462642492
+          ],
+          [
+            -16.19303556791581,
+            0.07072712357638777,
+            -270.9903899998378
+          ],
+          [
+            -15.813161599028088,
+            0.02797101898825633,
+            -270.85088548829054
+          ],
+          [
+            -16.19021186802918,
+            0.029301724266754946,
+            -270.8509341766466
+          ]
+        ],
+        "ground": 0
+      },
+      "clouds": {
+        "size": 128,
+        "day": 1,
+        "time": 3320
+      }
+    }
+  ],
+  "night": {
+    "clouds": {
+      "size": 128,
+      "day": 0,
+      "time": 3320
+    },
+    "avatar": {
+      "style": "realistic",
+      "model": "realistic:male",
+      "bones": 52,
+      "riding": false,
+      "gait": "idle",
+      "emote": null,
+      "speed": 0,
+      "lift": 0,
+      "yaw": 0,
+      "lean": {
+        "roll": 1.1698122939433895e-126,
+        "pitch": -1.02342435642806e-93
+      },
+      "feet": [
+        [
+          -15.804297886793385,
+          0.07114603195239144,
+          -270.9903300549088
+        ],
+        [
+          -16.187267478857276,
+          0.0674181038884909,
+          -270.9903693950003
+        ],
+        [
+          -15.806857628497706,
+          0.029713446263291282,
+          -270.8508683881464
+        ],
+        [
+          -16.18389232043772,
+          0.026036771812637353,
+          -270.85091274898616
+        ]
+      ],
+      "ground": 0
+    },
+    "night": 1
+  },
+  "errors": [],
+  "timing_note": "Native requestAnimationFrame/performance.now; only Date is overridden for the fixed solar clock. JS heap read using CDP Runtime.getHeapUsage."
+}

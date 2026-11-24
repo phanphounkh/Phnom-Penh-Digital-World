@@ -1,0 +1,110 @@
+{
+  "label": "wat-phnom-before",
+  "gpu": true,
+  "uncapped": false,
+  "base": "http://127.0.0.1:3000",
+  "viewport": "1920x1080",
+  "results": [
+    {
+      "slug": "wat-phnom",
+      "quality": "high",
+      "time_mode": "morning",
+      "spawn": {
+        "id": "75c9808c-af94-466d-b672-f6e5bb633f41",
+        "slug": "wat-phnom",
+        "name": "Wat Phnom",
+        "name_km": "វត្តភ្នំ",
+        "description": "The hilltop pagoda that gives Phnom Penh its name.",
+        "lat": 11.576333754125736,
+        "lon": 104.92324866843671,
+        "x": 229.02,
+        "z": -750.05,
+        "heading_deg": 194.7,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 229.02,
+        "z": -750.05,
+        "yaw": -0.25656340004316647,
+        "resumed": false
+      },
+      "load_ms": 3714,
+      "idle": {
+        "fps": 15.6,
+        "mean_ms": 64.24,
+        "p95_ms": 133.3,
+        "p5_fps": 7.5,
+        "worst_ms": 133.4
+      },
+      "moving": {
+        "fps": 21.5,
+        "mean_ms": 46.59,
+        "p95_ms": 66.7,
+        "p5_fps": 15,
+        "worst_ms": 1266.7
+      },
+      "metrics": {
+        "effective_quality": "low",
+        "draw_calls": 189,
+        "triangles": 2585100,
+        "loaded_chunks": 25,
+        "geometries": 196,
+        "textures": 65,
+        "js_heap_bytes": 114025070
+      },
+      "hud": "26 fps · 25 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "wat-phnom",
+      "quality": "low",
+      "time_mode": "morning",
+      "spawn": {
+        "id": "75c9808c-af94-466d-b672-f6e5bb633f41",
+        "slug": "wat-phnom",
+        "name": "Wat Phnom",
+        "name_km": "វត្តភ្នំ",
+        "description": "The hilltop pagoda that gives Phnom Penh its name.",
+        "lat": 11.576333754125736,
+        "lon": 104.92324866843671,
+        "x": 229.02,
+        "z": -750.05,
+        "heading_deg": 194.7,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 229.02,
+        "z": -750.05,
+        "yaw": -0.25656340004316647,
+        "resumed": false
+      },
+      "load_ms": 1706,
+      "idle": {
+        "fps": 29.5,
+        "mean_ms": 33.86,
+        "p95_ms": 66.7,
+        "p5_fps": 15,
+        "worst_ms": 116.7
+      },
+      "moving": {
+        "fps": 23.8,
+        "mean_ms": 41.99,
+        "p95_ms": 100,
+        "p5_fps": 10,
+        "worst_ms": 116.7
+      },
+      "metrics": {
+        "effective_quality": "low",
+        "draw_calls": 170,
+        "triangles": 2581026,
+        "loaded_chunks": 19,
+        "geometries": 180,
+        "textures": 65,
+        "js_heap_bytes": 37954278
+      },
+      "hud": "29 fps · 19 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ],
+  "render_errors": []
+}

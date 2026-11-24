@@ -1,0 +1,99 @@
+{
+  "passed": true,
+  "atlas": {
+    "width": 1536,
+    "height": 256,
+    "wall": [
+      253,
+      252,
+      252,
+      255
+    ],
+    "pane": [
+      101,
+      116,
+      117,
+      255
+    ],
+    "wallMask": [
+      0,
+      0,
+      0,
+      255
+    ],
+    "paneMask": [
+      255,
+      255,
+      255,
+      255
+    ],
+    "wallHeight": [
+      184,
+      184,
+      184,
+      255
+    ],
+    "paneHeight": [
+      122,
+      122,
+      122,
+      255
+    ],
+    "grain": {
+      "width": 256,
+      "height": 256,
+      "wrap": [
+        1000,
+        1000
+      ]
+    },
+    "doors": {
+      "before": 0,
+      "added": 1,
+      "after": 0
+    }
+  },
+  "cases": [
+    {
+      "preset": "Performance",
+      "time": "Midday",
+      "night": 0,
+      "detail": 0,
+      "shadows": false,
+      "calls": 126,
+      "triangles": 64994,
+      "doors": 6
+    },
+    {
+      "preset": "Quality",
+      "time": "Midday",
+      "night": 0,
+      "detail": 1,
+      "shadows": true,
+      "calls": 161,
+      "triangles": 77634,
+      "doors": 10
+    },
+    {
+      "preset": "Quality",
+      "time": "Night",
+      "night": 1,
+      "detail": 1,
+      "shadows": true,
+      "calls": 161,
+      "triangles": 78150,
+      "doors": 10
+    },
+    {
+      "preset": "Performance",
+      "time": "Night",
+      "night": 1,
+      "detail": 0,
+      "shadows": false,
+      "calls": 146,
+      "triangles": 67022,
+      "doors": 10
+    }
+  ],
+  "errors": []
+}

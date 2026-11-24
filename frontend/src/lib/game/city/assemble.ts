@@ -41,7 +41,7 @@ function materialOf(data: MeshData, m: CityMaterials): THREE.Material | undefine
 	}
 }
 
-const CASTS = new Set(['walls', 'roofs', 'khmerRoof']);
+const CASTS = new Set(['walls', 'roofs', 'khmerRoof', 'facadeRelief']);
 
 export function labelSprite(title: string, subtitle: string | null, accent = '#e8a33d'): THREE.Sprite {
 	const c = document.createElement('canvas');
@@ -169,25 +169,52 @@ export function assembleChunk(
 ): THREE.Group {
 	const group = new THREE.Group();
 	group.name = `chunk:${build.key}`;
+	group.userData.shadowEnabled = shadows;
 	// Small things (props, light pools, sign blades) are hidden for distant chunks (LOD).
 	const detail = new THREE.Group();
 	detail.name = 'detail';
 	group.add(detail);
 	group.userData.detail = detail;
+	const facadeDetail = new THREE.Group();
+	facadeDetail.name = 'facade-detail';
+	group.userData.facadeDetail = facadeDetail;
+	group.add(facadeDetail);
 	for (const data of build.meshes) {
 		const material = materialOf(data, materials);
 		if (!material) continue;
 		const mesh = new THREE.Mesh(geometryOf(data), material);
-		mesh.castShadow = shadows && CASTS.has(data.kind);
+		mesh.userData.shadowCaster = CASTS.has(data.kind);
+		mesh.castShadow = shadows && mesh.userData.shadowCaster;
 		mesh.receiveShadow = true;
 		mesh.matrixAutoUpdate = false;
-		group.add(mesh);
+		if (data.kind === 'facadeRelief') { mesh.name = 'facade-relief'; facadeDetail.add(mesh); }
+		else group.add(mesh);
 	}
 	const m4 = new THREE.Matrix4();
+	const contacts: THREE.Matrix4[] = [];
 	for (const { prop, matrices } of build.instances) {
 		const list: THREE.Matrix4[] = [];
 		for (let i = 0; i < matrices.length; i += 16) list.push(new THREE.Matrix4().fromArray(matrices, i));
 		for (const mesh of props.instance(prop as PropName, list, { shadows })) detail.add(mesh);
+		// Small ambient contact patches at existing tree bases; no new vegetation locations.
+		if (prop.startsWith('tree-')) for (const matrix of list) {
+			const p = new THREE.Vector3(), q = new THREE.Quaternion(), scale = new THREE.Vector3();
+			matrix.decompose(p, q, scale);
+			// Avoid flat decals floating above sloped hill terrain. Budget at most 128 per chunk.
+			if (p.y > .2 || contacts.length >= 128) continue;
+			p.y += .035;
+			contacts.push(new THREE.Matrix4().compose(p, new THREE.Quaternion(), new THREE.Vector3(scale.x * .36, 1, scale.z * .36)));
+		}
+
+	}
+	if (contacts.length) {
+		const patches = new THREE.InstancedMesh(POOL, materials.treeContact, contacts.length);
+		contacts.forEach((matrix, i) => patches.setMatrixAt(i, matrix));
+		patches.instanceMatrix.needsUpdate = true;
+		patches.userData.shared = true;
+		patches.name = 'tree-contact';
+		patches.computeBoundingSphere();
+		detail.add(patches);
 	}
 	if (build.pools.length) {
 		const count = build.pools.length / 3;
@@ -215,7 +242,8 @@ export function assembleChunk(
 			clone.scale.set(model.r / dims.r, model.h / dims.h, model.r / dims.r);
 			clone.traverse((n) => {
 				n.userData.shared = true;
-				(n as THREE.Mesh).castShadow = shadows;
+				n.userData.shadowCaster = true;
+				(n as THREE.Mesh).castShadow = !!group.userData.shadowEnabled;
 			});
 			group.add(clone);
 			(group.userData.onChange as (() => void) | undefined)?.(); // e.g. refresh cached shadows

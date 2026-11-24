@@ -39,12 +39,12 @@ const NIGHT_FOG = new THREE.Color('#1a2433');
 const DAY_SUN = new THREE.Color('#fff0d4');
 const LOW_SUN = new THREE.Color('#ffae66');
 const MOON = new THREE.Color('#8fa6d6');
-const DAY_SKY = new THREE.Color('#dfeaf0');
+const DAY_SKY = new THREE.Color('#cedfeb');
 const DUSK_SKY = new THREE.Color('#f3c9a2');
 const DUSK_GROUND = new THREE.Color('#9a7a5c');
-const NIGHT_SKY = new THREE.Color('#5a6a92');
+const NIGHT_SKY = new THREE.Color('#8999ba');
 const DAY_GROUND = new THREE.Color('#8c806a');
-const NIGHT_GROUND = new THREE.Color('#3a3128');
+const NIGHT_GROUND = new THREE.Color('#625c50');
 const MOON_DIR = new THREE.Vector3(0.35, 0.8, 0.45).normalize();
 
 /** Indoors: a warm fill like the house's lamps (ceiling bulb, floor lamp) and its tiled floor. */
@@ -70,6 +70,8 @@ export class DayNight {
 	private envKey = '';
 	/** Sky environment lighting (Quality); off in Performance mode. */
 	environment = true;
+	/** Extra daytime sky fill when cached shadows run without an environment map (Medium). */
+	dayFill = 0;
 	/** The sun's (or moon's) and the sky fill's settings from the time of day, before `indoor`. */
 	private sunIntensity = 3.1;
 	private hemiIntensity = 1;
@@ -122,6 +124,10 @@ export class DayNight {
 			this.pmrem = new THREE.PMREMGenerator(renderer);
 			this.envScene = new THREE.Scene();
 			this.envSky = new Sky();
+			// Reflect the same procedural daylight clouds, sharing their atlas and uniforms.
+			this.envSky.material.fragmentShader = sky.material.fragmentShader;
+			for (const [name, uniform] of Object.entries(sky.material.uniforms))
+				if (name.startsWith('uPpwCloud')) this.envSky.material.uniforms[name] = uniform;
 			this.envSky.scale.setScalar(50); // inside the PMREM cube camera's far plane
 			this.envScene.add(this.envSky);
 			// The Sky shader is dark violet below the horizon: give the environment a ground, so
@@ -164,6 +170,7 @@ export class DayNight {
 		const { renderer, sun, hemi, sky, fog, materials, props } = this.refs;
 		const [dx, dy, dz] = sunDirection(pos);
 		const day = 1 - this.night;
+		if (sky.material.uniforms.uPpwCloudDay) sky.material.uniforms.uPpwCloudDay.value = day;
 
 		if (pos.elevation > -3) {
 			this.lightDir.set(dx, Math.max(dy, 0.06), dz).normalize();
@@ -173,12 +180,12 @@ export class DayNight {
 		} else {
 			this.lightDir.copy(MOON_DIR);
 			sun.color.copy(MOON);
-			this.sunIntensity = 0.7 * this.night;
+			this.sunIntensity = 0.9 * this.night;
 		}
 		// Keep nights playable: a city sky glow plus moonlight, never pitch black. The sky
 		// environment map now carries part of the daylight fill, so the hemisphere is weaker.
 		const dusk = THREE.MathUtils.clamp(1 - Math.abs(pos.elevation - 4) / 12, 0, 1) * day;
-		this.hemiIntensity = this.environment ? 0.75 + 0.25 * day : 0.9 + 0.6 * day; // no env map: the old fill
+		this.hemiIntensity = (this.environment ? 1.1 - 0.1 * day : 1.15 + 0.03 * day) + this.dayFill * day;
 		this.hemiSky.copy(NIGHT_SKY).lerp(DAY_SKY, day).lerp(DUSK_SKY, dusk * 0.6);
 		this.hemiGround.copy(NIGHT_GROUND).lerp(DAY_GROUND, day).lerp(DUSK_GROUND, dusk * 0.5);
 		this.applyIndoor();
@@ -192,7 +199,7 @@ export class DayNight {
 		renderer.toneMappingExposure = 0.62 + 0.45 * this.night;
 
 		materials.night.value = this.night;
-		materials.pools.opacity = 0.95 * this.night;
+		materials.pools.opacity = 0.48 * this.night;
 		const lamp = props.materials.byName.get('Lamp');
 		if (lamp) {
 			lamp.emissive.set('#ffcf7a');

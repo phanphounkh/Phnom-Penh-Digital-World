@@ -12,6 +12,7 @@ from app.api.v1 import (
     market,
     me,
     merchant,
+    passport,
     players,
     realtime,
     shopping,
@@ -30,7 +31,7 @@ async def health() -> dict[str, str]:
 
 
 # The newest migration (migrations/versions): ready once the database is at it.
-SCHEMA_REVISION = "0006"
+SCHEMA_REVISION = "0008"
 
 
 @api_router.get("/health/ready", tags=["health"])
@@ -53,6 +54,7 @@ for module in (
     world,
     realtime,
     players,
+    passport,
     social,
     market,
     merchant,

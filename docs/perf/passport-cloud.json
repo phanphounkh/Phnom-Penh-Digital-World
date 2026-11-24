@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "legacyImport": {
+    "version": 1,
+    "stamps": [
+      "wat-phnom",
+      "canadia-garden"
+    ],
+    "delivered": true
+  },
+  "freshBrowserRestored": true,
+  "failedApiKeptLocalProgress": true,
+  "retryMerged": true,
+  "streamingContinuesWithMenuOpen": true,
+  "thirdSession": {
+    "version": 1,
+    "stamps": [
+      "wat-phnom",
+      "canadia-garden",
+      "central-market"
+    ],
+    "delivered": true
+  },
+  "errors": []
+}

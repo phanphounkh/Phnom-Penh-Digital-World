@@ -1,6 +1,7 @@
 /**
  * Procedural surface detail for the city's flat-colour materials, computed in the fragment
- * shader from world position, so it needs no textures, UVs or extra geometry:
+ * shader from world position, combining bounded shared detail textures and shader noise.
+ * Surface relief changes normals, never terrain height or collision geometry:
  *
  * - paving / plaza: stone tiles with grout and per-tile tint; sidewalk: smaller pavers and a
  *   concrete kerb along the road edge (ribbons carry `uv` = across/along metres, `band` = width);
@@ -127,10 +128,42 @@ const WATER_NORMAL = /* glsl */ `
 }
 `;
 
+/** Fine surface relief catches grazing light without adding terrain triangles. */
+const GROUND_NORMAL = /* glsl */ `
+{
+	vec2 p = vPpwW.xz;
+	float fade = ppwFade(0.12);
+	float scale = uPpwKind == 4 ? 32.0 : 18.0;
+	float a = ppwN(p * scale);
+	vec2 slope = vec2(ppwN((p + vec2(.015, 0.)) * scale) - a,
+	                  ppwN((p + vec2(0., .015)) * scale) - a);
+	vec3 grain = (viewMatrix * vec4(vec3(-slope.x, 0., -slope.y), 0.)).xyz;
+	normal = normalize(normal + grain * fade * (uPpwKind == 4 ? .65 : .25));
+}
+`;
+
+const PAVER_NORMAL = /* glsl */ `
+{
+	float size = uPpwKind == 2 ? 0.4 : 0.6;
+	vec2 p = vPpwW.xz / size;
+	vec2 cell = fract(p);
+	vec2 edge = abs(cell - .5) * 2.;
+	vec2 bevel = smoothstep(vec2(.82), vec2(.94), edge) * (1.-smoothstep(vec2(.96),vec2(1.),edge));
+	vec2 slope = sign(cell-.5)*bevel*.24;
+	float grain = ppwN(vPpwW.xz*35.);
+	slope += vec2(grain-.5, ppwN(vPpwW.xz*35.+9.)-.5)*.045;
+	vec3 relief = (viewMatrix*vec4(-slope.x,0.,-slope.y,0.)).xyz;
+	normal = normalize(normal+relief*ppwFade(.12));
+}
+`;
+
 export interface SurfaceUniforms {
 	time: { value: number };
-	/** 1 = procedural detail on (Quality), 0 = flat colours (Performance: near-zero cost). */
+	/** 1 = full procedural detail (High), 0 = filtered-texture paths (Low/Medium). */
 	detail: { value: number };
+	grain: THREE.Texture;
+	ground: THREE.Texture;
+	relief: { value: number };
 }
 
 const KINDS: SurfaceKind[] = ['paving', 'plaza', 'sidewalk', 'asphalt', 'grass', 'water', 'soil', 'ground'];
@@ -148,6 +181,9 @@ export function addSurfaceDetail(material: THREE.MeshStandardMaterial, kind: Sur
 		shader.uniforms.uPpwTime = uniforms.time;
 		shader.uniforms.uPpwKind = kindUniform;
 		shader.uniforms.uPpwDetail = uniforms.detail;
+		shader.uniforms.uPpwGrain = { value: uniforms.grain };
+		shader.uniforms.uPpwGround = { value: uniforms.ground };
+		shader.uniforms.uPpwRelief = uniforms.relief;
 		shader.vertexShader = shader.vertexShader
 			.replace('#include <common>', '#include <common>\nattribute float band;\nvarying vec3 vPpwW;\nvarying vec3 vPpwBand;')
 			.replace(
@@ -157,16 +193,54 @@ vPpwW = (modelMatrix * vec4(transformed, 1.0)).xyz;
 vPpwBand = vec3(uv, band); // ribbons: across/along metres and width (0 where absent)`
 			);
 		shader.fragmentShader = shader.fragmentShader
-			.replace('#include <common>', `#include <common>\nuniform float uPpwTime;\nuniform int uPpwKind;\nuniform float uPpwDetail;\n${COMMON}`)
+			.replace('#include <common>', `#include <common>\nuniform float uPpwTime;\nuniform int uPpwKind;\nuniform float uPpwDetail;\nuniform sampler2D uPpwGrain;\nuniform sampler2D uPpwGround;\nuniform float uPpwRelief;\n${COMMON}`)
 			.replace(
 				'#include <map_fragment>',
 				// The ground plane is white: without detail it takes a plain earth colour.
-				`#include <map_fragment>\nif (uPpwDetail > 0.5) {\n${SURFACE_FRAGMENT}\n} else if (uPpwKind == ${KINDS.indexOf('ground')}) diffuseColor.rgb = vec3(0.26, 0.24, 0.15);`
+				`#include <map_fragment>
+vec4 ppwGroundTexel = vec4(.5,.5,.5,1.);
+if (uPpwKind == 4 || uPpwKind == 6) {
+    ppwGroundTexel = texture2D(uPpwGround,vPpwW.xz*.5);
+    float ppwMeadow = ppwN(vPpwW.xz*.11);
+    vec3 ppwGrowth = mix(vec3(.82,.92,.78),vec3(1.10,1.05,.84),ppwMeadow);
+    diffuseColor.rgb *= ppwGrowth * (.67 + ppwGroundTexel.r*.72);
+    // Decorative sparse soil patches; never change map classification or terrain height.
+    float ppwBare = smoothstep(.62,.82,ppwMeadow)*.24;
+    diffuseColor.rgb = mix(diffuseColor.rgb,vec3(.11,.078,.043),ppwBare);
+} else if (uPpwDetail > 0.5) {\n${SURFACE_FRAGMENT}\n} else {
+// Performance mode keeps cheap colour variation; flat green made the hill look artificial.
+float ppwLowTexture = texture2D(uPpwGrain,vPpwW.xz*.25).r-.5;
+if (uPpwKind == ${KINDS.indexOf('ground')}) {
+    float ppwLowPatch = .86+.26*ppwN(vPpwW.xz*.18);
+    diffuseColor.rgb = vec3(.26,.24,.15)*ppwLowPatch*(1.+ppwLowTexture*.22);
+} else if (uPpwKind == ${KINDS.indexOf('grass')} || uPpwKind == ${KINDS.indexOf('soil')}) {
+    diffuseColor.rgb *= .86+.26*ppwN(vPpwW.xz*.18);
+} else if (uPpwKind == ${KINDS.indexOf('asphalt')}) {
+    diffuseColor.rgb *= .96+ppwLowTexture*.42;
+} else if (uPpwKind <= 2) {
+    vec2 ppwTiles = vPpwW.xz/vec2(.6,.4);
+    ppwTiles.x += mod(floor(ppwTiles.y),2.)*.5;
+    vec2 ppwEdges = abs(fract(ppwTiles)-.5)*2.;
+    float joint = max(smoothstep(.94,1.,ppwEdges.x),smoothstep(.92,1.,ppwEdges.y))*ppwFade(.2);
+    diffuseColor.rgb *= (1.-joint*.28)*(.95+.10*ppwH(floor(ppwTiles)))+ppwLowTexture*.16;
+}
+}`
 			)
-			.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\nif (uPpwDetail > 0.5 && uPpwKind == ${KINDS.indexOf('water')}) ${WATER_NORMAL.trim()}`);
+			.replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+if ((uPpwKind == 4 || uPpwKind == 6) && uPpwRelief > .5) {
+    vec2 ppwSlope = (ppwGroundTexel.gb*2.-1.)*.32*ppwFade(.08);
+    normal = normalize(normal+(viewMatrix*vec4(ppwSlope.x,0.,ppwSlope.y,0.)).xyz);
+} else if (uPpwDetail > 0.5) { if (uPpwKind == ${KINDS.indexOf('water')}) ${WATER_NORMAL.trim()} else if (uPpwKind == ${KINDS.indexOf('grass')} || uPpwKind == ${KINDS.indexOf('asphalt')}) ${GROUND_NORMAL.trim()} else if (uPpwKind <= 2) ${PAVER_NORMAL.trim()} }`)
+			.replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+if (uPpwKind == 4 || uPpwKind == 6) roughnessFactor = ppwGroundTexel.a;
+else if (uPpwDetail > .5 && uPpwKind <= 3) {
+	float wear = ppwFbm(vPpwW.xz*.7);
+	if (uPpwKind <= 2) roughnessFactor = mix(.62,.92,wear);
+	else if (uPpwKind == 3) roughnessFactor = mix(.73,.97,wear);
+}`);
 	};
 	const key = material.customProgramCacheKey.bind(material);
-	material.customProgramCacheKey = () => `${key()}|ppw-surface`;
+	material.customProgramCacheKey = () => `${key()}|ppw-surface-v4`;
 	material.needsUpdate = true;
 }
 

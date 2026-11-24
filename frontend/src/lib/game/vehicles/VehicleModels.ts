@@ -74,7 +74,7 @@ export async function createVehicle(kind: VehicleKind, color: string): Promise<V
 		if (!mesh.isMesh) return;
 		const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
 		const own = mats.map((m) => {
-			if (m.name !== 'Paint' && m.name !== 'PaintDark') return m;
+			if (!['Paint', 'PaintDark', 'DreamBlack'].includes(m.name)) return m;
 			const copy = (m as THREE.MeshStandardMaterial).clone();
 			paints.push(copy);
 			return copy;
@@ -98,7 +98,11 @@ export async function createVehicle(kind: VehicleKind, color: string): Promise<V
 	};
 	const setColor = (c: string) => {
 		const base = new THREE.Color(c);
-		for (const m of paints) m.color.copy(m.name === 'PaintDark' ? base.clone().multiplyScalar(0.45) : base);
+		for (const m of paints) {
+			// The Dream-style panels retain their black lacquer, with the saved colour as a subtle tint.
+			if (m.name === 'DreamBlack') m.color.set('#161d22').lerp(base, 0.025);
+			else m.color.copy(m.name === 'PaintDark' ? base.clone().multiplyScalar(0.45) : base);
+		}
 	};
 	setColor(color);
 	const maxSteer = HANDLING[kind].maxSteer;

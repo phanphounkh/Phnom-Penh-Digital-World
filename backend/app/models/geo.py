@@ -14,12 +14,14 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Column,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
     String,
+    Table,
     UniqueConstraint,
     func,
 )
@@ -27,6 +29,23 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base, CreatedAtMixin, TimestampMixin, UUIDPrimaryKey
+
+# Dataset membership is separate from a feature's legacy primary gameplay region.
+# Real foreign keys keep these associations in sync when regions/features are removed.
+FEATURE_REGION_TABLES = {
+    name: Table(
+        f"{name}_regions",
+        Base.metadata,
+        Column(
+            "feature_id", BigInteger, ForeignKey(f"{name}.id", ondelete="CASCADE"), primary_key=True
+        ),
+        Column(
+            "region_id", ForeignKey("geographic_regions.id", ondelete="CASCADE"), primary_key=True
+        ),
+        Index(f"ix_{name}_regions_region", "region_id"),
+    )
+    for name in ("roads", "buildings", "land_areas", "landmarks", "street_features")
+}
 
 
 def _geom(kind: str) -> Any:

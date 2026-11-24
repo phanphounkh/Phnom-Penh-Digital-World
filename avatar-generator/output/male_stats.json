@@ -1,7 +1,7 @@
 {
   "high": {
     "file": "male_avatar.glb",
-    "bytes": 6264968,
+    "bytes": 6264960,
     "meshes": 69,
     "triangles": 70390,
     "vertices": 40654,
@@ -108,7 +108,7 @@
   },
   "game": {
     "file": "male_avatar_game.glb",
-    "bytes": 4192416,
+    "bytes": 4192420,
     "meshes": 31,
     "triangles": 49137,
     "vertices": 30491,

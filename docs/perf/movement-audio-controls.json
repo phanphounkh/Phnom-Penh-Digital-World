@@ -1,0 +1,62 @@
+{
+  "passed": true,
+  "checks": [
+    "gesture unlock",
+    "nonzero audio signal",
+    "movement footsteps",
+    "master slider",
+    "mute silence",
+    "saved preferences",
+    "unmute after reload"
+  ],
+  "muted": {
+    "state": "running",
+    "footsteps": 8,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 8,
+      "sprint": 0
+    },
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 44.4175997757406,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "landings": 0,
+    "rms": 0,
+    "settings": {
+      "master": 0.25,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": true
+    }
+  },
+  "playing": {
+    "state": "running",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "landings": 0,
+    "rms": 0.000636692343595118,
+    "settings": {
+      "master": 0.25,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": false
+    }
+  }
+}

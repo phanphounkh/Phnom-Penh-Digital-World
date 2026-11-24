@@ -11,9 +11,17 @@ cd backend && uv run python scripts/import_osm.py   # load into PostGIS and rebu
 ```
 
 Regions and spawn landmarks are defined once, in `backend/app/geography/regions.py`, and this
-script imports them from there. To add a neighbourhood, add a bbox to `NEIGHBORHOODS`, then
-fetch and import.
+script imports them from there. Additional neighbourhoods require shared chunk/feature ownership
+before they can be safely imported. Audit adjacent coverage first; see the foundation audit below.
 
 Please respect the [Overpass usage policy](https://dev.overpass-api.de/overpass-doc/en/preface/commons.html):
 fetch rarely, and keep the snapshots committed. Data © OpenStreetMap contributors, ODbL 1.0.
 Accuracy notes are in `docs/DATA.md`.
+
+## Offline coverage and import preflight
+
+Run `backend/.venv/bin/python backend/scripts/audit_geography.py` from the repository root
+to measure downloaded coverage and check snapshots before import. This reads local data only.
+The importer runs the same preflight before database writes. Adjacent regions sharing a global
+chunk cell are rejected until canonical chunk ownership is implemented; this check does not
+implement cross-region travel. See [the foundation audit](../../docs/geographic-foundation-audit.md).

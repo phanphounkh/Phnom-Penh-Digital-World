@@ -1,0 +1,59 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "kind": "bicycle",
+      "media": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 1.565607,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 1.314374,
+          "volume": 0.21599997221242534,
+          "rate": 0.8180017800837215
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 1.558669,
+          "volume": 5.2597517911827385e-14,
+          "rate": 1.0000000136943792
+        }
+      ],
+      "error": ""
+    },
+    {
+      "kind": "motorbike",
+      "media": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 1.604443,
+          "volume": 0.25463669374269676,
+          "rate": 1.1627500962845176
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 1.673641,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 1.673574,
+          "volume": 0,
+          "rate": 1
+        }
+      ],
+      "error": ""
+    }
+  ]
+}

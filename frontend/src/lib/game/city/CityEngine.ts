@@ -13,6 +13,12 @@ import type { EmoteName } from '$lib/game/net/protocol';
 import { ChunkManager } from './ChunkManager';
 import { CollisionWorld, escapeFootprint, moveCircle, rayFraction } from './collision';
 import { DayNight, type TimeMode } from './lighting';
+import { WorldAudio, waterProximity } from '../audio/WorldAudio';
+import { qualityDebt, GRAPHICS_PRESETS, lowerQuality, type GraphicsQuality } from './quality';
+import { DaylightClouds } from './DaylightClouds';
+import { NightSky } from './NightSky';
+import { StreetLighting } from './StreetLighting';
+import { AvatarLighting, addAvatarLighting } from './AvatarLighting';
 import { CityMaterials } from './materials';
 import { PropLibrary } from './props';
 import { addSurfaceDetail } from './surfaces';
@@ -26,7 +32,7 @@ import { RouteLine } from '$lib/game/vehicles/RouteLine';
 import { PathFollower, RouteGuide, lanePath, stepText, type Progress, type Route } from '$lib/game/vehicles/route';
 import { JUMP_BUFFER, approachSpeed, grounded, isAirborne, stepHop, targetSpeed, turnHeading } from './locomotion';
 
-export type Quality = 'high' | 'low';
+export type Quality = GraphicsQuality;
 
 /** True when WebGL runs on a CPU rasteriser (SwiftShader, llvmpipe, …): no usable GPU. */
 export function softwareRenderer(renderer: THREE.WebGLRenderer): boolean {
@@ -84,6 +90,7 @@ export interface LocalState {
 }
 
 export interface CityController {
+	readonly audio: WorldAudio;
 	readonly projection: WorldProjection;
 	readonly scene: THREE.Scene;
 	readonly camera: THREE.PerspectiveCamera;
@@ -218,11 +225,12 @@ export async function createCity(
 	const region = config.regions.find((r) => r.slug === boot.spawn.region) ?? config.regions[0];
 	const projection = WorldProjection.fromConfig(config);
 	const terrain = new Terrain((config.terrain ?? []) as Mound[]);
-	let quality: Quality = options.quality ?? 'high';
+	let quality: Quality = options.quality ?? 'medium';
 	const khmer = !!options.preferKhmer;
 
 	// ── renderer & scene ──────────────────────────────────────────────────────────────
 	const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+	renderer.outputColorSpace = THREE.SRGBColorSpace;
 	renderer.toneMapping = THREE.ACESFilmicToneMapping;
 	renderer.toneMappingExposure = 0.62;
 	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -231,7 +239,7 @@ export async function createCity(
 	renderer.shadowMap.autoUpdate = false;
 	host.appendChild(renderer.domElement);
 	// No GPU (software rasteriser): start conservative; the player can still choose Quality.
-	if (quality === 'high' && softwareRenderer(renderer)) quality = 'low';
+	if (quality !== 'low' && softwareRenderer(renderer)) quality = 'low';
 	renderer.domElement.style.touchAction = 'none';
 
 	const scene = new THREE.Scene();
@@ -243,11 +251,13 @@ export async function createCity(
 	sky.scale.setScalar(4000);
 	const skyUniforms = sky.material.uniforms;
 	// A clearer, bluer tropical sky (was turbidity 7 / rayleigh 1.4: washed out to white).
-	skyUniforms.turbidity.value = 4.5;
-	skyUniforms.rayleigh.value = 2.2;
+	skyUniforms.turbidity.value = 2.8;
+	skyUniforms.rayleigh.value = 2.7;
 	skyUniforms.mieCoefficient.value = 0.003;
 	skyUniforms.mieDirectionalG.value = 0.82;
 	scene.add(sky);
+	const nightSky = new NightSky(scene);
+	const daylightClouds = new DaylightClouds(sky);
 
 	const hemi = new THREE.HemisphereLight('#dfeaf0', '#8c806a', 1.5);
 	scene.add(hemi);
@@ -255,7 +265,7 @@ export async function createCity(
 	sun.shadow.mapSize.set(2048, 2048);
 	Object.assign(sun.shadow.camera, { left: -75, right: 75, top: 75, bottom: -75, near: 10, far: 400 });
 	sun.shadow.bias = -0.0004;
-	sun.shadow.normalBias = 0.5;
+	sun.shadow.normalBias = 0.08;
 	scene.add(sun, sun.target);
 
 	const b = region.world_bounds;
@@ -272,7 +282,7 @@ export async function createCity(
 	// ── world data ────────────────────────────────────────────────────────────────────
 	const materials = new CityMaterials();
 	(groundPlane.material as THREE.MeshStandardMaterial).color.set('#ffffff'); // colours come from the 'ground' detail
-	addSurfaceDetail(groundPlane.material as THREE.MeshStandardMaterial, 'ground', { time: materials.time, detail: materials.detail });
+	addSurfaceDetail(groundPlane.material as THREE.MeshStandardMaterial, 'ground', { time: materials.time, detail: materials.detail, grain: materials.streetGrain, ground: materials.groundMap, relief: materials.relief });
 	const props = new PropLibrary();
 	await props.load();
 	const hills = terrainMesh(terrain, materials.terrain);
@@ -281,7 +291,7 @@ export async function createCity(
 	collision.bounds = { minX: b.min_x + 3, minZ: b.min_z + 3, maxX: b.max_x - 3, maxZ: b.max_z - 3 };
 	const chunks = new ChunkManager(scene, projection, collision, materials, props, terrain, new Set(region.chunk_keys), {
 		preferKhmer: khmer,
-		shadows: quality === 'high'
+		shadows: GRAPHICS_PRESETS[quality].shadows
 	});
 	const lighting = new DayNight(
 		{ renderer, scene, sun, hemi, sky, fog, materials, props },
@@ -290,6 +300,11 @@ export async function createCity(
 	);
 	lighting.mode = options.timeMode ?? 'live';
 	lighting.update();
+	const streetLighting = new StreetLighting(scene, chunks);
+	const audio = new WorldAudio();
+	let audioEnvironmentTimer = 1;
+	let nearbyWater = 0;
+	let nearbyRoad = false;
 
 	// ── player ────────────────────────────────────────────────────────────────────────
 	// `player` is a stable holder: the avatar model inside it can be swapped (avatar style) while
@@ -303,7 +318,14 @@ export async function createCity(
 	let styleToken = 0;
 	const wear = (c: GameCharacter) => {
 		// The avatar uses the contact blob below instead of the cached shadow map.
-		c.root.traverse((n) => ((n as THREE.Mesh).castShadow = false));
+		c.root.traverse((n) => {
+			(n as THREE.Mesh).castShadow = false;
+			if ((n as THREE.Mesh).isMesh) {
+				for (const material of [(n as THREE.Mesh).material].flat())
+					if ((material as THREE.MeshStandardMaterial).isMeshStandardMaterial)
+						addAvatarLighting(material as THREE.MeshStandardMaterial);
+			}
+		});
 		player.add(c.root);
 	};
 	wear(character);
@@ -325,6 +347,7 @@ export async function createCity(
 		}
 	}
 	scene.add(player);
+	const avatarLighting = new AvatarLighting();
 	const frameCallbacks = new Set<(dt: number) => void>();
 	const shadowBlob = new THREE.Mesh(
 		new THREE.CircleGeometry(0.42, 24),
@@ -469,17 +492,30 @@ export async function createCity(
 	observer.observe(host);
 
 	function applyQuality() {
-		renderer.setPixelRatio(quality === 'high' ? Math.min(devicePixelRatio, 1.5) : 0.75);
-		renderer.shadowMap.enabled = quality === 'high';
-		sun.castShadow = quality === 'high';
+		const preset = GRAPHICS_PRESETS[quality];
+		renderer.setPixelRatio(Math.min(devicePixelRatio, preset.pixelRatio));
+		renderer.shadowMap.enabled = preset.shadows;
+		sun.castShadow = preset.shadows;
+		if (sun.shadow.mapSize.x !== preset.shadowSize) {
+			sun.shadow.map?.dispose();
+			sun.shadow.map = null;
+			sun.shadow.mapSize.set(preset.shadowSize, preset.shadowSize);
+		}
+		const half = preset.shadowSpan / 2;
+		Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half });
+		sun.shadow.camera.updateProjectionMatrix();
 		shadowBlob.visible = true;
-		chunks.detailRadius = quality === 'high' ? 240 : 160;
+		chunks.detailRadius = preset.detailRadius;
+		chunks.facadeRadius = quality === 'high' ? 160 : quality === 'medium' ? 90 : 0;
 		renderer.shadowMap.needsUpdate = true;
-		chunks.radius = quality === 'high' ? 420 : 300;
-		chunks.shadows = quality === 'high';
-		// Performance: flat surfaces and no sky environment map (cheapest fragments and start-up).
-		materials.detail.value = quality === 'high' ? 1 : 0;
-		lighting.environment = quality === 'high';
+		chunks.radius = preset.radius;
+		chunks.setShadows(preset.shadows);
+		fog.near = preset.fogNear;
+		fog.far = preset.fogFar;
+		materials.detail.value = preset.surfaceDetail;
+		materials.relief.value = quality === 'low' ? 0 : 1;
+		lighting.environment = preset.environment;
+		lighting.dayFill = preset.dayFill;
 		lighting.update();
 		scene.traverse((n) => {
 			const m = (n as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
@@ -734,7 +770,7 @@ export async function createCity(
 	/** Streaming, the cached shadow window and the route line follow the player. */
 	function updateWorld() {
 		routeLine.update(1 / 60);
-		chunks.update(px, pz);
+
 		// Shadow window snapped to a 12 m grid: re-render only when it moves or things change.
 		const sx = Math.round(px / SHADOW_SNAP) * SHADOW_SNAP;
 		const sz = Math.round(pz / SHADOW_SNAP) * SHADOW_SNAP;
@@ -900,6 +936,7 @@ export async function createCity(
 		scene,
 		renderer,
 		materials,
+		daylight: () => daylightClouds.diagnostics(),
 		programs: () => renderer.info.programs?.length ?? 0,
 		/** The local avatar: style in use, model name, bone count, gait and motion (e2e checks). */
 		avatar: () => {
@@ -912,6 +949,7 @@ export async function createCity(
 			const ground = player.position.y - hop.lift;
 			return { style: character.style, model: character.root.name, bones, riding: !!rider, gait, emote: character.emotes.playing, speed, lift: hop.lift, yaw, lean, feet, ground };
 		},
+		audio: () => audio.diagnostics(),
 		reset() {
 			Object.assign(perf, { step: 0, render: 0, frames: 0, maxStep: 0, maxRender: 0, spikes: 0 });
 			chunks.assembleMs = 0;
@@ -927,7 +965,22 @@ export async function createCity(
 		const dt = Math.min(elapsed, 0.25);
 		const t0 = performance.now();
 		if (!paused) step(dt);
+		// Menus stop movement, while asynchronous city streaming must keep progressing.
+		chunks.update(px, pz);
 		materials.time.value += dt;
+		audioEnvironmentTimer += dt;
+		if (audio.started && audioEnvironmentTimer > .75) {
+			audioEnvironmentTimer = 0;
+			nearbyWater = waterProximity(chunks.payloads(), px, pz);
+			nearbyRoad = !!chunks.nearestStreet(px, pz, 30);
+		}
+		audio.update(dt, { x:px, z:pz, lift:hop.lift, speed:Math.abs(speed), indoor,
+			night:lighting.night, riding:riding?.kind ?? null, paused, water:nearbyWater, road:nearbyRoad,
+			propelling:keys.has('w') || keys.has('arrowup') || autoRide });
+		daylightClouds.update(lighting.night);
+		nightSky.update(lighting.night, materials.time.value, quality !== 'low');
+		streetLighting.update(dt, px, pz, lighting.night, quality !== 'low' && indoor < 0.5, quality === 'medium' ? 2 : 4);
+		avatarLighting.update(lighting.night, indoor);
 		for (const callback of frameCallbacks) callback(dt);
 		lightTimer += dt;
 		if (lightTimer > 2) {
@@ -947,7 +1000,7 @@ export async function createCity(
 		perf.triangles = renderer.info.render.triangles;
 		frames++;
 		stateTimer += elapsed;
-		if (elapsed > 1 / 24) slowTime += elapsed;
+		slowTime = qualityDebt(slowTime, elapsed);
 		if (stateTimer >= 0.25) {
 			setVehicleNight(lighting.night);
 			fps = Math.round(frames / stateTimer);
@@ -955,11 +1008,11 @@ export async function createCity(
 			stateTimer = 0;
 			emitState();
 			// Sustained slow rendering: drop to low quality automatically.
-			if (slowTime > 3 && quality === 'high') {
-				quality = 'low';
+			if (slowTime > 3 && quality !== 'low') {
+				quality = lowerQuality(quality);
+				slowTime = 0;
 				applyQuality();
 			}
-			slowTime = Math.max(0, slowTime - 0.25);
 		}
 	}
 	const startGround = terrain.height(px, pz);
@@ -967,6 +1020,7 @@ export async function createCity(
 	loop();
 
 	const controller: CityController = {
+		audio,
 		projection,
 		scene,
 		camera,
@@ -1227,6 +1281,12 @@ export async function createCity(
 			sky.geometry.dispose();
 			sky.material.dispose();
 			lighting.dispose();
+			audio.dispose();
+			nightSky.dispose();
+			daylightClouds.dispose();
+			streetLighting.dispose();
+			avatarLighting.dispose();
+			sun.shadow.dispose();
 			renderer.dispose();
 			renderer.domElement.remove();
 		}

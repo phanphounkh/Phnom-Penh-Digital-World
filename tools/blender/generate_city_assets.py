@@ -110,7 +110,7 @@ def box(name, size, loc, material, rot=(0, 0, 0)):
 
 
 def export(path: str) -> None:
-    if ONLY and not path.startswith(ONLY):
+    if ONLY and not any(path.startswith(prefix.strip()) for prefix in ONLY.split(",")):
         reset()
         return
     bpy.ops.object.select_all(action="SELECT")
@@ -143,46 +143,66 @@ def _fib_dome(n, top_bias=0.65):
 
 
 def leaf_crown(name, clumps, center, radii, material="Leaves", seed=1, tint=0.08, flat=0.75):
-    """One mesh of icosphere clumps [(x, y, z, radius)] with bent normals and AO colours."""
-    import bmesh
-    from mathutils import Vector
+    """Fixed leaf-spray cards with alpha-tested gaps; no solid crown cores.
 
+    One merged mesh/material per crown, roughly 400 triangles for a rain tree,
+    instead of thousands of folded polygon leaves. Not a surveyed species model.
+    """
+    from mathutils import Vector
     rng = random.Random(seed)
-    bm = bmesh.new()
-    clump_of = []
-    for k, (x, y, z, r) in enumerate(clumps):
-        made = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=r)
-        shade = 1 + rng.uniform(-tint, tint)
-        for v in made["verts"]:
-            v.co.x += rng.uniform(-0.2, 0.2) * r
-            v.co.y += rng.uniform(-0.2, 0.2) * r
-            v.co.z = v.co.z * flat + rng.uniform(-0.12, 0.12) * r
-            v.co += Vector((x, y, z))
-            clump_of.append(shade)
-    me = bpy.data.meshes.new(name)
-    bm.to_mesh(me)
-    bm.free()
-    o = bpy.data.objects.new(name, me)
-    bpy.context.collection.objects.link(o)
-    finish(o, material, smooth=True)
+    vertices, faces, normals, colors = [], [], [], []
     c = Vector(center)
-    lo, hi = c.z - radii[2], c.z + radii[2]
-    normals, colors = [], []
-    for i, v in enumerate(me.vertices):
-        d = v.co - c
-        d = Vector((d.x / radii[0], d.y / radii[1], d.z / radii[2]))
-        outward = min(1.0, d.length)
-        n = (v.normal * 0.3 + d.normalized() * 0.7).normalized()
-        normals.append(n)
-        height = max(0.0, min(1.0, (v.co.z - lo) / (hi - lo)))
-        ao = (0.45 + 0.55 * height) * (0.72 + 0.28 * outward) * clump_of[i] * 0.92
-        # glTF stores colours as normalised integers: values above 1 would wrap to near 0.
-        colors.append((min(ao, 1.0), min(ao * 1.01, 1.0), min(ao * 0.97, 1.0), 1.0))
+    for x, y, z, radius in clumps:
+        for j in range(6):
+            a = rng.uniform(0, math.tau)
+            h = rng.uniform(-.85, .95)
+            direction = Vector((math.cos(a)*math.sqrt(1-h*h), math.sin(a)*math.sqrt(1-h*h), h))
+            p = Vector((x,y,z)) + Vector((direction.x,direction.y,direction.z*flat))*radius*.65
+            normal = direction.normalized()
+            axis = normal.cross(Vector((0,0,1))).normalized()
+            up = normal.cross(axis).normalized()
+            angle = rng.uniform(0, math.tau)
+            right = axis*math.cos(angle)+up*math.sin(angle)
+            vertical = -axis*math.sin(angle)+up*math.cos(angle)
+            size = radius*rng.uniform(.7,1.05)
+            first = len(vertices)
+            for u,v in ((-1,-1),(1,-1),(1,1),(-1,1)):
+                pos = p+right*(u*size)+vertical*(v*size)
+                vertices.append(tuple(pos))
+                outward = (pos-c).normalized()
+                normals.append((normal*.25+outward*.75).normalized())
+                height = max(0,min(1,(pos.z-c.z+radii[2])/(radii[2]*2)))
+                shade = (.64+.34*height)*rng.uniform(1-tint,1+tint)
+                colors.append((shade,shade,shade,1))
+            faces.append(tuple(first+i for i in (0,1,2,3)))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(vertices, [], faces)
+    me.update()
+    uv = me.uv_layers.new(name="UVMap")
+    coords = ((0,0),(1,0),(1,1),(0,1))
+    for polygon in me.polygons:
+        for k,loop in enumerate(polygon.loop_indices): uv.data[loop].uv = coords[k]
     me.normals_split_custom_set_from_vertices(normals)
     attr = me.color_attributes.new("Col", "FLOAT_COLOR", "POINT")
-    for i, col in enumerate(colors):
-        attr.data[i].color = col
+    for i,color in enumerate(colors): attr.data[i].color = color
     me.color_attributes.active_color = attr
+    o = bpy.data.objects.new(name,me)
+    bpy.context.collection.objects.link(o)
+    finish(o,material,smooth=True)
+    m = mat(material)
+    if not m.node_tree.nodes.get("LeafSpray"):
+        tex = m.node_tree.nodes.new("ShaderNodeTexImage")
+        tex.name = "LeafSpray"
+        tex.image = bpy.data.images.load(os.path.join(os.path.dirname(__file__),"../../frontend/static/textures/foliage-original.png"),check_existing=True)
+        shader = m.node_tree.nodes.get("Principled BSDF")
+        shader.inputs["Base Color"].default_value = (1,1,1,1)
+        m.node_tree.links.new(tex.outputs["Color"],shader.inputs["Base Color"])
+        cutoff = m.node_tree.nodes.new("ShaderNodeMath")
+        cutoff.operation = 'GREATER_THAN'
+        cutoff.inputs[1].default_value = .5
+        m.node_tree.links.new(tex.outputs["Alpha"],cutoff.inputs[0])
+        m.node_tree.links.new(cutoff.outputs[0],shader.inputs["Alpha"])
+        m.use_backface_culling = False
     return o
 
 

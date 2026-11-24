@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.geography import osm
+from app.geography.ownership import sync_features
 from app.geography.projection import WorldProjection, chunk_key, default_projection
 from app.geography.regions import (
     KHMER_ROOF_KINDS,
@@ -52,6 +53,7 @@ from app.models import (
     StreetFeature,
     WorldChunk,
 )
+from app.models.geo import FEATURE_REGION_TABLES
 from app.transport import routing
 from app.transport.network import build_graph, oriented_pieces, road_masks
 
@@ -124,18 +126,6 @@ async def _upsert(
         stmt = insert(model).values(rows[start : start + BATCH])
         update = {c: stmt.excluded[c] for c in rows[0] if c not in conflict}
         await session.execute(stmt.on_conflict_do_update(index_elements=conflict, set_=update))
-
-
-async def _prune(
-    session: AsyncSession, model: Any, region_id: Any, keep: set[tuple[str, int]]
-) -> int:
-    existing = await session.execute(
-        select(model.id, model.osm_type, model.osm_id).where(model.region_id == region_id)
-    )
-    stale = [row.id for row in existing if (row.osm_type, row.osm_id) not in keep]
-    for start in range(0, len(stale), 1000):
-        await session.execute(delete(model).where(model.id.in_(stale[start : start + 1000])))
-    return len(stale)
 
 
 async def upsert_region(session: AsyncSession, **values: Any) -> GeographicRegion:
@@ -603,10 +593,10 @@ async def import_neighborhood(
     ):
         # Deduplicate (a relation member may repeat) — the last occurrence wins.
         unique = {(row["osm_type"], row["osm_id"]): row for row in rows}
-        if unique:
-            await _upsert(session, model, list(unique.values()), ["osm_type", "osm_id"])
         stats[key] = len(unique)
-        stats[f"{key}_pruned"] = await _prune(session, model, region.id, set(unique))
+        stats[f"{key}_pruned"] = await sync_features(
+            session, model, region.id, list(unique.values())
+        )
 
     # Link landmarks to the building that contains them.
     await session.execute(
@@ -621,15 +611,23 @@ async def import_neighborhood(
     building_ids = {
         (row.osm_type, row.osm_id): row.id
         for row in await session.execute(
-            select(Building.id, Building.osm_type, Building.osm_id).where(
-                Building.region_id == region.id
+            select(Building.id, Building.osm_type, Building.osm_id)
+            .join(
+                FEATURE_REGION_TABLES["buildings"],
+                FEATURE_REGION_TABLES["buildings"].c.feature_id == Building.id,
             )
+            .where(FEATURE_REGION_TABLES["buildings"].c.region_id == region.id)
         )
     }
     road_ids = {
         (row.osm_type, row.osm_id): row.id
         for row in await session.execute(
-            select(Road.id, Road.osm_type, Road.osm_id).where(Road.region_id == region.id)
+            select(Road.id, Road.osm_type, Road.osm_id)
+            .join(
+                FEATURE_REGION_TABLES["roads"],
+                FEATURE_REGION_TABLES["roads"].c.feature_id == Road.id,
+            )
+            .where(FEATURE_REGION_TABLES["roads"].c.region_id == region.id)
         )
     }
 
@@ -753,6 +751,13 @@ async def import_neighborhood(
 async def import_all(
     session: AsyncSession, data_dir: Path, slugs: list[str] | None = None
 ) -> dict[str, Any]:
+    # Validate every selected file and region seam before the first database write.
+    from app.geography.coverage import require_importable
+
+    require_importable(data_dir, slugs)
+    # Serialize refreshes so a concurrent import cannot prune a feature while
+    # another dataset is adding its membership. Released with this transaction.
+    await session.execute(text("SELECT pg_advisory_xact_lock(1347442433)"))
     result: dict[str, Any] = {"city": await import_city(session, data_dir)}
     for slug in slugs or list(NEIGHBORHOODS):
         result[slug] = await import_neighborhood(session, data_dir, slug)
