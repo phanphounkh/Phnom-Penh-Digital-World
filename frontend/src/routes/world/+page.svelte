@@ -5,10 +5,13 @@
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff,
 		ShoppingCart, ShoppingBasket, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
-		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt
+		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt, Volume2, VolumeX
 	} from 'lucide-svelte';
 	import ChatBox from '$lib/components/world/ChatBox.svelte';
 	import PeoplePanel from '$lib/components/world/PeoplePanel.svelte';
+	import PassportPanel from '$lib/components/world/PassportPanel.svelte';
+	import { PassportSync, type SyncStatus } from '$lib/game/activities/PassportSync';
+	import { emptyPassport, restorePassport, passportKey, practiceOffer, collectStamp, advanceDelivery, deliveryTarget, explorer, distance, type Passport } from '$lib/game/activities/passport';
 	import ShopPanel from '$lib/components/world/ShopPanel.svelte';
 	import CartPanel from '$lib/components/world/CartPanel.svelte';
 	import GaragePanel from '$lib/components/world/GaragePanel.svelte';
@@ -47,7 +50,7 @@
 	let progress = $state({ loaded: 0, total: 1 });
 	let ready = $state(false);
 	let failure = $state('');
-	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage' | 'menu' | 'driver' | 'wallet'>('');
+	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage' | 'menu' | 'driver' | 'wallet' | 'passport'>('');
 	let compact = $state(false);
 	let chatOpen = $state(false);
 	let mapExpanded = $state(false);
@@ -91,8 +94,29 @@
 	/** 100 m on the minimap, as a share of its width (170 px drawn at 1.6 m per px). */
 	const MAP_SCALE = `${(100 / 1.6 / 170) * 100}%`;
 	let places = $state<SpawnPoint[]>([]);
-	let quality = $state<Quality>('high');
+	let quality = $state<Quality>('medium');
 	let timeMode = $state<TimeMode>('live');
+	let soundMaster = $state(60);
+	let soundAmbience = $state(35);
+	let soundEffects = $state(80);
+	let soundMusic = $state(25);
+	let soundMuted = $state(false);
+	let soundPlayback = $state('not_started');
+	let soundError = $state('');
+	async function testSound() {
+		soundMuted=false;
+		await city?.audio.testSound();
+		if(city) {
+			soundMaster=Math.round(city.audio.settings.master*100);
+			soundEffects=Math.round(city.audio.settings.effects*100);
+		}
+		soundPlayback=city?.audio.playbackState ?? 'not_started';
+		soundError=city?.audio.lastError ?? '';
+	}
+	function setSound() {
+		city?.audio.configure({ master:soundMaster/100, ambience:soundAmbience/100, music:soundMusic/100, effects:soundEffects/100, muted:soundMuted });
+		if (!soundMuted) void city?.audio.unlock();
+	}
 	const TIME_MODES: [TimeMode, string][] = [
 		['live', 'Live'],
 		['morning', 'Morning'],
@@ -102,6 +126,57 @@
 	];
 	let touch = $state(false);
 
+	let passport = $state<Passport>(emptyPassport());
+	let passportStorageWarning = $state('');
+	let passportSyncStatus = $state<SyncStatus>('syncing');
+	let passportSync: PassportSync | null = null;
+	const cafeOffer = $derived(practiceOffer(shopList, places));
+	const adventureTarget = $derived(deliveryTarget(passport));
+	// Menus pause simulation; the HUD can retain the final walking speed from before the pause.
+	const passportPosition = $derived(hud ? {...hud, speed: panel === 'passport' ? 0 : hud.speed} : null);
+	function cachePassport(next: Passport) {
+		if (next === passport) return;
+		passport = next;
+		try {
+			if (session.user) localStorage.setItem(passportKey(session.user.id), JSON.stringify(next));
+			passportStorageWarning = '';
+		} catch { passportStorageWarning = 'Browser backup is unavailable. Account sync will still be attempted.'; }
+	}
+	function savePassport(next: Passport) {
+		cachePassport(next);
+		void passportSync?.sync();
+	}
+	function stamp(place: SpawnPoint) {
+		const next = collectStamp(passport, place, passportPosition);
+		if (next === passport) return;
+		savePassport(next);
+		net?.say(explorer(next) ? 'Daun Penh Explorer badge earned! All three memories collected.' : `Passport stamped: ${place.name}`);
+	}
+	function startPracticeDelivery() {
+		if (!cafeOffer || passport.delivery) return;
+		savePassport({...passport, delivery: {...cafeOffer}});
+		void showRoute(cafeOffer.pickup, city?.mode ?? 'foot');
+	}
+	function deliverDrinks() {
+		const next = advanceDelivery(passport, passportPosition);
+		if (next === passport) return;
+		savePassport(next);
+		if (next.delivery) {
+			net?.say('Drinks collected! Bring them to the garden. Walk, cycle, or ride at your own pace.');
+			void showRoute(next.delivery.dropoff, city?.mode ?? 'foot');
+		} else {
+			clearRoute();
+			net?.say('Delivery complete. Your City Helper passport badge is ready!');
+		}
+	}
+	function cancelPracticeDelivery() {
+		if (!passport.delivery) return;
+		const target = deliveryTarget(passport);
+		savePassport({...passport, delivery: null});
+		if (navTarget && target && navTarget.x === target.x && navTarget.z === target.z) clearRoute();
+	}
+
+
 	// Menus pause your movement (not the world): other players keep moving and chatting.
 	$effect(() => {
 		const paused = (panel !== '' && panel !== 'people' && panel !== 'garage') || (compact && chatOpen);
@@ -109,6 +184,15 @@
 	});
 
 	onMount(() => {
+		try {
+			if (session.user) passport = restorePassport(JSON.parse(localStorage.getItem(passportKey(session.user.id)) || 'null'));
+		} catch { passportStorageWarning = 'Saved passport could not be read. New discoveries will be saved if browser storage is available.'; }
+		passportSync = new PassportSync(() => passport, cachePassport, (state) => passportSyncStatus = state);
+		const syncPassport = () => { if (!document.hidden) void passportSync?.sync(); };
+		syncPassport();
+		const passportTimer = setInterval(syncPassport, 30000);
+		window.addEventListener('online', syncPassport);
+		window.addEventListener('focus', syncPassport);
 		touch = matchMedia('(pointer: coarse)').matches;
 		const viewport = matchMedia('(max-width: 900px), (max-height: 540px)');
 		const updateViewport = () => { compact = viewport.matches; };
@@ -128,12 +212,21 @@
 				const { createCity } = await import('$lib/game/city/CityEngine');
 				const created = await createCity(host, boot, {
 					preferKhmer,
-					quality: touch ? 'low' : 'high',
-					onState: (s) => (hud = s),
+					quality: touch ? 'low' : 'medium',
+					onState: (s) => {
+						hud = s;
+						soundPlayback=city?.audio.playbackState ?? 'not_started';
+						soundError=city?.audio.lastError ?? '';
+					},
 					onProgress: (loaded, total) => (progress = { loaded, total })
 				});
 				if (disposed) return created.dispose();
 				city = created;
+				soundMaster = Math.round(created.audio.settings.master*100);
+				soundAmbience = Math.round(created.audio.settings.ambience*100);
+				soundEffects = Math.round(created.audio.settings.effects*100);
+				soundMusic = Math.round(created.audio.settings.music*100);
+				soundMuted = created.audio.settings.muted;
 				quality = created.quality; // 'low' on touch devices and without a GPU
 				ready = true;
 				const { WorldSession } = await import('$lib/game/net/WorldSession.svelte');
@@ -238,6 +331,7 @@
 			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
 			if (typing) return;
+			if (e.key.toLowerCase() === 'j') panel = panel === 'passport' ? '' : 'passport';
 			if (e.key.toLowerCase() === 'm') panel = panel === 'places' ? '' : 'places';
 			if (e.key.toLowerCase() === 'v') panel = panel === 'garage' ? '' : 'garage';
 			if (e.key.toLowerCase() === 'f' && !panel) rideOrPark();
@@ -257,6 +351,10 @@
 		};
 		window.addEventListener('keydown', onKey);
 		return () => {
+			passportSync?.dispose(); passportSync = null;
+			clearInterval(passportTimer);
+			window.removeEventListener('online', syncPassport);
+			window.removeEventListener('focus', syncPassport);
 			disposed = true;
 			clearInterval(timer);
 			window.removeEventListener('keydown', onKey);
@@ -423,6 +521,7 @@
 	}
 
 	async function travel(p: SpawnPoint) {
+		if (passport.delivery) { cancelPracticeDelivery(); net?.say('Fast travel cancelled the practice delivery. You can start another anytime.'); }
 		panel = '';
 		// Online, the server moves you (it is authoritative); offline, travel locally.
 		if (net?.travel(p.slug)) return;
@@ -586,14 +685,24 @@
 			</p>
 		</div>
 
+		{#if !panel && !hud.nav}
+			<button class="world-action adventure-card hud-glass absolute left-3 top-40 max-w-[min(19rem,calc(100vw-7rem))] rounded-xl px-3 py-2 text-left text-xs" onclick={() => panel = 'passport'} data-testid="adventure-card">
+				<span class="flex items-center gap-2 font-semibold text-saffron-300"><Compass size={15}/>{adventureTarget ? 'Your café delivery' : explorer(passport) ? 'Daun Penh Explorer' : 'Your first city adventure'}</span>
+				<span class="mt-1 block truncate">{adventureTarget ? `${passport.delivery?.stage === 'pickup' ? 'Collect drinks' : 'Leave drinks'} · ${Math.round(distance(hud,adventureTarget))} m` : `Discover places · ${passport.stamps.length}/3 stamps`}</span>
+			</button>
+		{/if}
+
 		<!-- Toolbar -->
 		<nav class="world-toolbar absolute top-3 right-3 flex flex-col gap-2" aria-label="World controls">
-			{#each [['people', Users, 'People (P)'], ['places', MapPin, 'Places & shops (M)'], ['garage', Bike, 'My vehicles (V)'], ['cart', ShoppingCart, 'Cart (C)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
+			{#each [['passport', Compass, 'Discovery passport (J)'], ['people', Users, 'People (P)'], ['places', MapPin, 'Places & shops (M)'], ['garage', Bike, 'My vehicles (V)'], ['cart', ShoppingCart, 'Cart (C)'], ['settings', Settings2, 'Settings'], ['help', CircleHelp, 'Controls (Esc)']] as const as [id, Icon, label] (id)}
 				<button class="relative grid h-11 w-11 place-items-center tool rounded-xl text-paper {id === 'settings' || id === 'help' ? 'secondary-control' : ''} {panel === id ? 'ring-2 ring-saffron-500' : ''}" aria-label={preferKhmer && id in labels ? labels[id as keyof typeof labels] : label} aria-expanded={panel === id} title={id in labels ? labels[id as keyof typeof labels] : label} onclick={() => (panel = panel === id ? '' : id)}>
 					<Icon size={19} />
 					{#if id === 'cart' && cart?.item_count}<span class="absolute -mt-7 ml-7 rounded-full bg-saffron-500 px-1.5 text-[10px] font-bold text-river-950" data-testid="cart-count">{cart.item_count}</span>{/if}
 				</button>
 			{/each}
+			<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="Enable sound" title="Enable / test sound" onclick={testSound}>
+				{#if soundMuted || soundPlayback !== 'running'}<VolumeX size={19} />{:else}<Volume2 size={19} />{/if}
+			</button>
 			<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="Wardrobe (O)" title="Wardrobe (O)" data-testid="open-wardrobe" onclick={() => openWardrobe()}><Shirt size={19} /></button>
 			{#if isSeller}<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="My shop (B)" title="My shop (B)" data-testid="open-my-shop" onclick={openMyShop}><Store size={19} /></button>{/if}
 			<button class="grid h-11 w-11 place-items-center tool rounded-xl text-paper" aria-label="More controls" aria-expanded={panel === 'menu'} title={labels.more} onclick={() => panel = panel === 'menu' ? '' : 'menu'}><Menu size={19} /></button>
@@ -699,14 +808,12 @@
 		{/if}
 
 		{#if net && (hud.mode !== 'foot' || net.reachable)}
-			<div class="world-action absolute bottom-[11.5rem] left-1/2 -translate-x-1/2" data-testid="ride-prompt" data-kind={hud.mode !== 'foot' ? (canPark ? 'park' : 'pull_over') : 'ride'}>
-				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur hover:bg-river-800 disabled:opacity-60" onclick={rideOrPark} disabled={net.pendingRide}>
-					<kbd class="mr-2 rounded bg-saffron-500 px-1.5 font-mono text-river-950">F</kbd>
-					{#if hud.mode !== 'foot'}
-						{#if canPark}<CircleParking size={14} class="mr-1 inline" />Park here{:else}Pull over to the kerb to park{/if}
-					{:else if net.reachable}
-						Ride your {MODES[net.reachable.k].label.toLowerCase()}{net.reachable.name ? ` (${net.reachable.name})` : ''}
-					{/if}
+			{@const vehicleKind = hud.mode !== 'foot' ? hud.mode : (net.reachable?.k ?? 'motorbike')}
+			{@const actionLabel = hud.mode !== 'foot' ? (canPark ? `Park ${MODES[vehicleKind].label.toLowerCase()}` : 'Pull over to the kerb to park') : `Ride ${MODES[vehicleKind].label.toLowerCase()}`}
+			<div class="world-action vehicle-action absolute bottom-[11.5rem] left-1/2 -translate-x-1/2" data-testid="ride-prompt" data-kind={hud.mode !== 'foot' ? (canPark ? 'park' : 'pull_over') : 'ride'}>
+				<button class="ride-icon" aria-label={actionLabel} title={`${actionLabel} (F)`} onclick={rideOrPark} disabled={net.pendingRide} data-testid="ride-action">
+					{#if hud.mode !== 'foot'}<CircleParking size={23} />{:else}<VehicleIcon kind={vehicleKind} size={25} />{/if}
+					<kbd class="ride-key" aria-hidden="true">F</kbd>
 				</button>
 			</div>
 		{/if}
@@ -814,6 +921,7 @@
 			{#if panel === 'menu'}
 				<h2 class="display mb-4 text-xl font-bold">Your city</h2>
 				<div class="grid gap-2">
+					<button class="btn-ghost justify-start" onclick={() => panel = 'passport'}><Compass size={18} />Discovery passport</button>
 					<button class="btn-ghost justify-start" onclick={() => panel = 'wallet'}><WalletCards size={18} />Demo wallet</button>
 					{#if isDriver}<button class="btn-ghost justify-start" onclick={() => panel = 'driver'}><Truck size={18} />Delivery jobs</button>{/if}
 					<a class="btn-ghost justify-start" href="/orders"><Package size={18} />My orders</a>
@@ -824,6 +932,9 @@
 					<button class="btn-ghost justify-start" onclick={() => panel = 'help'}><CircleHelp size={18} />Controls & map information</button>
 					<button class="btn-quiet justify-start text-brick-600" onclick={signOut}><LogOut size={18} />Sign out</button>
 				</div>
+			{:else if panel === 'passport'}
+				<PassportPanel progress={passport} {places} position={passportPosition} offer={cafeOffer} {routing} storageWarning={passportStorageWarning} syncStatus={passportSyncStatus} onSync={() => void passportSync?.sync()}
+					onStamp={stamp} onGuide={(point) => showRoute(point, city?.mode ?? 'foot')} onStart={startPracticeDelivery} onDelivery={deliverDrinks} onCancel={cancelPracticeDelivery} />
 			{:else if panel === 'wallet'}
 				<h2 class="display mb-4 text-xl font-bold">Demo wallet</h2><WalletPanel />
 			{:else if panel === 'driver'}
@@ -855,6 +966,7 @@
 				<div class="h-[min(34rem,calc(100dvh-8rem))]"><ShopPanel shop={browsing} {canBuy} onCart={setCart} /></div>
 			{:else if panel === 'places'}
 				<h2 class="display text-xl font-bold">Places</h2>
+				<button class="btn-primary mt-3 w-full" onclick={() => panel = 'passport'}><Compass size={16}/> Discovery passport · {passport.stamps.length}/3</button>
 				<p class="mt-1 text-xs text-ink-soft">Get directions on the real streets, or fast-travel between public spawn areas (a vehicle you ride stays parked behind).</p>
 				<p class="label mt-3 flex items-center gap-1.5"><RouteIcon size={13} /> Directions by</p>
 				<div class="grid grid-cols-3 gap-1 rounded-xl bg-paper-2 p-1 text-xs font-semibold" role="radiogroup" aria-label="Travel mode">
@@ -902,14 +1014,31 @@
 				</div>
 			{:else if panel === 'settings'}
 				<h2 class="display text-xl font-bold">Settings</h2>
+				<p class="label mt-4">Sound</p>
+				<button class="btn-ghost mt-2 w-full" onclick={testSound} data-testid="sound-test">Enable / test sound</button>
+				<p class="hint">Plays two notes and restores muted or zero-volume effects.</p>
+				<p class="hint" role="status" data-testid="sound-status">{soundMuted ? 'Sound is muted.' : soundMaster === 0 ? 'Master volume is zero.' : soundPlayback === 'running' ? 'Sound playback is enabled.' : soundPlayback === 'unavailable' ? 'Audio is unavailable in this browser.' : 'Click Enable / test sound to start playback.'}</p>
+				{#if soundError}<p class="alert-error text-sm">{soundError}</p>{/if}
+				{#if soundEffects === 0}<p class="hint">Effects volume is zero: footsteps and vehicle sounds are silent.</p>{/if}
+				<label class="mt-2 flex items-center gap-2 text-sm"><input type="checkbox" bind:checked={soundMuted} onchange={(event) => { soundMuted=event.currentTarget.checked; setSound(); }} /> Mute all sounds</label>
+				{#each [['Master volume', 'master'], ['Music volume', 'music'], ['Ambience volume', 'ambience'], ['Effects volume', 'effects']] as [label, key]}
+					<label class="mt-3 block text-sm">{label}
+						{#if key === 'master'}<input class="mt-1 w-full" type="range" min="0" max="100" bind:value={soundMaster} oninput={(event) => { soundMaster=Number(event.currentTarget.value); setSound(); }} />
+						{:else if key === 'music'}<input class="mt-1 w-full" type="range" min="0" max="100" bind:value={soundMusic} oninput={(event) => { soundMusic=Number(event.currentTarget.value); setSound(); }} />
+						{:else if key === 'ambience'}<input class="mt-1 w-full" type="range" min="0" max="100" bind:value={soundAmbience} oninput={(event) => { soundAmbience=Number(event.currentTarget.value); setSound(); }} />
+						{:else}<input class="mt-1 w-full" type="range" min="0" max="100" bind:value={soundEffects} oninput={(event) => { soundEffects=Number(event.currentTarget.value); setSound(); }} />{/if}
+					</label>
+				{/each}
+				<p class="hint" data-testid="music-track">Music: Riverside Breeze · Original instrumental</p>
+				<p class="hint">Sound starts after a click or key press. Your volume settings are saved on this device.</p>
 				<p class="label mt-4">Graphics</p>
 				<p class="hint">{hud?.fps ?? 0} fps · {hud?.chunks ?? 0} loaded chunks · {net?.rtt ?? '—'} ms latency</p>
-				<div class="grid grid-cols-2 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
-					{#each [['high', 'Quality'], ['low', 'Performance']] as const as [q, text] (q)}
+				<div class="grid grid-cols-3 gap-1 rounded-xl bg-paper-2 p-1 text-sm font-semibold">
+					{#each [['low', 'Performance'], ['medium', 'Balanced'], ['high', 'Quality']] as const as [q, text] (q)}
 						<button class="rounded-lg py-2 {quality === q ? 'bg-white shadow' : 'text-ink-soft'}" onclick={() => setQuality(q)}>{text}</button>
 					{/each}
 				</div>
-				<p class="hint">Performance mode turns off shadows and streams fewer chunks. It switches on automatically if the frame rate stays low.</p>
+				<p class="hint">Performance (Low) disables sun shadows. Balanced (Medium) uses a smaller cached shadow map. Quality (High) extends detail and sky reflections. Sustained low FPS lowers the preset automatically.</p>
 				<p class="label mt-4">Time of day</p>
 				<div class="grid grid-cols-5 gap-1 rounded-xl bg-paper-2 p-1 text-xs font-semibold" role="radiogroup" aria-label="Time of day">
 					{#each TIME_MODES as [mode, text] (mode)}
@@ -965,6 +1094,16 @@
 	}
 	.world-location { top: var(--hud-top); left: var(--hud-left); }
 	.world-toolbar { top: var(--hud-top); right: var(--hud-right); }
+	.world-toolbar .tool { width: 38px; height: 38px; border-radius: 11px; }
+	.world-toolbar :global(svg) { width: 17px; height: 17px; }
+	.ride-icon { position: relative; display: grid; place-items: center; width: 52px; height: 52px; padding: 0; border-radius: 50%; color: #fffaf0; background: rgb(11 37 36 / .82); border: 1px solid rgb(255 255 255 / .25); box-shadow: 0 6px 20px rgb(0 0 0 / .22); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); cursor: pointer; }
+	.ride-icon:hover { background: rgb(24 80 77 / .95); border-color: var(--color-saffron-500); }
+	.ride-icon:focus-visible { outline: 2px solid var(--color-saffron-500); outline-offset: 3px; }
+	.ride-icon:disabled { opacity: .5; cursor: wait; }
+	.ride-key { position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 5px; font-size: 10px; font-weight: 700; color: #0b2524; background: var(--color-saffron-500); }
+	.compact .vehicle-action .ride-icon { width: 48px; height: 48px; min-height: 48px; }
+	.compact .world-action.vehicle-action { width: 48px; max-width: none; }
+	.compact .ride-key { display: none; }
 	.world-panel { z-index: 40; max-height: calc(100dvh - var(--hud-top) - var(--hud-bottom)); overflow-y: auto; overscroll-behavior: contain; }
 	/* Clicking the city closes a panel; it stays undimmed behind the glass. */
 	.world-backdrop { position: absolute; inset: 0; z-index: 30; background: transparent; }
@@ -995,7 +1134,9 @@
 	.compact .world-location { max-width: min(16rem, calc(100vw - 19rem - env(safe-area-inset-left) - env(safe-area-inset-right))); padding: 6px 10px; border-radius: 12px; }
 	.compact .hud-street { font-size: 14px; }
 	.compact .location-detail { display: none; }
-	.compact .world-toolbar { flex-direction: row; gap: 6px; }
+	.compact .world-toolbar { flex-direction: row; gap: 4px; }
+	.compact .world-toolbar .tool { width: 36px; height: 36px; border-radius: 10px; }
+	.compact .world-toolbar :global(svg) { width: 16px; height: 16px; }
 	.compact .secondary-control { display: none; }
 	.compact .world-minimap { left: var(--hud-left); bottom: var(--hud-bottom); }
 	.compact { --disc: 96px; --disc-big: min(230px, 50vw); }
@@ -1068,6 +1209,9 @@
 	@media (max-height: 400px) and (min-width: 601px) {
 		.compact { --disc: 84px; --disc-big: 180px; }
 	}
+	.compact .adventure-card { bottom: auto; top: calc(var(--hud-top) + 128px); max-width: min(19rem, calc(100vw - 7rem)); text-align: left; }
+	@media (max-width: 620px) { .compact .adventure-card { top: calc(var(--hud-top) + 160px); } }
+	@media (max-height: 440px) { .compact .adventure-card { display: none; } }
 	.pad {
 		display: grid;
 		place-items: center;

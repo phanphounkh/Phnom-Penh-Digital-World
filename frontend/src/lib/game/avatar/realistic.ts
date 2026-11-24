@@ -24,6 +24,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import type { Avatar } from '$lib/api/types';
+import { addAvatarLighting } from '../city/AvatarLighting';
 
 /** What the realistic character wears, slot by slot (see avatar-generator/scripts/outfits.py). */
 export interface Outfit {
@@ -170,6 +171,7 @@ export function loadRealistic(kind: RealisticKind) {
 				const mesh = o as THREE.Mesh;
 				if (!mesh.isMesh) return;
 				for (const m of [mesh.material].flat() as THREE.MeshStandardMaterial[]) {
+					if (m.isMeshStandardMaterial) addAvatarLighting(m);
 					// Hair, brows and decals are alpha-tested: smooth their edges under MSAA.
 					if (m.alphaTest > 0) m.alphaToCoverage = true;
 				}
@@ -231,6 +233,7 @@ export async function createRealisticAvatar(avatar: Avatar): Promise<RealisticIn
 		let copy = copies.get(m) as THREE.MeshStandardMaterial | undefined;
 		if (!copy) {
 			copy = m.clone();
+			addAvatarLighting(copy); // Material.clone does not preserve shader callbacks.
 			copies.set(m, copy);
 			owned.push(copy);
 			if (m.name === 'Skin') skin = copy;

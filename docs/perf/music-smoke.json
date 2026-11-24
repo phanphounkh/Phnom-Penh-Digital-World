@@ -1,0 +1,382 @@
+{
+  "passed": true,
+  "webAudioDisabled": true,
+  "playing": {
+    "state": "running",
+    "error": "",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": true,
+      "error": "",
+      "footsteps": 0,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 0,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 28,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": true,
+      "testTime": 0.227597,
+      "steps": [
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        }
+      ],
+      "loops": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 0.311561,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 0.314351,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 0.318024,
+          "volume": 0,
+          "rate": 1
+        }
+      ]
+    },
+    "music": {
+      "title": "Riverside Breeze",
+      "playing": true,
+      "time": 0.217806,
+      "duration": 51.2,
+      "volume": 0.15,
+      "ready": 4,
+      "error": ""
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "music": 0.25,
+      "muted": false
+    }
+  },
+  "looped": {
+    "state": "running",
+    "error": "",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": true,
+      "error": "",
+      "footsteps": 0,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 0,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 28,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": true,
+      "testTime": 0.83182,
+      "steps": [
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        }
+      ],
+      "loops": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 0.893884,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 0.896769,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 0.900402,
+          "volume": 0,
+          "rate": 1
+        }
+      ]
+    },
+    "music": {
+      "title": "Riverside Breeze",
+      "playing": true,
+      "time": 0.008076,
+      "duration": 51.2,
+      "volume": 0.24,
+      "ready": 4,
+      "error": ""
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "music": 0.4,
+      "muted": false
+    }
+  },
+  "walking": {
+    "state": "running",
+    "error": "",
+    "footsteps": 1,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 1,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 48.453523518797084,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": true,
+      "error": "",
+      "footsteps": 1,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 1,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 48.453523518797084,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": false,
+      "testTime": 0.95,
+      "steps": [
+        {
+          "playing": true,
+          "time": 0.017114,
+          "volume": 0.408,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        },
+        {
+          "playing": false,
+          "time": 0,
+          "volume": 0,
+          "ready": 4
+        }
+      ],
+      "loops": [
+        {
+          "kind": "motorbike",
+          "playing": true,
+          "time": 1.928633,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-pedal",
+          "playing": true,
+          "time": 1.931445,
+          "volume": 0,
+          "rate": 1
+        },
+        {
+          "kind": "bicycle-coast",
+          "playing": true,
+          "time": 1.935079,
+          "volume": 0,
+          "rate": 1
+        }
+      ]
+    },
+    "music": {
+      "title": "Riverside Breeze",
+      "playing": true,
+      "time": 0.987452,
+      "duration": 51.2,
+      "volume": 0.24,
+      "ready": 4,
+      "error": ""
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "music": 0.4,
+      "muted": false
+    }
+  },
+  "persisted": {
+    "state": "not_started",
+    "error": "",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "landings": 0,
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "media": {
+      "enabled": false,
+      "error": "",
+      "footsteps": 0,
+      "gaitSteps": {
+        "walk": 0,
+        "run": 0,
+        "sprint": 0
+      },
+      "landings": 0,
+      "bikeTicks": 0,
+      "vehicle": {
+        "engine": 0,
+        "rpm": 28,
+        "tyres": 0,
+        "bikeTick": 0,
+        "coasting": false
+      },
+      "testPlaying": false,
+      "testTime": 0,
+      "steps": [],
+      "loops": []
+    },
+    "music": {
+      "title": "Riverside Breeze",
+      "playing": false,
+      "time": 0,
+      "duration": 0,
+      "volume": 0,
+      "ready": 0,
+      "error": ""
+    },
+    "rms": 0,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "music": 0.4,
+      "muted": false
+    }
+  },
+  "errors": []
+}

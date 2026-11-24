@@ -1,0 +1,60 @@
+{
+  "label": "street-before",
+  "gpu": true,
+  "uncapped": false,
+  "base": "http://localhost:3000",
+  "viewport": "1280x720",
+  "results": [
+    {
+      "slug": "central-market",
+      "quality": "low",
+      "time_mode": "noon",
+      "spawn": {
+        "id": "cca9ebdf-fb0a-44ef-a1b4-59b5c8c47763",
+        "slug": "central-market",
+        "name": "Phsar Thmei (Central Market)",
+        "name_km": "\u1795\u17d2\u179f\u17b6\u179a\u1792\u17c6\u1790\u17d2\u1798\u17b8",
+        "description": "The 1937 Art Deco market hall at the heart of Daun Penh.",
+        "lat": 11.568899003677567,
+        "lon": 104.92116401205331,
+        "x": 1.51,
+        "z": 71.98,
+        "heading_deg": 358.8,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 1.51,
+        "z": 71.98,
+        "yaw": -3.1206487025658616,
+        "resumed": false
+      },
+      "load_ms": 1557,
+      "idle": {
+        "fps": 59,
+        "mean_ms": 16.96,
+        "p95_ms": 16.8,
+        "p5_fps": 59.5,
+        "worst_ms": 50
+      },
+      "moving": {
+        "fps": 59.6,
+        "mean_ms": 16.78,
+        "p95_ms": 16.8,
+        "p5_fps": 59.5,
+        "worst_ms": 33.4
+      },
+      "metrics": {
+        "effective_quality": "low",
+        "draw_calls": 406,
+        "triangles": 106282,
+        "loaded_chunks": 18,
+        "geometries": 289,
+        "textures": 58,
+        "js_heap_bytes": 50243561
+      },
+      "hud": "60 fps \u00b7 18 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ],
+  "render_errors": []
+}

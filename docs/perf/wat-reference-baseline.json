@@ -1,0 +1,225 @@
+{
+  "stage": "baseline",
+  "viewport": [
+    1280,
+    720
+  ],
+  "date": "2026-11-24 07:30 UTC+7",
+  "setup": {
+    "position": {
+      "x": 207,
+      "z": -628,
+      "yaw": 3.141592653589793
+    },
+    "hill": {
+      "x": 225.89,
+      "z": -727.52,
+      "height": 27
+    },
+    "eye": [
+      212,
+      2.7,
+      -612
+    ],
+    "target": [
+      225.89,
+      10,
+      -727.52
+    ],
+    "fov": 58
+  },
+  "cases": [
+    {
+      "mode": "low",
+      "fps": 51.13939232409384,
+      "p95Ms": 33.400000000001455,
+      "heap": 31264072,
+      "effective": "low",
+      "position": {
+        "x": 207,
+        "z": -628,
+        "yaw": 3.141592653589793,
+        "speed": 0
+      },
+      "calls": 259,
+      "triangles": 277535,
+      "chunks": 21,
+      "textures": 75,
+      "geometries": 283,
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:female",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 3.141592653589793,
+        "lean": {
+          "roll": -7.19543993505084e-31,
+          "pitch": -5.826270109793507e-22
+        },
+        "feet": [
+          [
+            206.84247392612394,
+            0.06329391042865606,
+            -628.0243726618537
+          ],
+          [
+            207.1669172725734,
+            0.06799810289094721,
+            -628.0243762149327
+          ],
+          [
+            206.84465622625632,
+            0.02106210269439418,
+            -628.1447229826816
+          ],
+          [
+            207.1659727224568,
+            0.025714060036754645,
+            -628.144729284512
+          ]
+        ],
+        "ground": 8.85509661580462e-133
+      },
+      "facadeTriangles": 0,
+      "facadeBatches": 0,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "mode": "medium",
+      "fps": 60.07955131713743,
+      "p95Ms": 16.799999999995634,
+      "heap": 29761464,
+      "effective": "medium",
+      "position": {
+        "x": 207,
+        "z": -628,
+        "yaw": 3.141592653589793,
+        "speed": 0
+      },
+      "calls": 259,
+      "triangles": 277535,
+      "chunks": 21,
+      "textures": 76,
+      "geometries": 283,
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:female",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 3.141592653589793,
+        "lean": {
+          "roll": -3.566608627119004e-60,
+          "pitch": -6.335781639427038e-44
+        },
+        "feet": [
+          [
+            206.84562001807845,
+            0.060094106306448236,
+            -628.0243691306433
+          ],
+          [
+            207.17001043050672,
+            0.06760876662602566,
+            -628.0243728623029
+          ],
+          [
+            206.84816803520263,
+            0.01788227997865567,
+            -628.144719270011
+          ],
+          [
+            207.16943216729445,
+            0.02531761930329164,
+            -628.1447257486716
+          ]
+        ],
+        "ground": 2.1756524048181948e-191
+      },
+      "facadeTriangles": 0,
+      "facadeBatches": 0,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "mode": "high",
+      "fps": 41.866028708175435,
+      "p95Ms": 50,
+      "heap": 36660360,
+      "effective": "high",
+      "position": {
+        "x": 207,
+        "z": -628,
+        "yaw": 3.141592653589793,
+        "speed": 0
+      },
+      "calls": 259,
+      "triangles": 277535,
+      "chunks": 26,
+      "textures": 76,
+      "geometries": 283,
+      "avatar": {
+        "style": "realistic",
+        "model": "realistic:female",
+        "bones": 52,
+        "riding": false,
+        "gait": "idle",
+        "emote": null,
+        "speed": 0,
+        "lift": 0,
+        "yaw": 3.141592653589793,
+        "lean": {
+          "roll": -7.899251195675121e-90,
+          "pitch": -3.4914094345909595e-66
+        },
+        "feet": [
+          [
+            206.84557640877895,
+            0.060145450124942434,
+            -628.0243683897322
+          ],
+          [
+            207.16996756767313,
+            0.06762785316963538,
+            -628.0243699286583
+          ],
+          [
+            206.8481210475757,
+            0.017933122469625168,
+            -628.1447184252122
+          ],
+          [
+            207.1693859182723,
+            0.025336515389942707,
+            -628.1447227322573
+          ]
+        ],
+        "ground": 1.06721138290102e-250
+      },
+      "facadeTriangles": 0,
+      "facadeBatches": 0,
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ],
+  "movement": {
+    "start": {
+      "x": 207,
+      "z": -628,
+      "yaw": 3.141592653589793,
+      "speed": 0
+    },
+    "end": {
+      "x": 205.68142236067268,
+      "z": -624.1329796296278,
+      "yaw": 5.97691008658287,
+      "speed": 2.5999952364801495
+    }
+  },
+  "errors": []
+}

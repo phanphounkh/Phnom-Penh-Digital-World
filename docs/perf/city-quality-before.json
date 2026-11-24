@@ -1,0 +1,109 @@
+{
+  "label": "city-quality-before",
+  "gpu": true,
+  "uncapped": false,
+  "base": "http://127.0.0.1:3000",
+  "viewport": "1280x720",
+  "results": [
+    {
+      "slug": "riverside",
+      "quality": "high",
+      "time_mode": "night",
+      "spawn": {
+        "id": "f91c82df-3b2b-41a7-8de1-267a7388463e",
+        "slug": "riverside",
+        "name": "Sisowath Quay Riverside",
+        "name_km": "មាត់ទន្លេស៊ីសុវត្ថិ",
+        "description": "The riverside promenade along the Tonle Sap.",
+        "lat": 11.570000000000002,
+        "lon": 104.9305,
+        "x": 1019.43,
+        "z": -49.49,
+        "heading_deg": 90,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 1019.43,
+        "z": -49.49,
+        "yaw": 1.5707963267948966,
+        "resumed": false
+      },
+      "load_ms": 2983,
+      "idle": {
+        "fps": 60.1,
+        "mean_ms": 16.63,
+        "p95_ms": 16.8,
+        "p5_fps": 59.5,
+        "worst_ms": 16.8
+      },
+      "moving": {
+        "fps": 60.1,
+        "mean_ms": 16.64,
+        "p95_ms": 16.7,
+        "p5_fps": 59.9,
+        "worst_ms": 16.8
+      },
+      "metrics": {
+        "effective_quality": "high",
+        "draw_calls": 38,
+        "triangles": 131158,
+        "loaded_chunks": 23,
+        "geometries": 80,
+        "textures": 31,
+        "js_heap_bytes": 43102866
+      },
+      "hud": "60 fps · 23 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    },
+    {
+      "slug": "riverside",
+      "quality": "low",
+      "time_mode": "night",
+      "spawn": {
+        "id": "f91c82df-3b2b-41a7-8de1-267a7388463e",
+        "slug": "riverside",
+        "name": "Sisowath Quay Riverside",
+        "name_km": "មាត់ទន្លេស៊ីសុវត្ថិ",
+        "description": "The riverside promenade along the Tonle Sap.",
+        "lat": 11.570000000000002,
+        "lon": 104.9305,
+        "x": 1019.43,
+        "z": -49.49,
+        "heading_deg": 90,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 1019.43,
+        "z": -49.49,
+        "yaw": 1.5707963267948966,
+        "resumed": false
+      },
+      "load_ms": 1324,
+      "idle": {
+        "fps": 60.1,
+        "mean_ms": 16.65,
+        "p95_ms": 16.7,
+        "p5_fps": 59.9,
+        "worst_ms": 16.8
+      },
+      "moving": {
+        "fps": 60.1,
+        "mean_ms": 16.65,
+        "p95_ms": 16.7,
+        "p5_fps": 59.9,
+        "worst_ms": 16.8
+      },
+      "metrics": {
+        "effective_quality": "low",
+        "draw_calls": 38,
+        "triangles": 131158,
+        "loaded_chunks": 19,
+        "geometries": 71,
+        "textures": 31,
+        "js_heap_bytes": 36514509
+      },
+      "hud": "60 fps · 19 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ]
+}

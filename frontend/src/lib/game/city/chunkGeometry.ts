@@ -10,6 +10,7 @@
  * and lamp positions are procedural decoration.
  */
 import * as THREE from 'three';
+import { FacadeRelief } from './facadeRelief';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { ChunkBuilding, ChunkPayload, ChunkRoad, PolygonRings, XZ } from '$lib/api/types';
 import { pointInRing } from './collision';
@@ -17,7 +18,7 @@ import { FLAT, type Terrain } from './terrain';
 
 export type MeshKind =
 	| 'walls' | 'roofs' | 'khmerRoof' | 'sidewalk' | 'asphalt' | 'asphaltMinor' | 'paving'
-	| 'marking' | 'area';
+	| 'marking' | 'area' | 'facadeRelief';
 export type PropKind = 'tree-rain' | 'tree-palm' | 'tree-slender' | 'bush' | 'lamp' | 'traffic-signal' | 'sign-post';
 
 export interface MeshData {
@@ -357,6 +358,7 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 	const roofs: THREE.BufferGeometry[] = [];
 	const khmer: THREE.BufferGeometry[] = [];
 	const color = new THREE.Color();
+	const relief = new FacadeRelief();
 	const roofGrey = new THREE.Color('#8f8a82');
 	for (const [i, b] of chunk.buildings.entries()) {
 		const seed = b.id ?? i + chunk.ix * 1000 + chunk.iz;
@@ -373,6 +375,7 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 		const facadeSeed = hash(seed * 7 + 3);
 		const top = Math.max(lo + b.h, hi + 2.5);
 		const depth = Math.max(0.6, top - lo - b.min_h);
+		let buildingFrames = 0;
 		for (const rings of b.polys) {
 			const shape = shapeFrom(rings);
 			if (!shape) continue;
@@ -390,6 +393,10 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 				color.set(base);
 				fill(wall, 'color', [color.r, color.g, color.b]);
 				fill(wall, 'facade', [b.min_h > 0 ? 0 : shop, facadeSeed]);
+				if (!b.roof && b.kind !== 'temple' && b.kind !== 'pagoda' && b.h <= 32) {
+					const trim = color.clone().lerp(new THREE.Color('#e1dbcf'), .35);
+					buildingFrames += relief.add(wall, facadeSeed, trim, 8-buildingFrames);
+				}
 				color.set(base).multiplyScalar(0.78).lerp(roofGrey, 0.35);
 				fill(roof, 'color', [color.r, color.g, color.b]);
 				walls.push(wall);
@@ -399,7 +406,7 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 		}
 		if (b.roof?.type === 'khmer') khmer.push(khmerRoof(b.roof.obb, lo + b.h));
 	}
-	return [merged('walls', walls), merged('roofs', roofs), merged('khmerRoof', khmer)].filter((m): m is MeshData => m !== null);
+	return [merged('walls', walls), merged('roofs', roofs), merged('khmerRoof', khmer), relief.mesh()].filter((m): m is MeshData => m !== null);
 }
 
 function colourOf(b: ChunkBuilding, seed: number): string {

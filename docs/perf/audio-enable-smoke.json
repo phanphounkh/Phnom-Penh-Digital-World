@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "test": {
+    "state": "running",
+    "error": "",
+    "footsteps": 0,
+    "gaitSteps": {
+      "walk": 0,
+      "run": 0,
+      "sprint": 0
+    },
+    "bikeTicks": 0,
+    "vehicle": {
+      "engine": 0,
+      "rpm": 28,
+      "tyres": 0,
+      "bikeTick": 0,
+      "coasting": false
+    },
+    "landings": 0,
+    "rms": 0.0056798908259621805,
+    "settings": {
+      "master": 0.6,
+      "ambience": 0,
+      "effects": 0.8,
+      "muted": false
+    }
+  },
+  "checks": [
+    "saved mute and zero volume reproduced",
+    "explicit speaker gesture",
+    "test tone signal",
+    "audible volume defaults restored",
+    "visible playback status"
+  ]
+}

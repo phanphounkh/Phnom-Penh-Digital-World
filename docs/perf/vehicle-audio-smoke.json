@@ -1,0 +1,161 @@
+{
+  "passed": true,
+  "results": [
+    {
+      "kind": "bicycle",
+      "idle": {
+        "state": "running",
+        "footsteps": 2,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 2,
+          "sprint": 0
+        },
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0,
+          "rpm": 28,
+          "tyres": 0,
+          "bikeTick": 0,
+          "coasting": true
+        },
+        "landings": 0,
+        "rms": 0.0009775531447355568,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      },
+      "moving": {
+        "state": "running",
+        "footsteps": 2,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 2,
+          "sprint": 0
+        },
+        "bikeTicks": 5,
+        "vehicle": {
+          "engine": 0,
+          "rpm": 63.200372059428815,
+          "tyres": 0.0261776187277597,
+          "bikeTick": 0.25,
+          "coasting": false
+        },
+        "landings": 0,
+        "rms": 0.0022266541925970557,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      },
+      "coast": {
+        "state": "running",
+        "footsteps": 2,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 2,
+          "sprint": 0
+        },
+        "bikeTicks": 6,
+        "vehicle": {
+          "engine": 0,
+          "rpm": 46.042593844656594,
+          "tyres": 0.024808566536403658,
+          "bikeTick": 0.2505073864320186,
+          "coasting": true
+        },
+        "landings": 0,
+        "rms": 0.0024671027049144377,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      }
+    },
+    {
+      "kind": "motorbike",
+      "idle": {
+        "state": "running",
+        "footsteps": 1,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 1,
+          "sprint": 0
+        },
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0.055,
+          "rpm": 28,
+          "tyres": 0,
+          "bikeTick": 0,
+          "coasting": false
+        },
+        "landings": 0,
+        "rms": 0.012094365934150685,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      },
+      "moving": {
+        "state": "running",
+        "footsteps": 1,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 1,
+          "sprint": 0
+        },
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0.09852270558583151,
+          "rpm": 75.36360744777534,
+          "tyres": 0.043124960240691436,
+          "bikeTick": 0,
+          "coasting": false
+        },
+        "landings": 0,
+        "rms": 0.031158413306097064,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      },
+      "coast": {
+        "state": "running",
+        "footsteps": 1,
+        "gaitSteps": {
+          "walk": 0,
+          "run": 1,
+          "sprint": 0
+        },
+        "bikeTicks": 0,
+        "vehicle": {
+          "engine": 0.07768940383371446,
+          "rpm": 58.25253844495261,
+          "tyres": 0.04159724036180984,
+          "bikeTick": 0,
+          "coasting": false
+        },
+        "landings": 0,
+        "rms": 0.02914149305223948,
+        "settings": {
+          "master": 0.6,
+          "ambience": 0.35,
+          "effects": 0.8,
+          "muted": false
+        }
+      }
+    }
+  ]
+}

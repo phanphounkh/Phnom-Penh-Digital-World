@@ -100,7 +100,11 @@ export function flattenProp(root: THREE.Object3D, materials: PropMaterials): Pro
 				if (!g.getAttribute('color')) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count * 3).fill(1), 3));
 			material.vertexColors = true;
 		}
-		if (FOLIAGE.has(material.name)) addFoliageVariation(material);
+		if (FOLIAGE.has(material.name)) {
+			material.side = THREE.DoubleSide;
+			if (material.alphaTest > 0) material.alphaToCoverage = true;
+			addFoliageVariation(material);
+		}
 		const geometry = mergeGeometries(list, false);
 		list.forEach((g) => g.dispose());
 		if (geometry) parts.push({ geometry, material });
@@ -157,6 +161,7 @@ export class PropLibrary {
 			const mesh = new THREE.InstancedMesh(geometry, material, matrices.length);
 			matrices.forEach((m, i) => mesh.setMatrixAt(i, m));
 			mesh.instanceMatrix.needsUpdate = true;
+			mesh.userData.shadowCaster = true;
 			mesh.castShadow = shadows;
 			mesh.receiveShadow = true;
 			mesh.computeBoundingSphere();

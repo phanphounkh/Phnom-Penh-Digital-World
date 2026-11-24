@@ -1,0 +1,45 @@
+{
+  "passed": true,
+  "layouts": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "cardVisible": true,
+      "panel": {
+        "x": 860,
+        "y": 12,
+        "width": 352,
+        "height": 684
+      }
+    },
+    {
+      "viewport": {
+        "width": 844,
+        "height": 390
+      },
+      "cardVisible": false,
+      "panel": {
+        "x": 400,
+        "y": 12,
+        "width": 432,
+        "height": 354
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "cardVisible": true,
+      "panel": {
+        "x": 12,
+        "y": 12,
+        "width": 366,
+        "height": 808
+      }
+    }
+  ],
+  "errors": []
+}

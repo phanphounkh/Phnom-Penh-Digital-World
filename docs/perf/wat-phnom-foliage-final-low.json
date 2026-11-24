@@ -1,0 +1,60 @@
+{
+  "label": "wat-phnom-final-low",
+  "gpu": true,
+  "uncapped": false,
+  "base": "http://127.0.0.1:3000",
+  "viewport": "1920x1080",
+  "results": [
+    {
+      "slug": "wat-phnom",
+      "quality": "low",
+      "time_mode": "morning",
+      "spawn": {
+        "id": "75c9808c-af94-466d-b672-f6e5bb633f41",
+        "slug": "wat-phnom",
+        "name": "Wat Phnom",
+        "name_km": "វត្តភ្នំ",
+        "description": "The hilltop pagoda that gives Phnom Penh its name.",
+        "lat": 11.576333754125736,
+        "lon": 104.92324866843671,
+        "x": 229.02,
+        "z": -750.05,
+        "heading_deg": 194.7,
+        "region": "daun-penh-central"
+      },
+      "start": {
+        "x": 229.02,
+        "z": -750.05,
+        "yaw": -0.25656340004316647,
+        "resumed": false
+      },
+      "load_ms": 2529,
+      "idle": {
+        "fps": 55.4,
+        "mean_ms": 18.05,
+        "p95_ms": 33.3,
+        "p5_fps": 30,
+        "worst_ms": 33.4
+      },
+      "moving": {
+        "fps": 53.4,
+        "mean_ms": 18.71,
+        "p95_ms": 33.4,
+        "p5_fps": 29.9,
+        "worst_ms": 50.1
+      },
+      "metrics": {
+        "effective_quality": "low",
+        "draw_calls": 170,
+        "triangles": 278682,
+        "loaded_chunks": 19,
+        "geometries": 180,
+        "textures": 67,
+        "js_heap_bytes": 46640388
+      },
+      "hud": "50 fps · 19 chunks",
+      "renderer": "ANGLE (Intel, Vulkan 1.4.305 (Intel(R) Graphics (ADL-N) (0x000046D3)), Intel open-source Mesa driver)"
+    }
+  ],
+  "render_errors": []
+}

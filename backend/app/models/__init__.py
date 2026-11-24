@@ -48,6 +48,7 @@ from app.models.market import (
     Shop,
     VirtualProperty,
 )
+from app.models.passport import PlayerPassport
 from app.models.social import (
     REPORT_REASONS,
     ChatMessage,
@@ -90,6 +91,7 @@ __all__ = [
     "PasswordReset",
     "PaymentIntent",
     "Place",
+    "PlayerPassport",
     "PlayerReport",
     "PlayerSession",
     "PlayerSpawnPoint",

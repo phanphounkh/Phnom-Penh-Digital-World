@@ -3,11 +3,12 @@
  * (fetch + triangulate off the main thread); the main thread only assembles meshes, registers
  * colliders and answers spatial questions (nearest street, nearby landmark) from loaded data.
  */
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import { world as worldApi } from '$lib/api/endpoints';
 import type { ChunkLandmark, ChunkPayload, ChunkRoad } from '$lib/api/types';
 import type { WorldProjection } from '$lib/geo/projection';
 import { assembleChunk, disposeGroup } from './assemble';
+import { setChunkShadows } from './shadows';
 import { buildChunkData, type ChunkBuild } from './chunkGeometry';
 import type { CollisionWorld } from './collision';
 import type { CityMaterials } from './materials';
@@ -17,6 +18,7 @@ import type { Mound, Terrain } from './terrain';
 interface Loaded {
 	payload: ChunkPayload;
 	group: THREE.Group;
+	lamps: Float32Array;
 }
 
 type Built = { payload: ChunkPayload; build: ChunkBuild };
@@ -44,6 +46,8 @@ export class ChunkManager {
 	assembleMs = 0;
 	/** Distance (m) within which a chunk shows its props, pools and sign blades. */
 	detailRadius = 240;
+	/** Separate budget for projected upper-storey trim. Zero disables it in Low. */
+	facadeRadius = 100;
 	/** Set whenever chunks are added/removed or detail visibility changes (shadow cache). */
 	changed = false;
 	/** Bumped whenever the set of loaded chunks changes (road network, vehicles). */
@@ -84,6 +88,13 @@ export class ChunkManager {
 			console.warn('Chunk workers unavailable; building on the main thread', error);
 			this.workers = [];
 		}
+	}
+
+	setShadows(enabled: boolean): void {
+		if (this.shadows === enabled) return;
+		this.shadows = enabled;
+		for (const { group } of this.loaded.values()) setChunkShadows(group, enabled);
+		this.changed = true;
 	}
 
 	get loadedCount() {
@@ -132,6 +143,11 @@ export class ChunkManager {
 			const detail = group.userData.detail as THREE.Group | undefined;
 			if (!detail) continue;
 			const d = Math.hypot((payload.ix + 0.5) * size - x, (payload.iz + 0.5) * size - z);
+			const facade = group.userData.facadeDetail as THREE.Group | undefined;
+			if (facade) {
+				const visible = this.facadeRadius > 0 && d < this.facadeRadius + size * .71;
+				if (facade.visible !== visible) { facade.visible = visible; this.changed = true; }
+			}
 			const show = d < this.detailRadius + size * 0.71;
 			if (detail.visible !== show) {
 				detail.visible = show;
@@ -187,7 +203,7 @@ export class ChunkManager {
 			if (a.kind === 'water') for (const rings of a.polys) this.collision.addRing(key, rings[0], 0);
 		for (let i = 0; i < build.posts.length; i += 3)
 			this.collision.addCircle(key, build.posts[i], build.posts[i + 1], build.posts[i + 2]);
-		this.loaded.set(key, { payload, group });
+		this.loaded.set(key, { payload, group, lamps: build.pools });
 		this.assembleMs += performance.now() - started;
 		this.changed = true;
 		this.version++;
@@ -234,6 +250,14 @@ export class ChunkManager {
 
 	payloads(): ChunkPayload[] {
 		return [...this.loaded.values()].map((c) => c.payload);
+	}
+
+	lampPositions(): THREE.Vector3[] {
+		const positions: THREE.Vector3[] = [];
+		for (const { lamps } of this.loaded.values())
+			for (let i = 0; i < lamps.length; i += 3)
+				positions.push(new THREE.Vector3(lamps[i], lamps[i + 1] + 8.09, lamps[i + 2]));
+		return positions;
 	}
 
 	dispose(): void {

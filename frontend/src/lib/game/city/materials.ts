@@ -11,7 +11,9 @@
  *    shopfront glows warm. Lighting is decorative and says nothing about real occupancy.
  */
 import * as THREE from 'three';
+import { groundTextureData } from './groundTexture';
 import { addSurfaceDetail, type SurfaceKind } from './surfaces';
+import { finishFacadeAtlas, facadeHeightAtlas, streetGrainCanvas } from './facadeDetail';
 
 /** Doorways cut into the facades at once (walk-in shops and enterable buildings, the nearest
  * ones) and the shops' opening height (m). */
@@ -130,7 +132,7 @@ function facadeCanvas(mask: boolean): HTMLCanvasElement {
 	paint('#2b2b2d', '#000000');
 	rect(x0 + 54, 44, 20, BAY - 44); // door
 	rect(x0 + 6, 44, 4, BAY - 44); rect(x0 + BAY - 10, 44, 4, BAY - 44); rect(x0 + 31, 48, 2, 70); rect(x0 + 95, 48, 2, 70);
-	return c;
+	return finishFacadeAtlas(c, mask);
 }
 
 function canvasTexture(canvas: HTMLCanvasElement, srgb: boolean): THREE.CanvasTexture {
@@ -160,6 +162,10 @@ const mat = (color: string, extra: THREE.MeshStandardMaterialParameters = {}) =>
 export class CityMaterials {
 	readonly facadeMap = canvasTexture(facadeCanvas(false), true);
 	readonly glassMask = canvasTexture(facadeCanvas(true), false);
+	readonly facadeHeight = canvasTexture(facadeHeightAtlas(this.glassMask.image as HTMLCanvasElement), false);
+	readonly streetGrain = canvasTexture(streetGrainCanvas(), false);
+	readonly groundMap = new THREE.DataTexture(groundTextureData(), 256, 256, THREE.RGBAFormat);
+	readonly relief = { value: 1 };
 	readonly poolMap = poolTexture();
 	/** 0 by day → 1 at night; drives windows, lamps and light pools. */
 	readonly night = { value: 0 };
@@ -169,6 +175,7 @@ export class CityMaterials {
 	readonly detail = { value: 1 };
 
 	readonly walls = new THREE.MeshStandardMaterial({ vertexColors: true, map: this.facadeMap, roughness: 0.85 });
+	readonly facadeRelief = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .83 });
 	readonly roofs = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
 	readonly khmerRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, side: THREE.DoubleSide });
 	readonly asphalt = mat('#4a4d52', { polygonOffset: true, polygonOffsetFactor: -2 });
@@ -196,9 +203,20 @@ export class CityMaterials {
 		polygonOffset: true,
 		polygonOffsetFactor: -4
 	});
+	readonly treeContact = new THREE.MeshBasicMaterial({
+		color: '#000000', map: this.poolMap, transparent: true, opacity: .15,
+		depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2
+	});
 	readonly terrain = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1 });
 
 	constructor() {
+		this.groundMap.wrapS = this.groundMap.wrapT = THREE.RepeatWrapping;
+		this.groundMap.minFilter = THREE.LinearMipmapLinearFilter;
+		this.groundMap.magFilter = THREE.LinearFilter;
+		this.groundMap.generateMipmaps = true;
+		this.groundMap.anisotropy = 4;
+		this.groundMap.needsUpdate = true;
+		this.streetGrain.wrapS = this.streetGrain.wrapT = THREE.RepeatWrapping;
 		for (const m of Object.values(this.areas)) {
 			m.polygonOffset = true;
 			m.polygonOffsetFactor = -1;
@@ -220,7 +238,7 @@ export class CityMaterials {
 			[this.areas.wetland, 'grass'],
 			[this.areas.water, 'water']
 		];
-		for (const [material, kind] of detail) addSurfaceDetail(material, kind, { time: this.time, detail: this.detail });
+		for (const [material, kind] of detail) addSurfaceDetail(material, kind, { time: this.time, detail: this.detail, grain: this.streetGrain, ground: this.groundMap, relief: this.relief });
 	}
 
 	/**
@@ -260,6 +278,8 @@ export class CityMaterials {
 		const { doorA, doorB, doorCount } = this;
 		this.walls.onBeforeCompile = (shader) => {
 			shader.uniforms.uNight = night;
+			shader.uniforms.uFacadeDetail = this.detail;
+			shader.uniforms.uFacadeHeight = { value: this.facadeHeight };
 			shader.uniforms.uGlass = { value: glass };
 			shader.uniforms.uDoorA = doorA;
 			shader.uniforms.uDoorB = doorB;
@@ -279,6 +299,8 @@ export class CityMaterials {
 					`#include <common>
 uniform float uNight;
 uniform sampler2D uGlass;
+uniform sampler2D uFacadeHeight;
+uniform float uFacadeDetail;
 uniform vec4 uDoorA[${MAX_DOORS}];
 uniform vec3 uDoorB[${MAX_DOORS}];
 uniform int uDoorCount;
@@ -313,25 +335,44 @@ if (ppwShop > 0.5) ppwBay = 4.0 + step(0.6, ppwHash(vec3(floor(ppwCell.x * 0.5),
 vec2 ppwLocal = fract(ppwCell);
 vec2 ppwAtlas = vec2((ppwLocal.x + ppwBay) / ${FACADE_BAYS}.0, ppwLocal.y);
 vec2 ppwGrad = ppwCell * vec2(1.0 / ${FACADE_BAYS}.0, 1.0);
-diffuseColor *= textureGrad(map, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad));
+vec4 ppwPaint = textureGrad(map, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad));
+diffuseColor *= ppwPaint;
 float ppwGlass = textureGrad(uGlass, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
+// Glazing is neutral glass rather than paint tinted by the wall's vertex colour.
+diffuseColor.rgb = mix(diffuseColor.rgb, ppwPaint.rgb, ppwGlass * .85);
 // Street grime at the foot of the walls and faint rain streaks higher up.
 float ppwStreak = 0.93 + 0.07 * fract(sin(floor(vWall.x * 2.5) * 12.9898 + vFacade.y * 78.23) * 43758.5453);
 diffuseColor.rgb *= (0.76 + 0.24 * smoothstep(0.0, 0.9, vWall.y)) * mix(1.0, ppwStreak, smoothstep(1.5, 6.0, vWall.y));`
 				)
 				.replace(
+					'#include <normal_fragment_maps>',
+					`#include <normal_fragment_maps>
+// Derivative bump mapping: shallow window recesses with no additional meshes or draw calls.
+if (uFacadeDetail > .5) {
+float ppwHeight = textureGrad(uFacadeHeight, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
+vec3 ppwDx = dFdx(-vViewPosition), ppwDy = dFdy(-vViewPosition);
+vec3 ppwR1 = cross(ppwDy, normal), ppwR2 = cross(normal, ppwDx);
+float ppwDet = dot(ppwDx, ppwR1);
+vec3 ppwSlope = sign(ppwDet) * (dFdx(ppwHeight) * ppwR1 + dFdy(ppwHeight) * ppwR2);
+normal = normalize(max(abs(ppwDet), .0000001) * normal - ppwSlope * .045);
+}`
+				)
+				.replace(
 					'#include <roughnessmap_fragment>',
 					`#include <roughnessmap_fragment>
-roughnessFactor = mix(roughnessFactor, 0.15, ppwGlass * (1.0 - uNight)); // glass reflects the sky`
+roughnessFactor = mix(roughnessFactor, 0.2, ppwGlass); // sky and city light reflect in glazing`
 				)
 				.replace(
 					'#include <emissivemap_fragment>',
 					`#include <emissivemap_fragment>
 float ppwLit = max(step(0.58, ppwHash(vec3(floor(ppwCell.x), ppwStorey, vFacade.y * 97.0))), ppwShop);
-totalEmissiveRadiance += uNight * ppwLit * ppwGlass * vec3(1.0, 0.6, 0.28) * 1.2;`
+// Decorative rooms vary in warmth and brightness; not real occupancy data.
+vec3 ppwRoomColor = mix(vec3(1.0,.48,.19),vec3(1.0,.77,.46),ppwR);
+float ppwCurtain = mix(.68,1.,smoothstep(.1,.8,ppwLocal.x));
+totalEmissiveRadiance += uNight * ppwLit * ppwGlass * ppwRoomColor * (.45+.4*ppwR)*ppwCurtain;`
 				);
 		};
-		this.walls.customProgramCacheKey = () => 'ppw-facade-v5';
+		this.walls.customProgramCacheKey = () => 'ppw-facade-v8';
 	}
 
 	area(kind: string | undefined): THREE.Material | undefined {
@@ -341,10 +382,13 @@ totalEmissiveRadiance += uNight * ppwLit * ppwGlass * vec3(1.0, 0.6, 0.28) * 1.2
 	dispose() {
 		this.facadeMap.dispose();
 		this.glassMask.dispose();
+		this.facadeHeight.dispose();
+		this.streetGrain.dispose();
+		this.groundMap.dispose();
 		this.poolMap.dispose();
 		for (const m of [
-			this.walls, this.roofs, this.khmerRoof, this.asphalt, this.asphaltMinor, this.paving,
-			this.sidewalk, this.marking, this.pools, this.terrain, ...Object.values(this.areas)
+			this.walls, this.facadeRelief, this.roofs, this.khmerRoof, this.asphalt, this.asphaltMinor, this.paving,
+			this.sidewalk, this.marking, this.pools, this.treeContact, this.terrain, ...Object.values(this.areas)
 		])
 			m.dispose();
 	}

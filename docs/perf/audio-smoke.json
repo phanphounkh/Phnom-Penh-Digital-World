@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "checks": [
+    "gesture unlock",
+    "nonzero audio signal",
+    "movement footsteps",
+    "master slider",
+    "mute silence",
+    "saved preferences",
+    "unmute after reload"
+  ],
+  "muted": {
+    "state": "running",
+    "footsteps": 9,
+    "landings": 0,
+    "rms": 0,
+    "settings": {
+      "master": 0.25,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": true
+    }
+  },
+  "playing": {
+    "state": "running",
+    "footsteps": 0,
+    "landings": 0,
+    "rms": 0.0004251969185740252,
+    "settings": {
+      "master": 0.25,
+      "ambience": 0.35,
+      "effects": 0.8,
+      "muted": false
+    }
+  }
+}
