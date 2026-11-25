@@ -76,6 +76,7 @@ export function meshShown(info: WardrobeMesh, outfit: Outfit, hiddenWhen: Record
 
 export const REALISTIC_BASE = '/models/characters/realistic/';
 export type RealisticKind = 'male' | 'female';
+export type NpcFace = 'broad' | 'slender';
 
 export interface RealisticEntry {
 	kind: RealisticKind;
@@ -151,7 +152,7 @@ export function hairFactor(hair: string, mean: number): [number, number, number]
 // ── Loading ──────────────────────────────────────────────────────────────────────────────
 
 let manifest: Promise<RealisticManifest> | null = null;
-const templates = new Map<RealisticKind, Promise<{ scene: THREE.Group; clips: THREE.AnimationClip[]; entry: RealisticEntry }>>();
+const templates = new Map<string, Promise<{ scene: THREE.Group; clips: THREE.AnimationClip[]; entry: RealisticEntry }>>();
 
 export function loadManifest(): Promise<RealisticManifest> {
 	manifest ??= fetch(REALISTIC_BASE + 'manifest.json').then((r) => {
@@ -161,11 +162,12 @@ export function loadManifest(): Promise<RealisticManifest> {
 	return manifest;
 }
 
-export function loadRealistic(kind: RealisticKind) {
-	let t = templates.get(kind);
+export function loadRealistic(kind: RealisticKind, npcFace?: NpcFace) {
+	const key = npcFace ? `${kind}:${npcFace}` : kind;
+	let t = templates.get(key);
 	if (!t) {
 		t = loadManifest().then(async (m) => {
-			const entry = m.characters[kind];
+			const entry = npcFace ? { ...m.characters[kind], file: `../npcs/${kind}-${npcFace}.glb` } : m.characters[kind];
 			const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(REALISTIC_BASE + entry.file);
 			gltf.scene.traverse((o) => {
 				const mesh = o as THREE.Mesh;
@@ -178,8 +180,8 @@ export function loadRealistic(kind: RealisticKind) {
 			});
 			return { scene: gltf.scene, clips: gltf.animations, entry };
 		});
-		t.catch(() => templates.delete(kind));
-		templates.set(kind, t);
+		t.catch(() => templates.delete(key));
+		templates.set(key, t);
 	}
 	return t;
 }
@@ -211,11 +213,11 @@ function makePalette(source: THREE.Texture, size: number): { canvas: HTMLCanvasE
 	return { canvas, texture };
 }
 
-export async function createRealisticAvatar(avatar: Avatar): Promise<RealisticInstance> {
+export async function createRealisticAvatar(avatar: Avatar, npcFace?: NpcFace): Promise<RealisticInstance> {
 	const kind = kindFor(avatar);
-	const { scene, clips, entry } = await loadRealistic(kind);
+	const { scene, clips, entry } = await loadRealistic(kind, npcFace);
 	const root = cloneSkinned(scene) as THREE.Group;
-	root.name = `realistic:${kind}`;
+	root.name = `realistic:${kind}${npcFace ? `:npc-${npcFace}` : ''}`;
 
 	// Per-instance copies of the three recolourable materials.
 	const owned: THREE.Material[] = [];

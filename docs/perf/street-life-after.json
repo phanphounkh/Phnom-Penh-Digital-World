@@ -1,0 +1,48 @@
+{
+  "stage": "after",
+  "visualComparisonOnly": true,
+  "multiplayerStoppedForCameraSetup": true,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "time": "noon",
+  "quality": "medium",
+  "perf": {
+    "fps": 60.19036954087347,
+    "p95ms": 16.700000000000728,
+    "calls": 138,
+    "triangles": 87286,
+    "geometries": 156,
+    "textures": 59,
+    "heapMB": 44.98678016662598,
+    "streetLife": {
+      "actors": 1,
+      "pending": 0,
+      "walkedMeters": 9.038964999988611,
+      "greetings": 0,
+      "routes": [
+        {
+          "id": "710:800.0:-71.9:758.1:-57.9:-1:run0",
+          "a": [
+            776.7529331542823,
+            -59.87511015315254
+          ],
+          "b": [
+            764.0787020453427,
+            -55.62619052054188
+          ],
+          "x": 765.0141771338923,
+          "z": -55.93979995652202
+        }
+      ]
+    },
+    "position": {
+      "x": 763,
+      "z": -60,
+      "yaw": -1.5707963267948966,
+      "speed": 0
+    }
+  },
+  "errors": []
+}

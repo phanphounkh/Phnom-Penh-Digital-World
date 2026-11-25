@@ -4,6 +4,7 @@ import type { SpawnPoint } from '$lib/api/types';
 import type { Shop } from '$lib/api/market';
 export const STOPS = ['wat-phnom', 'canadia-garden', 'central-market'] as const;
 export const REACH = 25;
+export const DELIVERY_REACH = 3;
 export interface Point { x: number; z: number; label: string }
 export interface Position { x: number; z: number; mode: string; speed: number }
 export interface PracticeDelivery { stage: 'pickup' | 'carrying'; pickup: Point; dropoff: Point }
@@ -16,9 +17,9 @@ export interface Passport {
 export const emptyPassport = (): Passport => ({version:1,stamps:[],delivery:null,delivered:false});
 export const passportKey = (user: string) => `ppw-passport-v1:${user}`;
 export const distance = (a: Pick<Point,'x'|'z'>, b: Pick<Point,'x'|'z'>) => Math.hypot(a.x-b.x,a.z-b.z);
-export function canInteract(position: Position|null, point: Point): boolean {
+export function canInteract(position: Position|null, point: Point, reach = REACH): boolean {
  return !!position && Number.isFinite(position.x) && Number.isFinite(position.z)
-  && position.mode==='foot' && Math.abs(position.speed)<.5 && distance(position,point)<=REACH;
+  && position.mode==='foot' && Math.abs(position.speed)<.5 && distance(position,point)<=reach;
 }
 export function stops(places: SpawnPoint[]) {
  return STOPS.flatMap(slug=>places.filter(p=>p.slug===slug).slice(0,1));
@@ -43,7 +44,7 @@ export function deliveryTarget(state: Passport): Point|null {
 }
 export function advanceDelivery(state: Passport, position: Position|null): Passport {
  const target=deliveryTarget(state);
- if(!target||!state.delivery||!canInteract(position,target))return state;
+ if(!target||!state.delivery||!canInteract(position,target,DELIVERY_REACH))return state;
  return state.delivery.stage==='pickup'
   ? {...state,delivery:{...state.delivery,stage:'carrying'}}
   : {...state,delivery:null,delivered:true};

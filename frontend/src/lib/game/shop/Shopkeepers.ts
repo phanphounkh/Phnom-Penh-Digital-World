@@ -10,6 +10,7 @@
  * (MAX within RADIUS), since each is a full character (about 30k triangles, one animation mixer).
  */
 import * as THREE from 'three';
+import { npcFaceFor } from '$lib/game/avatar/npcIdentity';
 import type { Shop } from '$lib/api/market';
 import type { Avatar } from '$lib/api/types';
 import { createCharacter, type GameCharacter } from '$lib/game/avatar/character';
@@ -282,7 +283,7 @@ export class Shopkeepers {
 		this.scene.add(group);
 		const k: Keeper = { shop: p.shop, name, group, character: null, tag: null, bubble: null, said: null, base: p.yaw, yaw: p.yaw, inside: false, greetedAt: -Infinity, talkUntil: 0, extras: [], removed: false };
 		this.keepers.set(p.shop.id, k);
-		createCharacter(avatar)
+		createCharacter(avatar, { npcFace: npcFaceFor(p.shop.id) })
 			.then((character) => {
 				if (k.removed || this.disposed) return character.dispose();
 				k.character = character;

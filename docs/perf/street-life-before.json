@@ -1,0 +1,28 @@
+{
+  "stage": "before",
+  "visualComparisonOnly": true,
+  "multiplayerStoppedForCameraSetup": true,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "time": "noon",
+  "quality": "medium",
+  "perf": {
+    "fps": 59.97960693392848,
+    "p95ms": 16.700000000000728,
+    "calls": 123,
+    "triangles": 65176,
+    "geometries": 151,
+    "textures": 44,
+    "heapMB": 40.69059467315674,
+    "streetLife": null,
+    "position": {
+      "x": 763,
+      "z": -60,
+      "yaw": -1.5707963267948966,
+      "speed": 0
+    }
+  },
+  "errors": []
+}

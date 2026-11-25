@@ -1,0 +1,88 @@
+{
+  "passed": true,
+  "multiplayerStayedConnected": true,
+  "initial": {
+    "actors": 2,
+    "pending": 0,
+    "walkedMeters": 56.543428053849304,
+    "greetings": 0,
+    "hops": 0,
+    "shopping": 1,
+    "routes": [
+      {
+        "id": "710:950.9:-121.8:850.8:-89.0:-1:run0",
+        "a": [
+          867.5587285596376,
+          -90.20806052771994
+        ],
+        "b": [
+          855.8740330154712,
+          -86.37037125377155
+        ],
+        "x": 858.0112680187801,
+        "z": -87.07231884128922,
+        "face": "slender",
+        "model": "realistic:female:npc-slender",
+        "state": "idle",
+        "lift": 0,
+        "bag": false,
+        "pace": 0.88
+      },
+      {
+        "id": "2:820.0:-173.6:850.8:-89.0:-1:run0",
+        "a": [
+          849.2980630723433,
+          -104.95124672667367
+        ],
+        "b": [
+          853.2460691487403,
+          -94.11471253837915
+        ],
+        "x": 851.8973021349133,
+        "z": -97.81682433216808,
+        "face": "slender",
+        "model": "realistic:female:npc-slender",
+        "state": "browsing",
+        "lift": 0,
+        "bag": false,
+        "pace": 0.8
+      }
+    ]
+  },
+  "greeting": true,
+  "photo": {
+    "width": 1280,
+    "height": 720
+  },
+  "downloadBytes": 1364289,
+  "low": {
+    "actors": 1,
+    "pending": 0,
+    "walkedMeters": 66.27768042677133,
+    "greetings": 1,
+    "hops": 0,
+    "shopping": 2,
+    "routes": [
+      {
+        "id": "2:820.0:-173.6:850.8:-89.0:-1:run0",
+        "a": [
+          849.2980630723433,
+          -104.95124672667367
+        ],
+        "b": [
+          853.2460691487403,
+          -94.11471253837915
+        ],
+        "x": 849.8071366573656,
+        "z": -103.55393547595608,
+        "face": "slender",
+        "model": "realistic:female:npc-slender",
+        "state": "walking",
+        "lift": 0,
+        "bag": true,
+        "pace": 0.8
+      }
+    ]
+  },
+  "errors": []
+}

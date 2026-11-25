@@ -1,3 +1,4 @@
+import { capturePostcard } from './postcard';
 /**
  * The playable 3D city: renderer, day/night lighting, terrain, streamed OSM chunks (built in
  * Web Workers), Blender props and landmarks, the player's avatar, third-person camera,
@@ -91,6 +92,7 @@ export interface LocalState {
 
 export interface CityController {
 	readonly audio: WorldAudio;
+	capturePostcard(): Promise<Blob>;
 	readonly projection: WorldProjection;
 	readonly scene: THREE.Scene;
 	readonly camera: THREE.PerspectiveCamera;
@@ -129,6 +131,7 @@ export interface CityController {
 	/** The loaded chunks' data (buildings, roads…), e.g. to find buildings to open. */
 	chunkData(): ChunkPayload[];
 	readonly walking: boolean;
+	readonly airborne: boolean;
 	/** Runs every frame after the player has moved (dt in seconds). */
 	onFrame(callback: (dt: number) => void): () => void;
 	localState(): LocalState;
@@ -1021,6 +1024,7 @@ export async function createCity(
 
 	const controller: CityController = {
 		audio,
+		capturePostcard: () => capturePostcard(renderer, scene, camera, [routeLine.group]),
 		projection,
 		scene,
 		camera,
@@ -1083,6 +1087,9 @@ export async function createCity(
 		onFrame(callback) {
 			frameCallbacks.add(callback);
 			return () => frameCallbacks.delete(callback);
+		},
+		get airborne() {
+			return hop.lift > .15;
 		},
 		localState: () => ({ x: px, z: pz, yaw, speed }),
 		network,

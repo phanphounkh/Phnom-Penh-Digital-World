@@ -1,0 +1,56 @@
+{
+  "stage": "npc",
+  "visualComparisonOnly": true,
+  "multiplayerStoppedForCameraSetup": true,
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "time": "noon",
+  "quality": "medium",
+  "perf": {
+    "fps": 60.12424345332049,
+    "p95ms": 16.799999999999272,
+    "calls": 152,
+    "triangles": 108706,
+    "geometries": 167,
+    "textures": 83,
+    "heapMB": 47.13512706756592,
+    "streetLife": {
+      "actors": 1,
+      "pending": 0,
+      "walkedMeters": 6.560519999979427,
+      "greetings": 0,
+      "hops": 0,
+      "shopping": 0,
+      "routes": [
+        {
+          "id": "710:800.0:-71.9:758.1:-57.9:-1:run0",
+          "a": [
+            776.7529331542823,
+            -59.87511015315254
+          ],
+          "b": [
+            764.0787020453427,
+            -55.62619052054188
+          ],
+          "x": 767.3640883222708,
+          "z": -56.72758611075671,
+          "face": "slender",
+          "model": "realistic:female:npc-slender",
+          "state": "walking",
+          "lift": 0,
+          "bag": false,
+          "pace": 1.15
+        }
+      ]
+    },
+    "position": {
+      "x": 763,
+      "z": -60,
+      "yaw": -1.5707963267948966,
+      "speed": 0
+    }
+  },
+  "errors": []
+}

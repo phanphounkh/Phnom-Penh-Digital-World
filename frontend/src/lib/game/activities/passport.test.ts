@@ -45,3 +45,10 @@ it('restores browser progress defensively and separates accounts',()=>{
  expect(restorePassport(JSON.parse(JSON.stringify(job)))).toEqual(job);
  expect(passportKey('a')).not.toBe(passportKey('b'));
 });
+it('uses a three-metre reach for delivery while leaving discovery stamp reach unchanged',()=>{
+ const state={...emptyPassport(),delivery:{stage:'pickup' as const,pickup:{x:0,z:0,label:'Café'},dropoff:{x:80,z:0,label:'Garden'}}};
+ expect(advanceDelivery(state,{...here,x:3.01})).toBe(state);
+ expect(advanceDelivery(state,{...here,x:3})).not.toBe(state);
+ expect(advanceDelivery(state,{...here,speed:.6})).toBe(state);
+ expect(collectStamp(emptyPassport(),place('wat-phnom'),{...here,x:20}).stamps).toEqual(['wat-phnom']);
+});

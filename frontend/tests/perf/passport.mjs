@@ -30,7 +30,7 @@ try {
  const walkRoute=async(point)=>{
   await page.getByTestId('nav-follow').waitFor({timeout:15000});await page.getByTestId('nav-follow').click();
   const started=Date.now();
-  try { await page.waitForFunction(p=>{const c=globalThis.__ppwNet.city.localState();return Math.hypot(c.x-p.x,c.z-p.z)<24;},point,{timeout:150000}); } catch(error) { console.log(await page.evaluate(()=>({position:globalThis.__ppwNet.city.localState(),nav:document.querySelector('[data-testid=\"hud-nav\"]')?.textContent})));await page.screenshot({path:'/tmp/ppg-passport-route-failure.png'});throw error; }
+  try { await page.waitForFunction(p=>{const c=globalThis.__ppwNet.city.localState();return Math.hypot(c.x-p.x,c.z-p.z)<2.7;},point,{timeout:150000}); } catch(error) { console.log(await page.evaluate(()=>({position:globalThis.__ppwNet.city.localState(),nav:document.querySelector('[data-testid=\"hud-nav\"]')?.textContent})));await page.screenshot({path:'/tmp/ppg-passport-route-failure.png'});throw error; }
   // Opening the passport stops manual movement and the route follower without teleporting.
   await open();
   return {seconds:(Date.now()-started)/1000,position:await page.evaluate(()=>globalThis.__ppwNet.city.localState())};

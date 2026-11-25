@@ -127,3 +127,13 @@ it('keeps building footprint, height and wall geometry intact, and skips landmar
 		make({ ...b, kind: 'temple' }).meshes.some((m) => m.kind === 'facadeRelief')
 	).toBe(false);
 });
+it('adds bounded overhead canopy depth only when a street-facing wall is explicitly eligible',()=>{
+ const g=wall(),before=g.getAttribute('position').array.slice();let found=false;
+ for(let seed=.01;seed<1&&!found;seed+=.03){
+  const detail=new FacadeRelief(4);detail.add(g,seed,new THREE.Color(),4,()=>true);
+  const mesh=detail.mesh();if(!mesh)continue;
+  const heights=Array.from(mesh.position).filter((_,i)=>i%3===1);
+  if(Math.min(...heights)<3.3){found=true;expect(Math.min(...heights)).toBeGreaterThan(2.6);expect(detail.frames).toBeLessThanOrEqual(4);}
+ }
+ expect(found).toBe(true);expect(g.getAttribute('position').array).toEqual(before);g.dispose();
+});
