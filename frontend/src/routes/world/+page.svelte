@@ -5,13 +5,18 @@
 		Compass, MapPin, Navigation, Settings2, CircleHelp, LogOut, X, Gauge, Users, Landmark,
 		ChevronUp, ChevronDown, ArrowBigUp, ChevronLeft, ChevronRight, Footprints, Wifi, WifiOff,
 		ShoppingCart, ShoppingBasket, Store, Package, Bike, Route as RouteIcon, CircleParking, TriangleAlert, Play, Square,
-		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt, Volume2, VolumeX
+		Menu, MessageCircle, WalletCards, Truck, Maximize2, Minimize2, Shirt, Volume2, VolumeX, Camera
 	} from 'lucide-svelte';
 	import ChatBox from '$lib/components/world/ChatBox.svelte';
 	import PeoplePanel from '$lib/components/world/PeoplePanel.svelte';
 	import PassportPanel from '$lib/components/world/PassportPanel.svelte';
+	import DeliveryObjective from '$lib/components/world/DeliveryObjective.svelte';
+	import PostcardPanel from '$lib/components/world/PostcardPanel.svelte';
+	import type { DeliveryWorld } from '$lib/game/activities/DeliveryWorld';
+	import type { StreetLife } from '$lib/game/ambient/StreetLife';
+	import type { AmbientTraffic } from '$lib/game/ambient/AmbientTraffic';
 	import { PassportSync, type SyncStatus } from '$lib/game/activities/PassportSync';
-	import { emptyPassport, restorePassport, passportKey, practiceOffer, collectStamp, advanceDelivery, deliveryTarget, explorer, distance, type Passport } from '$lib/game/activities/passport';
+	import { emptyPassport, restorePassport, passportKey, practiceOffer, collectStamp, advanceDelivery, deliveryTarget, explorer, distance, canInteract, DELIVERY_REACH, type Passport } from '$lib/game/activities/passport';
 	import ShopPanel from '$lib/components/world/ShopPanel.svelte';
 	import CartPanel from '$lib/components/world/CartPanel.svelte';
 	import GaragePanel from '$lib/components/world/GaragePanel.svelte';
@@ -50,7 +55,7 @@
 	let progress = $state({ loaded: 0, total: 1 });
 	let ready = $state(false);
 	let failure = $state('');
-	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage' | 'menu' | 'driver' | 'wallet' | 'passport'>('');
+	let panel = $state<'' | 'places' | 'settings' | 'help' | 'people' | 'cart' | 'shop' | 'garage' | 'menu' | 'driver' | 'wallet' | 'passport' | 'photo'>('');
 	let compact = $state(false);
 	let chatOpen = $state(false);
 	let mapExpanded = $state(false);
@@ -130,8 +135,32 @@
 	let passportStorageWarning = $state('');
 	let passportSyncStatus = $state<SyncStatus>('syncing');
 	let passportSync: PassportSync | null = null;
+	let deliveryWorld: DeliveryWorld | null = null;
+	let streetLife: StreetLife | null = null;
+	let ambientTraffic: AmbientTraffic | null = null;
+	let neighbour = $state<{id: string;name: string}|null>(null);
+	let photoUrl = $state('');
+	let photoPlace = $state('');
+	let photoFilename = $state('phnom-penh.png');
+	let photoBusy = false;
+	async function takePostcard() {
+		if(!city||photoBusy)return;photoBusy=true;
+		try {
+			const image=await city.capturePostcard();
+			if(!city)return;
+			if(photoUrl)URL.revokeObjectURL(photoUrl);
+			photoUrl=URL.createObjectURL(image);photoPlace=hud?.street??hud?.landmark??'Daun Penh';
+			photoFilename=`phnom-penh-${photoPlace.replace(/[^\p{L}\p{N}]+/gu,'-').slice(0,65)}.png`;
+			panel='photo';
+		}catch(error){net?.say(error instanceof Error?error.message:'Camera unavailable.','warning');}
+		finally{photoBusy=false;}
+	}
+	let shoppingHolding = false;
+	let deliveryHolding = false;
 	const cafeOffer = $derived(practiceOffer(shopList, places));
 	const adventureTarget = $derived(deliveryTarget(passport));
+	const deliveryNearby = $derived(!!hud && !!adventureTarget && distance(hud,adventureTarget) <= DELIVERY_REACH);
+	const deliveryReady = $derived(!!adventureTarget && canInteract(hud,adventureTarget,DELIVERY_REACH));
 	// Menus pause simulation; the HUD can retain the final walking speed from before the pause.
 	const passportPosition = $derived(hud ? {...hud, speed: panel === 'passport' ? 0 : hud.speed} : null);
 	function cachePassport(next: Passport) {
@@ -165,6 +194,7 @@
 			net?.say('Drinks collected! Bring them to the garden. Walk, cycle, or ride at your own pace.');
 			void showRoute(next.delivery.dropoff, city?.mode ?? 'foot');
 		} else {
+			deliveryWorld?.finish();
 			clearRoute();
 			net?.say('Delivery complete. Your City Helper passport badge is ready!');
 		}
@@ -241,7 +271,7 @@
 					terrain: created.terrain,
 					avatar: created.avatar,
 					camera: created.camera,
-					setHolding: (h) => created.setHolding(h),
+					setHolding: (h) => { shoppingHolding = h; created.setHolding(h || deliveryHolding); },
 					onInteraction: (i) => (prompt = i),
 					onBasket: (b) => (basket = b)
 				});
@@ -305,6 +335,29 @@
 					if (here?.id !== insideShop?.id) insideShop = here;
 					if (counterShop && shops?.shopAt(me.x, me.z, 0.5)?.id !== counterShop.id) counterShop = null; // walked out
 				});
+				const { DeliveryWorld } = await import('$lib/game/activities/DeliveryWorld');
+				if (disposed) return;
+				deliveryWorld = new DeliveryWorld(created);
+				(globalThis as { __ppwDelivery?: unknown }).__ppwDelivery = deliveryWorld;
+				created.onFrame((dt) => {
+					deliveryHolding = deliveryWorld?.update(dt, passport.delivery, shoppingHolding) ?? false;
+					created.setHolding(shoppingHolding || deliveryHolding);
+				});
+				const { StreetLife } = await import('$lib/game/ambient/StreetLife');
+				if (disposed) return;
+				streetLife = new StreetLife(created, () => shopList);
+				(globalThis as { __ppwStreetLife?: unknown }).__ppwStreetLife = streetLife;
+				const { AmbientTraffic } = await import('$lib/game/ambient/AmbientTraffic');
+				if (disposed) return;
+				ambientTraffic = new AmbientTraffic(created);
+				(globalThis as { __ppwTraffic?: unknown }).__ppwTraffic = ambientTraffic;
+				let neighbourClock=0;
+				created.onFrame((dt) => {
+					streetLife?.update(dt);
+					ambientTraffic?.update(dt);
+					neighbourClock += dt;
+					if(neighbourClock>.25){neighbourClock=0;neighbour=created.riding?null:streetLife?.nearest()??null;}
+				});
 				await loadShops();
 				if (canBuy) shopping.cart().then(setCart).catch(() => {});
 				timer = setInterval(() => {
@@ -331,12 +384,16 @@
 			if (e.key === 'Escape' && !typing && inspection) return houses?.closeInspection();
 			if (e.key === 'Escape' && !typing) panel = panel ? '' : 'help';
 			if (typing) return;
+			if (e.key.toLowerCase() === 'k' && !panel && !e.repeat) void takePostcard();
+			if (e.key.toLowerCase() === 'g' && !panel && !e.repeat) streetLife?.greet();
 			if (e.key.toLowerCase() === 'j') panel = panel === 'passport' ? '' : 'passport';
 			if (e.key.toLowerCase() === 'm') panel = panel === 'places' ? '' : 'places';
 			if (e.key.toLowerCase() === 'v') panel = panel === 'garage' ? '' : 'garage';
 			if (e.key.toLowerCase() === 'f' && !panel) rideOrPark();
 			if (e.key.toLowerCase() === 'e' && !panel) {
-				if (housePrompt || inspection) houses?.interact();
+				if (e.repeat && passport.delivery) return;
+				if (deliveryNearby) { if (deliveryReady && !e.repeat) deliverDrinks(); }
+				else if (housePrompt || inspection) houses?.interact();
 				else void interact();
 			}
 			if (e.key.toLowerCase() === 'c') panel = panel === 'cart' ? '' : 'cart';
@@ -365,6 +422,14 @@
 			net = null;
 			shops?.dispose();
 			shops = null;
+			if(photoUrl)URL.revokeObjectURL(photoUrl);
+			ambientTraffic?.dispose();
+			ambientTraffic = null;
+			delete (globalThis as { __ppwTraffic?: unknown }).__ppwTraffic;
+			streetLife?.dispose(); streetLife = null;
+			delete (globalThis as { __ppwStreetLife?: unknown }).__ppwStreetLife;
+			deliveryWorld?.dispose(); deliveryWorld = null;
+			delete (globalThis as { __ppwDelivery?: unknown }).__ppwDelivery;
 			houses?.dispose();
 			houses = null;
 			city?.dispose();
@@ -685,10 +750,14 @@
 			</p>
 		</div>
 
-		{#if !panel && !hud.nav}
-			<button class="world-action adventure-card hud-glass absolute left-3 top-40 max-w-[min(19rem,calc(100vw-7rem))] rounded-xl px-3 py-2 text-left text-xs" onclick={() => panel = 'passport'} data-testid="adventure-card">
+		{#if !panel && passport.delivery && adventureTarget}
+			<div class="world-action adventure-card active-delivery hud-glass absolute left-3 top-40 w-64 rounded-xl px-3 py-2 text-left text-xs" class:with-navigation={!!hud.nav}>
+				<DeliveryObjective job={passport.delivery} position={hud} {routing} onRoute={() => showRoute(adventureTarget!, city?.mode ?? 'foot')} onCancel={cancelPracticeDelivery} />
+			</div>
+		{:else if !panel && !hud.nav}
+			<button class="world-action adventure-card hud-glass absolute left-3 top-40 max-w-[min(19rem,calc(100vw-7rem))] rounded-xl px-3 py-2 text-left text-xs" onclick={() => panel = 'passport'} data-testid="adventure-card" >
 				<span class="flex items-center gap-2 font-semibold text-saffron-300"><Compass size={15}/>{adventureTarget ? 'Your café delivery' : explorer(passport) ? 'Daun Penh Explorer' : 'Your first city adventure'}</span>
-				<span class="mt-1 block truncate">{adventureTarget ? `${passport.delivery?.stage === 'pickup' ? 'Collect drinks' : 'Leave drinks'} · ${Math.round(distance(hud,adventureTarget))} m` : `Discover places · ${passport.stamps.length}/3 stamps`}</span>
+				<span class="mt-1 block truncate">{adventureTarget ? `${passport.delivery?.stage === 'pickup' ? 'Collect drinks' : 'Hand over drinks'} · ${Math.round(distance(hud,adventureTarget))} m` : `Discover places · ${passport.stamps.length}/3 stamps`}</span>
 			</button>
 		{/if}
 
@@ -818,13 +887,28 @@
 			</div>
 		{/if}
 
+		{#if !panel && !wardrobe && !office && !myShop && !counterShop && deliveryNearby && adventureTarget}
+			<div class="world-action delivery-prompt absolute bottom-48 left-1/2 -translate-x-1/2" data-testid="delivery-prompt">
+				<button class="rounded-full bg-river-950/90 px-4 py-3 text-sm font-semibold shadow-lg" disabled={!deliveryReady} onclick={deliverDrinks} data-testid="delivery-world-interact">
+					<kbd class="mr-2 rounded bg-saffron-500 px-1.5 text-river-950">E</kbd>
+					{hud.mode !== 'foot' ? 'Dismount to deliver' : !deliveryReady ? 'Stop to interact' : passport.delivery?.stage === 'pickup' ? 'Collect café drinks' : 'Hand drinks to the garden host'}
+				</button>
+			</div>
+		{/if}
+
+		{#if neighbour && !panel && !deliveryNearby && !wardrobe && !myShop && !office && !counterShop && !housePrompt && !prompt}
+			<div class="world-action absolute bottom-48 left-1/2 -translate-x-1/2" data-testid="neighbour-prompt">
+				<button class="rounded-full bg-river-950/90 px-4 py-3 text-sm font-semibold shadow-lg" onclick={() => streetLife?.greet()}><kbd class="mr-2 rounded bg-saffron-500 px-1.5 text-river-950">G</kbd>Say hello to {neighbour.name}</button>
+			</div>
+		{/if}
+
 		{#if inspection}
 			<div class="world-action pointer-events-none absolute bottom-64 left-1/2 w-[min(26rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl bg-paper px-4 py-3 text-ink shadow-xl" data-testid="inspect-card">
 				<p class="display text-base font-bold">{inspection.title}</p>
 				<p class="mt-1 text-sm text-ink-soft">{inspection.text}</p>
 			</div>
 		{/if}
-		{#if housePrompt}
+		{#if housePrompt && !deliveryNearby}
 			<div class="world-action absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-1.5" data-testid="house-prompt" data-kind={housePrompt.kind}>
 				<button class="rounded-full bg-river-950/85 px-4 py-2 text-sm font-semibold shadow-lg backdrop-blur" onclick={() => houses?.interact()}>
 					Press <kbd class="mx-1 rounded bg-saffron-500 px-1.5 font-mono text-river-950">E</kbd> to {housePrompt.label}
@@ -835,7 +919,7 @@
 					</button>
 				{/if}
 			</div>
-		{:else if prompt || basket?.count}
+		{:else if (prompt || basket?.count) && !deliveryNearby}
 			<div class="world-action pointer-events-none absolute bottom-48 left-1/2 flex -translate-x-1/2 flex-col items-center gap-2" data-testid="shop-prompt" data-kind={prompt?.kind ?? ''}>
 				{#if basket?.count}
 					<div class="basket-chip" data-testid="basket" data-count={basket.count}>
@@ -921,6 +1005,7 @@
 			{#if panel === 'menu'}
 				<h2 class="display mb-4 text-xl font-bold">Your city</h2>
 				<div class="grid gap-2">
+					<button class="btn-ghost justify-start" onclick={() => void takePostcard()}><Camera size={18} />Take a postcard (K)</button>
 					<button class="btn-ghost justify-start" onclick={() => panel = 'passport'}><Compass size={18} />Discovery passport</button>
 					<button class="btn-ghost justify-start" onclick={() => panel = 'wallet'}><WalletCards size={18} />Demo wallet</button>
 					{#if isDriver}<button class="btn-ghost justify-start" onclick={() => panel = 'driver'}><Truck size={18} />Delivery jobs</button>{/if}
@@ -932,6 +1017,8 @@
 					<button class="btn-ghost justify-start" onclick={() => panel = 'help'}><CircleHelp size={18} />Controls & map information</button>
 					<button class="btn-quiet justify-start text-brick-600" onclick={signOut}><LogOut size={18} />Sign out</button>
 				</div>
+			{:else if panel === 'photo' && photoUrl}
+				<PostcardPanel url={photoUrl} place={photoPlace} filename={photoFilename} onRetake={() => panel = ''} />
 			{:else if panel === 'passport'}
 				<PassportPanel progress={passport} {places} position={passportPosition} offer={cafeOffer} {routing} storageWarning={passportStorageWarning} syncStatus={passportSyncStatus} onSync={() => void passportSync?.sync()}
 					onStamp={stamp} onGuide={(point) => showRoute(point, city?.mode ?? 'foot')} onStart={startPracticeDelivery} onDelivery={deliverDrinks} onCancel={cancelPracticeDelivery} />
@@ -1174,7 +1261,7 @@
 	}
 	.compact .world-attribution { left: var(--hud-left); right: auto; padding: 0 0 max(4px, calc(env(safe-area-inset-bottom) - 4px)); background: none; text-align: left; font-size: 8px; line-height: 12px; text-shadow: 0 1px 2px rgb(11 37 36 / .9); }
 	.compact .attribution-detail { display: none; }
-	.compact .world-guidance { top: calc(var(--hud-top) + 54px); right: var(--hud-right); left: auto; width: min(24rem, calc(100vw - 22rem)); transform: none; padding: 10px 12px; }
+	.compact .world-guidance { translate: none; top: calc(var(--hud-top) + 54px); right: var(--hud-right); left: auto; width: min(24rem, calc(100vw - 22rem)); transform: none; padding: 10px 12px; }
 	/* Centred between the minimap and chat button (left) and the touch pad (right). */
 	.compact .world-action { bottom: var(--hud-bottom); max-width: calc(100vw - 2 * (max(var(--hud-left), var(--hud-right)) + var(--disc) + 64px)); text-align: center; }
 	.compact .world-action > button { min-height: 44px; font-size: 12px; }
@@ -1202,7 +1289,7 @@
 		.compact .world-location { max-width: calc(100vw - var(--hud-left) - var(--hud-right)); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-toolbar { top: calc(var(--hud-top) + 112px); }
 		.compact .world-alert { top: calc(var(--hud-top) + 166px); }
-		.compact .world-guidance { top: calc(var(--hud-top) + 166px); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
+		.compact .world-guidance { translate: none; top: calc(var(--hud-top) + 166px); width: calc(100vw - var(--hud-left) - var(--hud-right)); }
 		.compact .world-action { bottom: calc(var(--hud-bottom) + 150px); max-width: calc(100vw - 2rem); width: max-content; }
 		.compact .world-speed { right: var(--hud-right); bottom: calc(var(--hud-bottom) + 145px); }
 	}
@@ -1211,7 +1298,9 @@
 	}
 	.compact .adventure-card { bottom: auto; top: calc(var(--hud-top) + 128px); max-width: min(19rem, calc(100vw - 7rem)); text-align: left; }
 	@media (max-width: 620px) { .compact .adventure-card { top: calc(var(--hud-top) + 160px); } }
-	@media (max-height: 440px) { .compact .adventure-card { display: none; } }
+	@media (max-height: 440px) { .compact .adventure-card { top: calc(var(--hud-top) + 82px); max-width: 190px; padding: 6px 10px; } .compact .adventure-card:not(.active-delivery) { display: none; } }
+	.compact .active-delivery :global(button) { min-width: 32px; min-height: 32px; }
+	@media (max-width: 600px) { .compact .active-delivery.with-navigation { top: calc(var(--hud-top) + 256px); } }
 	.pad {
 		display: grid;
 		place-items: center;

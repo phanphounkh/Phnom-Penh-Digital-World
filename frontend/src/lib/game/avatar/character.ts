@@ -12,6 +12,7 @@ import type { EmoteName } from '$lib/game/net/protocol';
 import type { VehicleInstance } from '$lib/game/vehicles/VehicleModels';
 
 export type AvatarStyle = 'realistic' | 'classic';
+export interface CharacterOptions { npcFace?: 'broad' | 'slender' }
 
 export interface Gait {
 	update(dt: number, speed: number, holding?: boolean, picking?: boolean, targets?: null, travel?: number, direction?: number): void;
@@ -48,13 +49,13 @@ export interface GameCharacter {
 	dispose(): void;
 }
 
-async function realisticCharacter(avatar: Avatar): Promise<GameCharacter> {
+async function realisticCharacter(avatar: Avatar, options: CharacterOptions): Promise<GameCharacter> {
 	const [{ createRealisticAvatar }, { RealisticAnimations, RealisticEmotes }, { RealisticRider }] = await Promise.all([
 		import('./realistic'),
 		import('./RealisticAnimations'),
 		import('$lib/game/vehicles/RealisticRider')
 	]);
-	const instance = await createRealisticAvatar(avatar);
+	const instance = await createRealisticAvatar(avatar, options.npcFace);
 	const { entry } = instance;
 	const animations = new RealisticAnimations(instance.root, instance.clips, { walk: entry.walk_speed, run: entry.run_speed, sprint: entry.sprint_speed }, entry.height_m);
 	return {
@@ -103,9 +104,9 @@ async function classicCharacter(avatar: Avatar): Promise<GameCharacter> {
 }
 
 /** The realistic avatar, or the classic one if the realistic models cannot load. */
-export async function createCharacter(avatar: Avatar): Promise<GameCharacter> {
+export async function createCharacter(avatar: Avatar, options: CharacterOptions = {}): Promise<GameCharacter> {
 	try {
-		return await realisticCharacter(avatar);
+		return await realisticCharacter(avatar, options);
 	} catch (error) {
 		console.warn('Realistic avatar unavailable, using the classic one:', error);
 	}

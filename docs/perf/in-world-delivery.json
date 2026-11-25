@@ -1,0 +1,62 @@
+{
+  "passed": true,
+  "keyboardPickup": true,
+  "restoredParcelAfterReload": true,
+  "keyboardHandoff": true,
+  "nearbyHost": true,
+  "cancelledCleanly": true,
+  "walkingSeconds": 133.906,
+  "withHost": {
+    "fps": 59.830082565656184,
+    "calls": 209,
+    "triangles": 152803,
+    "geometries": 520,
+    "textures": 100
+  },
+  "afterHandoff": {
+    "fps": 59.813382247530036,
+    "calls": 186,
+    "triangles": 130998,
+    "geometries": 520,
+    "textures": 98
+  },
+  "layouts": [
+    {
+      "viewport": {
+        "width": 844,
+        "height": 390
+      },
+      "objective": {
+        "x": 23,
+        "y": 101,
+        "width": 168,
+        "height": 92
+      },
+      "prompt": {
+        "x": 301.65625,
+        "y": 322,
+        "width": 240.6875,
+        "height": 44
+      }
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "objective": {
+        "x": 25,
+        "y": 181,
+        "width": 174.953125,
+        "height": 76
+      },
+      "prompt": {
+        "x": 74.65625,
+        "y": 626,
+        "width": 240.6875,
+        "height": 44
+      }
+    }
+  ],
+  "errors": []
+}

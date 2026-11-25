@@ -336,7 +336,23 @@ vec2 ppwLocal = fract(ppwCell);
 vec2 ppwAtlas = vec2((ppwLocal.x + ppwBay) / ${FACADE_BAYS}.0, ppwLocal.y);
 vec2 ppwGrad = ppwCell * vec2(1.0 / ${FACADE_BAYS}.0, 1.0);
 vec4 ppwPaint = textureGrad(map, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad));
+// Original decorative finishes; these do not identify real businesses or opening hours.
+float ppwFinish = ppwHash(vec3(floor(ppwCell.x * .5), 11.0, vFacade.y * 53.0));
+vec3 ppwFabric = vec3(.20,.25,.21);
+if (ppwFinish > .2) ppwFabric = vec3(.045,.14,.15);
+if (ppwFinish > .4) ppwFabric = vec3(.10,.14,.23);
+if (ppwFinish > .6) ppwFabric = vec3(.34,.24,.11);
+if (ppwFinish > .8) ppwFabric = vec3(.36,.15,.09);
+// Identify fabric from its red stripe and its adjacent stripe, independent of atlas V orientation.
+vec3 ppwNextStripe = textureGrad(map,vec2((fract(ppwLocal.x+.0625)+ppwBay)/${FACADE_BAYS}.0,ppwLocal.y),dFdx(ppwGrad),dFdy(ppwGrad)).rgb;
+float ppwRed = max(ppwPaint.r-max(ppwPaint.g,ppwPaint.b),ppwNextStripe.r-max(ppwNextStripe.g,ppwNextStripe.b));
+float ppwCanopy = ppwShop * step(4.5, ppwBay) * smoothstep(.10,.16,ppwRed);
+float ppwStripe = step(.5,fract(ppwLocal.x*8.0));
+vec3 ppwCanvas = mix(ppwFabric,vec3(.68,.64,.54),ppwStripe * step(.62,ppwFinish));
+ppwCanvas *= .8 + .2 * sin((ppwLocal.y-.70)*18.0);
+ppwPaint.rgb = mix(ppwPaint.rgb,ppwCanvas,ppwCanopy);
 diffuseColor *= ppwPaint;
+diffuseColor.rgb *= 1.0 + (ppwFinish-.5)*.075;
 float ppwGlass = textureGrad(uGlass, ppwAtlas, dFdx(ppwGrad), dFdy(ppwGrad)).r;
 // Glazing is neutral glass rather than paint tinted by the wall's vertex colour.
 diffuseColor.rgb = mix(diffuseColor.rgb, ppwPaint.rgb, ppwGlass * .85);
@@ -369,10 +385,11 @@ float ppwLit = max(step(0.58, ppwHash(vec3(floor(ppwCell.x), ppwStorey, vFacade.
 // Decorative rooms vary in warmth and brightness; not real occupancy data.
 vec3 ppwRoomColor = mix(vec3(1.0,.48,.19),vec3(1.0,.77,.46),ppwR);
 float ppwCurtain = mix(.68,1.,smoothstep(.1,.8,ppwLocal.x));
+totalEmissiveRadiance += (1.0-uNight) * ppwGlass * vec3(1.0,.84,.67) * (.008 + .035*ppwShop);
 totalEmissiveRadiance += uNight * ppwLit * ppwGlass * ppwRoomColor * (.45+.4*ppwR)*ppwCurtain;`
 				);
 		};
-		this.walls.customProgramCacheKey = () => 'ppw-facade-v8';
+		this.walls.customProgramCacheKey = () => 'ppw-facade-v9';
 	}
 
 	area(kind: string | undefined): THREE.Material | undefined {

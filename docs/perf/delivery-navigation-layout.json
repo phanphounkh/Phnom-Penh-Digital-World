@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "objective": {
+    "x": 25,
+    "y": 277,
+    "width": 174.953125,
+    "height": 76
+  },
+  "navigation": {
+    "x": 12,
+    "y": 178,
+    "width": 366,
+    "height": 72
+  },
+  "errors": []
+}

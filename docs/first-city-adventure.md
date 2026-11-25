@@ -14,7 +14,7 @@ The small adventure card introduces this activity without forcing a tutorial.
 - **Coffee for the garden** selects the nearest open, active virtual café within
   1.2 km of Wat Phnom. Its pickup uses the same sidewalk offset as shop navigation.
   Collect fictional drinks there, then leave them at the imported Canadia Garden
-  public arrival point. Both actions require stopping on foot within 25 m.
+  public arrival point. Both delivery actions now require stopping on foot within 3 m.
 - The **City Helper** badge is a keepsake for completing the practice delivery.
   Walk, cycle, or ride between stops. Existing route guidance and route following
   remain available. Fast-travel requests cancel a practice delivery. There is no
@@ -27,8 +27,9 @@ The small adventure card introduces this activity without forcing a tutorial.
 This is an introductory activity, separate from marketplace orders, purchases,
 roles, driver jobs, wallets and monetary rewards. The café and garden handoff are
 fictional gameplay; no actual business partnership or delivery recipient is claimed.
-No recipient NPC, physical drink parcel, shared co-op job, clothing unlock or photo
-album is added in this milestone.
+The later [in-world delivery milestone](in-world-delivery.md) adds a nearby fictional
+host, drinks parcel and contextual interactions. Shared co-op jobs, clothing unlocks
+and a photo album remain outside these milestones.
 
 Completed stamps and the City Helper badge now merge into the authenticated account's
 `player_passports` database row through `/api/v1/me/passport`. Browser storage under
@@ -56,7 +57,7 @@ is accepted in the request body. Ordinary session authentication and CSRF apply.
 - `frontend/tests/perf/passport.mjs`: actual-browser full adventure and reload test.
 
 No new textures, models, audio, external APIs or dependencies. Icons reuse the
-existing Lucide dependency. No new rendering geometry or simulation loop is added;
+existing Lucide dependency. The initial passport release added no rendering geometry or simulation loop;
 positions use existing HUD updates. No matched before/after FPS benchmark is claimed.
 
 Next: add explicit party invitations and shared delivery state; test the introduction with

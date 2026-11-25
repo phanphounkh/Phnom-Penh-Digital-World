@@ -40,7 +40,8 @@ export class FacadeRelief {
 		wall: THREE.BufferGeometry,
 		seed: number,
 		colour: THREE.Color,
-		buildingBudget: number
+		buildingBudget: number,
+		canopy?: (point: V) => boolean
 	): number {
 		if (this.count >= this.budget || buildingBudget <= 0) return 0;
 		const p = wall.getAttribute('position'),
@@ -89,6 +90,22 @@ export class FacadeRelief {
 				maxU = Math.max(maxU, uv.getX(k));
 				minV = Math.min(minV, uv.getY(k));
 				maxV = Math.max(maxV, uv.getY(k));
+			}
+			// A few overhead canopies, only where the caller verifies a nearby street.
+			if(canopy && minV<=.05 && maxV>=3.15 && this.count< this.budget && this.count-before<buildingBudget) {
+				for(let bay=Math.ceil(minU/4);bay*4+3.8<maxU;bay++) {
+					const u0=bay*4+.2,u1=bay*4+3.8;
+					if(randomBay(Math.floor(bay*.5),3,Math.fround(seed*31))<=.6)continue;
+					const middle=(u0+u1)/2,point=world(middle,0);
+					if(!canopy(point))continue;
+					const finish=randomBay(Math.floor(bay*.5),11,Math.fround(seed*53));
+					const palette=[[.20,.25,.21],[.045,.14,.15],[.10,.14,.23],[.34,.24,.11],[.36,.15,.09]];
+					const rgb=palette[Math.min(4,Math.floor(finish*5))];
+					const fabric=new THREE.Color().setRGB(rgb[0],rgb[1],rgb[2]);
+					this.box(world(middle,3.02),axis,out,[(u1-u0)*scale,.06,.8],.4,fabric,.18);
+					this.box(world(middle,2.80),axis,out,[(u1-u0)*scale,.14,.04],.78,fabric.clone().multiplyScalar(.8));
+					this.count++;break;
+				}
 			}
 			let onWall = 0;
 			for (
@@ -165,7 +182,8 @@ export class FacadeRelief {
 		out: V,
 		size: V,
 		offset: number,
-		colour: THREE.Color
+		colour: THREE.Color,
+		slope = 0
 	) {
 		const signs = [
 			[-1, -1, -1],
@@ -183,7 +201,7 @@ export class FacadeRelief {
 					(x, k) =>
 						x +
 						(axis[k] * u * size[0]) / 2 +
-						(k === 1 ? (v * size[1]) / 2 : 0) +
+						(k === 1 ? (v * size[1]) / 2 - (n + 1) * slope / 2 : 0) +
 						out[k] * (offset + (n * size[2]) / 2)
 				) as V
 		);

@@ -2,7 +2,7 @@
  import { Compass, MapPin, Check, Award, Coffee, Navigation, PackageCheck } from 'lucide-svelte';
  import type { SpawnPoint } from '$lib/api/types';
  import type { Passport, Point, Position, PracticeDelivery } from '$lib/game/activities/passport';
- import { stops, publicPoint, canInteract, distance, deliveryTarget, explorer, STOPS } from '$lib/game/activities/passport';
+ import { stops, publicPoint, canInteract, distance, deliveryTarget, explorer, STOPS, DELIVERY_REACH } from '$lib/game/activities/passport';
  let { progress, places, position, offer, routing, storageWarning, syncStatus, onSync, onStamp, onGuide, onStart, onDelivery, onCancel }: {
   progress: Passport; places: SpawnPoint[]; position: Position|null; offer: PracticeDelivery|null;
   routing: boolean; storageWarning: string; syncStatus: 'syncing'|'saved'|'offline'; onSync: ()=>void;
@@ -26,6 +26,11 @@
   {#if syncStatus === 'offline'}<button class="ml-2 underline" onclick={onSync}>Retry sync</button>{/if}
  </div>
  {#if storageWarning}<p class="text-xs text-brick-600" role="alert">{storageWarning}</p>{/if}
+ {#if progress.delivery && target}
+  <button class="btn-primary w-full" disabled={routing} onclick={()=>onGuide(target)} data-testid="delivery-quick-start"><Coffee size={16}/> Continue café delivery</button>
+ {:else if offer}
+  <button class="btn-primary w-full" onclick={onStart} data-testid="delivery-quick-start"><Coffee size={16}/> {progress.delivered?'Take another café delivery':'Try a café delivery'}</button>
+ {/if}
  <div class="space-y-2">
   {#each stops(places) as place (place.slug)}
    {@const collected=progress.stamps.includes(place.slug)}
@@ -45,16 +50,16 @@
  <p class="text-xs text-ink-soft">Stop on foot within 25 m of the public arrival point to collect a stamp. Routes follow the existing street network.</p>
  <section class="rounded-xl border border-river-900/15 bg-white p-3" data-testid="practice-delivery">
   <h3 class="flex items-center gap-2 font-semibold"><Coffee size={17}/> Coffee for the garden</h3>
-  <p class="mt-2 text-xs leading-relaxed text-ink-soft">A fictional practice delivery: collect drinks outside an existing virtual café, then leave them at the Canadia Garden meetup point. No purchase, work role, real order, or payment is involved.</p>
+  <p class="mt-2 text-xs leading-relaxed text-ink-soft">A fictional practice delivery: collect drinks outside an existing virtual café, then hand them to the garden host at the Canadia Garden meetup point. No purchase, work role, real order, or payment is involved.</p>
   {#if progress.delivery && target}
    <p class="mt-3 text-sm font-semibold">{progress.delivery.stage==='pickup'?'1. Collect the drinks':'2. Bring the drinks to the garden'}</p>
    <p class="mt-1 text-xs">{target.label} · {position?`${Math.round(distance(position,target))} m`:'Locating…'}</p>
    <div class="mt-3 flex flex-wrap gap-2">
     <button class="btn-ghost px-2 py-1 text-xs" disabled={routing} onclick={()=>onGuide(target)}><Navigation size={13}/> Show route</button>
-    <button class="btn-primary px-2 py-1 text-xs" disabled={!canInteract(position,target)} onclick={onDelivery} data-testid="delivery-interact">{progress.delivery.stage==='pickup'?'Collect drinks':'Leave drinks'}</button>
+    <button class="btn-primary px-2 py-1 text-xs" disabled={!canInteract(position,target,DELIVERY_REACH)} onclick={onDelivery} data-testid="delivery-interact">{progress.delivery.stage==='pickup'?'Collect drinks':'Hand over drinks'}</button>
     <button class="btn-quiet px-2 py-1 text-xs" onclick={onCancel}>Cancel</button>
    </div>
-   <p class="mt-2 text-xs text-ink-soft">Walk, cycle, or ride. Dismount and stop within 25 m to collect or leave drinks. Fast travel cancels this practice run.</p>
+   <p class="mt-2 text-xs text-ink-soft">Walk, cycle, or ride. Dismount and stop within 3 m to collect or hand over drinks. Fast travel cancels this practice run.</p>
   {:else if offer}
    <p class="mt-2 text-xs">From {offer.pickup.label} to {offer.dropoff.label}.</p>
    <button class="btn-primary mt-3 w-full" onclick={onStart} data-testid="delivery-start">{progress.delivered?'Take another practice delivery':'Try a delivery'}</button>

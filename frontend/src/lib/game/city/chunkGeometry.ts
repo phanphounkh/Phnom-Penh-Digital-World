@@ -375,7 +375,17 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 		const facadeSeed = hash(seed * 7 + 3);
 		const top = Math.max(lo + b.h, hi + 2.5);
 		const depth = Math.max(0.6, top - lo - b.min_h);
-		let buildingFrames = 0;
+		let buildingFrames = 0, canopies = 0;
+		const canopyFront = (point: [number,number,number]) => {
+			if(!shop || b.min_h>0 || canopies>=2)return false;
+			for(const road of chunk.roads)for(let k=1;k<road.pts.length;k++){
+				const a=road.pts[k-1],c=road.pts[k],dx=c[0]-a[0],dz=c[1]-a[1],length=dx*dx+dz*dz;
+				const t=length?Math.max(0,Math.min(1,((point[0]-a[0])*dx+(point[2]-a[1])*dz)/length)):0;
+				const distance=Math.hypot(point[0]-a[0]-t*dx,point[2]-a[1]-t*dz);
+				if(distance>=road.w/2+.8 && distance<=road.w/2+3){canopies++;return true;}
+			}
+			return false;
+		};
 		for (const rings of b.polys) {
 			const shape = shapeFrom(rings);
 			if (!shape) continue;
@@ -395,7 +405,7 @@ function buildBuildings(chunk: ChunkPayload, terrain: Terrain, models: ModelSpec
 				fill(wall, 'facade', [b.min_h > 0 ? 0 : shop, facadeSeed]);
 				if (!b.roof && b.kind !== 'temple' && b.kind !== 'pagoda' && b.h <= 32) {
 					const trim = color.clone().lerp(new THREE.Color('#e1dbcf'), .35);
-					buildingFrames += relief.add(wall, facadeSeed, trim, 8-buildingFrames);
+					buildingFrames += relief.add(wall, facadeSeed, trim, 8-buildingFrames, canopyFront);
 				}
 				color.set(base).multiplyScalar(0.78).lerp(roofGrey, 0.35);
 				fill(roof, 'color', [color.r, color.g, color.b]);

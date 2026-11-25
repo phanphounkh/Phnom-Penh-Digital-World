@@ -1,0 +1,243 @@
+{
+  "passed": true,
+  "qaMovementDisconnected": true,
+  "initial": {
+    "life": {
+      "actors": 1,
+      "pending": 0,
+      "walkedMeters": 0.5722399999931127,
+      "greetings": 0,
+      "hops": 0,
+      "shopping": 0,
+      "routes": [
+        {
+          "id": "710:800.0:-71.9:758.1:-57.9:-1:run0",
+          "a": [
+            776.7529331542823,
+            -59.87511015315254
+          ],
+          "b": [
+            764.0787020453427,
+            -55.62619052054188
+          ],
+          "x": 773.0418121253244,
+          "z": -58.63099089547137,
+          "face": "slender",
+          "model": "realistic:female:npc-slender",
+          "state": "walking",
+          "lift": 0,
+          "bag": false,
+          "pace": 1.15
+        }
+      ]
+    },
+    "traffic": {
+      "active": true,
+      "pending": false,
+      "kind": "motorbike",
+      "distance": 9.265554866347083,
+      "brakes": 1,
+      "connections": 0,
+      "face": "broad",
+      "position": {
+        "x": 731.6980159827679,
+        "z": -50.731790025119615,
+        "speed": 4.127533832027107
+      }
+    },
+    "player": {
+      "style": "realistic",
+      "model": "realistic:female",
+      "bones": 52,
+      "riding": false,
+      "gait": "idle",
+      "emote": null,
+      "speed": 0,
+      "lift": 0,
+      "yaw": -1.5707963267948966,
+      "lean": {
+        "roll": 0,
+        "pitch": 0
+      },
+      "feet": [
+        [
+          762.9756157852144,
+          0.06023622590299149,
+          -59.845247643195094
+        ],
+        [
+          762.9756284239982,
+          0.06750617803559311,
+          -60.169643635589715
+        ],
+        [
+          762.8552653515598,
+          0.018023683000301757,
+          -59.8477698633629
+        ],
+        [
+          762.8552750855052,
+          0.025216672518300065,
+          -60.16903951658011
+        ]
+      ],
+      "ground": 0
+    }
+  },
+  "jumping": {
+    "actors": 1,
+    "pending": 0,
+    "walkedMeters": 0.5722399999931127,
+    "greetings": 0,
+    "hops": 1,
+    "shopping": 0,
+    "routes": [
+      {
+        "id": "710:800.0:-71.9:758.1:-57.9:-1:run0",
+        "a": [
+          776.7529331542823,
+          -59.87511015315254
+        ],
+        "b": [
+          764.0787020453427,
+          -55.62619052054188
+        ],
+        "x": 773.0418121253244,
+        "z": -58.63099089547137,
+        "face": "slender",
+        "model": "realistic:female:npc-slender",
+        "state": "jumping",
+        "lift": 0.19074311200106908,
+        "bag": false,
+        "pace": 1.15
+      }
+    ]
+  },
+  "motorbike": {
+    "active": true,
+    "pending": false,
+    "kind": "motorbike",
+    "distance": 41.83904394240502,
+    "brakes": 1,
+    "connections": 0,
+    "face": "broad",
+    "position": {
+      "x": 700.8226345240014,
+      "z": -40.35185696349886,
+      "speed": 4.19999862823932
+    }
+  },
+  "bicycle": {
+    "active": true,
+    "pending": false,
+    "kind": "bicycle",
+    "distance": 42.895232963564894,
+    "brakes": 2,
+    "connections": 0,
+    "face": "slender",
+    "position": {
+      "x": 759.5779287409982,
+      "z": -56.67498855371831,
+      "speed": 1.8784319262912352
+    }
+  },
+  "shopping": {
+    "actors": 2,
+    "pending": 0,
+    "walkedMeters": 8.517127999979563,
+    "greetings": 0,
+    "hops": 1,
+    "shopping": 0,
+    "routes": [
+      {
+        "id": "710:800.0:-71.9:758.1:-57.9:-1:run0",
+        "a": [
+          776.7529331542823,
+          -59.87511015315254
+        ],
+        "b": [
+          764.0787020453427,
+          -55.62619052054188
+        ],
+        "x": 773.0418121253244,
+        "z": -58.63099089547137,
+        "face": "slender",
+        "model": "realistic:female:npc-slender",
+        "state": "walking",
+        "lift": 0,
+        "bag": false,
+        "pace": 1.15
+      },
+      {
+        "id": "711:758.1:-57.9:777.0:0.0:-1:run0",
+        "a": [
+          764.3428534006084,
+          -55.73156960865315
+        ],
+        "b": [
+          768.4792558934289,
+          -43.12414589699169
+        ],
+        "x": 764.7615748705299,
+        "z": -54.455340083689514,
+        "face": "broad",
+        "model": "realistic:female:npc-broad",
+        "state": "walking",
+        "lift": 0,
+        "bag": false,
+        "pace": 1.1400000000000001
+      }
+    ]
+  },
+  "perf": {
+    "fps": 59.364381371177295,
+    "p95ms": 16.799999999999272,
+    "calls": 174,
+    "triangles": 136793,
+    "heapMB": 72.63417053222656,
+    "textures": 137,
+    "geometries": 286
+  },
+  "low": {
+    "life": {
+      "actors": 1,
+      "pending": 0,
+      "walkedMeters": 11.786207977194959,
+      "greetings": 0,
+      "hops": 1,
+      "shopping": 0,
+      "routes": [
+        {
+          "id": "711:758.1:-57.9:777.0:0.0:-1:run0",
+          "a": [
+            764.3428534006084,
+            -55.73156960865315
+          ],
+          "b": [
+            768.4792558934289,
+            -43.12414589699169
+          ],
+          "x": 764.9432435183583,
+          "z": -53.901628586253906,
+          "face": "broad",
+          "model": "realistic:female:npc-broad",
+          "state": "walking",
+          "lift": 0,
+          "bag": false,
+          "pace": 1.1400000000000001
+        }
+      ]
+    },
+    "traffic": {
+      "active": false,
+      "pending": false,
+      "kind": null,
+      "distance": 58.11363633483809,
+      "brakes": 2,
+      "connections": 0,
+      "face": null,
+      "position": null
+    }
+  },
+  "errors": []
+}
